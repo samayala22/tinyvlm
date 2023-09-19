@@ -1,6 +1,8 @@
 #include "vlm.hpp"
 #include "vlm_solver.hpp"
 
+#include <oneapi/tbb/global_control.h>
+
 using namespace vlm;
 
 void VLM::init() {
@@ -16,6 +18,7 @@ void VLM::preprocess() {
 
 void VLM::solve() {
     Solver solver(mesh, data, io, config);
+    //tbb::global_control global_limit(oneapi::tbb::global_control::max_allowed_parallelism, 8);
     for (auto alpha : config.alphas) {
         solver.run(alpha);
     }

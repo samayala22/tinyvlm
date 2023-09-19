@@ -284,10 +284,10 @@ inline void influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, __m256 x
 }
 
 template<bool Overwrite>
-inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 i, u32 j) {
-    const u32 v0 = i * (m.ns+1) + j;
+inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx) {
+    const u32 v0 = lidx + lidx / m.ns;
     const u32 v1 = v0 + 1;
-    const u32 v3 = (i + 1) * (m.ns+1) + j;
+    const u32 v3 = v0 + m.ns+1;
     const u32 v2 = v3 + 1;
     // in reality only load v1 & v2 and reuse data from previous v1 & v2 to be new v0 & v3 respectively
     // 12 regs (6 loads + 6 reuse) -> these will get spilled once we get in the influence function
@@ -341,25 +341,22 @@ void Solver::compute_lhs() {
     Mesh& m = mesh;
     tbb::affinity_partitioner ap;
 
-    tbb::parallel_for(tbb::blocked_range<u32>(0, m.nc - 1),[&](const tbb::blocked_range<u32> &r) {
+    const u32 start_wing = 0;
+    const u32 end_wing = (m.nc - 1) * m.ns;
+    tbb::parallel_for(tbb::blocked_range<u32>(start_wing, end_wing),[&](const tbb::blocked_range<u32> &r) {
     for (u32 i = r.begin(); i < r.end(); i++) {
-    //for (u32 i = 0; i < m.nc - 1; i++) {
-        for (u32 j = 0; j < m.ns; j++) {
-            const u32 ia = i * m.ns + j;
-            macro_kernel_avx2<true>(m, lhs, ia, i, j);
-        }
+        macro_kernel_avx2<true>(m, lhs, i, i);
     }
     }, ap);
 
-    for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
-        tbb::parallel_for(tbb::blocked_range<u32>(0, m.ns),[&](const tbb::blocked_range<u32> &r) {
-        for (u32 j = r.begin(); j < r.end(); j++) {
-        //for (u32 j = 0; j < m.ns; j++) {
-            const u32 ia = (m.nc - 1) * m.ns + j;
-            macro_kernel_avx2<false>(m, lhs, ia, i, j);
-        }
-        }, ap);
+    const u32 start_wake = (m.nc - 1) * m.ns;
+    const u32 end_wake = (m.nc + m.nw) * m.ns;
+    tbb::parallel_for(tbb::blocked_range<u32>(start_wake, end_wake),[&](const tbb::blocked_range<u32> &r) {
+    for (u32 i = r.begin(); i < r.end(); i++) {
+        const u32 ia = start_wake + i % m.ns;
+        macro_kernel_avx2<false>(m, lhs, ia, i);
     }
+    }, ap);
 }
 
 void Solver::compute_rhs() {
