@@ -22,7 +22,7 @@
 using namespace vlm;
 
 Solver::Solver(Mesh& mesh, Data& data, IO& io, Config& config) : mesh(mesh), data(data), io(io), config(config) {
-    lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
+    lhs.resize((u64)mesh.nb_panels_wing() * (u64)mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
 }
 
