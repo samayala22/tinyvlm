@@ -16,6 +16,9 @@
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/Dense>
 
+#include "oneapi/tbb/blocked_range.h"
+#include "oneapi/tbb/parallel_for.h"
+
 using namespace vlm;
 
 Solver::Solver(Mesh& mesh, Data& data, IO& io, Config& config) : mesh(mesh), data(data), io(io), config(config) {
@@ -336,19 +339,26 @@ inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 i, u32
 void Solver::compute_lhs() {
     SimpleTimer timer("LHS");
     Mesh& m = mesh;
+    tbb::affinity_partitioner ap;
 
-    for (u32 i = 0; i < m.nc - 1; i++) {
+    tbb::parallel_for(tbb::blocked_range<u32>(0, m.nc - 1),[&](const tbb::blocked_range<u32> &r) {
+    for (u32 i = r.begin(); i < r.end(); i++) {
+    //for (u32 i = 0; i < m.nc - 1; i++) {
         for (u32 j = 0; j < m.ns; j++) {
             const u32 ia = i * m.ns + j;
             macro_kernel_avx2<true>(m, lhs, ia, i, j);
         }
     }
+    }, ap);
 
     for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
-        for (u32 j = 0; j < m.ns; j++) {
+        tbb::parallel_for(tbb::blocked_range<u32>(0, m.ns),[&](const tbb::blocked_range<u32> &r) {
+        for (u32 j = r.begin(); j < r.end(); j++) {
+        //for (u32 j = 0; j < m.ns; j++) {
             const u32 ia = (m.nc - 1) * m.ns + j;
             macro_kernel_avx2<false>(m, lhs, ia, i, j);
         }
+        }, ap);
     }
 }
 
