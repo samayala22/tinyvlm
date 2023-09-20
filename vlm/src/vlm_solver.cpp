@@ -13,11 +13,10 @@
 #include <fstream>
 #include <immintrin.h>
 
-#include <Eigen/IterativeLinearSolvers>
-#include <Eigen/Dense>
-
 #include "oneapi/tbb/blocked_range.h"
 #include "oneapi/tbb/parallel_for.h"
+
+#include "mkl.h"
 
 using namespace vlm;
 
@@ -284,7 +283,7 @@ inline void influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, __m256 x
 }
 
 template<bool Overwrite>
-inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx) {
+inline void macro_kernel_avx2(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 lidx) {
     const u32 v0 = lidx + lidx / m.ns;
     const u32 v1 = v0 + 1;
     const u32 v3 = v0 + m.ns+1;
@@ -306,9 +305,9 @@ inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx) 
 
     for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2+=8) {
         // loads (3 regs)
-        __m256 colloc_x = _mm256_loadu_ps(&m.colloc.x[ia2]);
-        __m256 colloc_y = _mm256_loadu_ps(&m.colloc.y[ia2]);
-        __m256 colloc_z = _mm256_loadu_ps(&m.colloc.z[ia2]);
+        __m256 colloc_x = _mm256_load_ps(&m.colloc.x[ia2]);
+        __m256 colloc_y = _mm256_load_ps(&m.colloc.y[ia2]);
+        __m256 colloc_z = _mm256_load_ps(&m.colloc.z[ia2]);
         // 3 regs to store induced velocity
         __m256 inf_x = _mm256_setzero_ps();
         __m256 inf_y = _mm256_setzero_ps();
@@ -320,18 +319,18 @@ inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx) 
         influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
 
         // dot product
-        __m256 nx = _mm256_loadu_ps(&m.normal.x[ia2]);
-        __m256 ny = _mm256_loadu_ps(&m.normal.y[ia2]);
-        __m256 nz = _mm256_loadu_ps(&m.normal.z[ia2]);
+        __m256 nx = _mm256_load_ps(&m.normal.x[ia2]);
+        __m256 ny = _mm256_load_ps(&m.normal.y[ia2]);
+        __m256 nz = _mm256_load_ps(&m.normal.z[ia2]);
         __m256 ring_inf = _mm256_fmadd_ps(inf_x, nx, _mm256_fmadd_ps(inf_y, ny, _mm256_mul_ps(inf_z, nz)));
 
         // store in col major order
         if (Overwrite) {
-            _mm256_storeu_ps(&lhs[ia * m.nb_panels_wing() + ia2], ring_inf);
+            _mm256_store_ps(&lhs[ia * m.nb_panels_wing() + ia2], ring_inf);
         } else {
-            __m256 lhs_ia = _mm256_loadu_ps(&lhs[ia * m.nb_panels_wing() + ia2]);
+            __m256 lhs_ia = _mm256_load_ps(&lhs[ia * m.nb_panels_wing() + ia2]);
             lhs_ia = _mm256_add_ps(lhs_ia, ring_inf);
-            _mm256_storeu_ps(&lhs[ia * m.nb_panels_wing() + ia2], lhs_ia);
+            _mm256_store_ps(&lhs[ia * m.nb_panels_wing() + ia2], lhs_ia);
         }
     }
 }
@@ -349,14 +348,15 @@ void Solver::compute_lhs() {
     }
     }, ap);
 
-    const u32 start_wake = (m.nc - 1) * m.ns;
-    const u32 end_wake = (m.nc + m.nw) * m.ns;
-    tbb::parallel_for(tbb::blocked_range<u32>(start_wake, end_wake),[&](const tbb::blocked_range<u32> &r) {
-    for (u32 i = r.begin(); i < r.end(); i++) {
-        const u32 ia = start_wake + i % m.ns;
-        macro_kernel_avx2<false>(m, lhs, ia, i);
+    for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
+        tbb::parallel_for(tbb::blocked_range<u32>(0, m.ns),[&](const tbb::blocked_range<u32> &r) {
+        for (u32 j = r.begin(); j < r.end(); j++) {
+            const u32 ia = (m.nc - 1) * m.ns + j;
+            const u32 lidx = i * m.ns + j;
+            macro_kernel_avx2<false>(m, lhs, ia, lidx);
+        }
+        }, ap);
     }
-    }, ap);
 }
 
 void Solver::compute_rhs() {
@@ -370,21 +370,23 @@ void Solver::compute_rhs() {
 
 void Solver::solve() {
     SimpleTimer timer("Solve");
-    const u32 n = mesh.nb_panels_wing();
-    Eigen::Map<Eigen::Matrix<f32, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> A(lhs.data(), n, n);
-    Eigen::Map<Eigen::VectorXf> x(data.gamma.data(), n);
-    Eigen::Map<Eigen::VectorXf> b(rhs.data(), n);
+    const MKL_INT n = static_cast<MKL_INT>(mesh.nb_panels_wing());
 
-    // Eigen::BiCGSTAB<Eigen::MatrixXf> solver;
-    // solver.setTolerance(1.0e-5f);
-    // solver.setMaxIterations(100);
-    // solver.compute(A);
-    // if (solver.info() != Eigen::Success) throw std::runtime_error("Failed to compute lhs matrix");
-    // x = solver.solve(b);
-    // if (solver.info() != Eigen::Success) throw std::runtime_error("Failed to converge");
+    std::vector<MKL_INT> ipiv(n);
 
-    Eigen::PartialPivLU<Eigen::MatrixXf> lu(A);
-    x = lu.solve(b);
+    // Use LAPACK_COL_MAJOR since the data is stored in column-major format
+    MKL_INT info = LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
+    if (info != 0) {
+        throw std::runtime_error("Failed to compute lhs matrix");
+    }
+
+    info = LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), rhs.data(), n);
+    if (info != 0) {
+        throw std::runtime_error("Failed to solve linear system");
+    }
+
+    // Copy the solution from rhs to data.gamma
+    std::copy(rhs.begin(), rhs.end(), data.gamma.begin());
 }
 
 void Solver::compute_forces() {

@@ -1,9 +1,9 @@
-add_requires("eigen", "tbb")
+add_requires("tbb", "mkl")
 
 target("vlm")
     set_kind("binary")
     set_runargs({"-i"}, {"../../../../config/elliptic.vlm"}, {"-m"}, {"../../../../mesh/elliptic_128x128.xyz"}, {"-o"}, {"../../../../results/elliptic.vtu"})
-    add_packages("eigen", "tbb")
+    add_packages("tbb", "mkl")
     -- add_packages("tbb", "lz4")
     add_files("src/*.cpp")
     add_files("dev/*.cpp")
