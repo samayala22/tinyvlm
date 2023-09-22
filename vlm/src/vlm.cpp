@@ -9,6 +9,8 @@ void VLM::init() {
     io.read_config(config);
     io.read_mesh(mesh);
     data.alloc(mesh.nc, mesh.ns);
+    data.s_ref = config.S_ref;
+    data.ref_pt = config.ref_pt;
 }
 
 void VLM::preprocess() {
