@@ -9,7 +9,7 @@ add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.asan")
 set_policy("build.warning", true)
 set_warnings("all")
 set_languages("c++20", "c99")
-set_runtimes("MT")
+set_runtimes("MD")
 -- set_policy("build.optimization.lto")
 
 if is_mode("release", "releasedbg") then
