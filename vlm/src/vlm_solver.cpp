@@ -18,6 +18,9 @@
 
 #include "mkl.h"
 
+#define BLOCK_I 32
+#define BLOCK_J 8
+
 using namespace vlm;
 
 Solver::Solver(Mesh& mesh, Data& data, IO& io, Config& config) : mesh(mesh), data(data), io(io), config(config) {
@@ -39,9 +42,9 @@ void Solver::run(const f32 alpha) {
     mesh.update_wake(data.u_inf);
     compute_lhs();
     compute_rhs();
-    solve();
-    data.postprocess();
-    compute_forces();
+    // solve();
+    // data.postprocess();
+    // compute_forces();
 
     std::cout << "Alpha: " << alpha << " CL: " << data.cl << " CD: " << data.cd << " CM: " << data.cm << std::endl;
 }
@@ -283,6 +286,65 @@ inline void influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, __m256 x
 }
 
 template<bool Overwrite>
+inline void macro_block_kernel_avx2(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ji, u32 bjj) {
+    // bil = block i (index of inf matrix) l(inear index)
+    for (u32 bil = 0; bil < m.nb_panels_wing(); bil+=BLOCK_I) {
+        for (u32 jj = bjj; jj < bjj+BLOCK_J; jj++) {
+            u32 jl = ji * m.ns + jj;
+            const u32 v0 = ji * (m.ns + 1) + jj;
+            const u32 v1 = v0 + 1;
+            const u32 v3 = v0 + m.ns+1;
+            const u32 v2 = v3 + 1;
+            // in reality only load v1 & v2 and reuse data from previous v1 & v2 to be new v0 & v3 respectively
+            // 12 regs (6 loads + 6 reuse) -> these will get spilled once we get in the influence function
+            __m256 v0x = _mm256_broadcast_ss(&m.v.x[v0]);
+            __m256 v0y = _mm256_broadcast_ss(&m.v.y[v0]);
+            __m256 v0z = _mm256_broadcast_ss(&m.v.z[v0]);
+            __m256 v1x = _mm256_broadcast_ss(&m.v.x[v1]);
+            __m256 v1y = _mm256_broadcast_ss(&m.v.y[v1]);
+            __m256 v1z = _mm256_broadcast_ss(&m.v.z[v1]);
+            __m256 v2x = _mm256_broadcast_ss(&m.v.x[v2]);
+            __m256 v2y = _mm256_broadcast_ss(&m.v.y[v2]);
+            __m256 v2z = _mm256_broadcast_ss(&m.v.z[v2]);
+            __m256 v3x = _mm256_broadcast_ss(&m.v.x[v3]);
+            __m256 v3y = _mm256_broadcast_ss(&m.v.y[v3]);
+            __m256 v3z = _mm256_broadcast_ss(&m.v.z[v3]);
+
+            for (u32 il = bil; il < bil+BLOCK_I; il+=8) {
+                // loads (3 regs)
+                __m256 colloc_x = _mm256_load_ps(&m.colloc.x[il]);
+                __m256 colloc_y = _mm256_load_ps(&m.colloc.y[il]);
+                __m256 colloc_z = _mm256_load_ps(&m.colloc.z[il]);
+                // 3 regs to store induced velocity
+                __m256 inf_x = _mm256_setzero_ps();
+                __m256 inf_y = _mm256_setzero_ps();
+                __m256 inf_z = _mm256_setzero_ps();
+
+                influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
+                influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
+                influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
+                influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
+
+                // dot product
+                __m256 nx = _mm256_load_ps(&m.normal.x[il]);
+                __m256 ny = _mm256_load_ps(&m.normal.y[il]);
+                __m256 nz = _mm256_load_ps(&m.normal.z[il]);
+                __m256 ring_inf = _mm256_fmadd_ps(inf_x, nx, _mm256_fmadd_ps(inf_y, ny, _mm256_mul_ps(inf_z, nz)));
+
+                // store in col major order
+                if (Overwrite) {
+                    _mm256_store_ps(&lhs[jl * m.nb_panels_wing() + il], ring_inf);
+                } else {
+                    __m256 lhs_ia = _mm256_load_ps(&lhs[jl * m.nb_panels_wing() + il]);
+                    lhs_ia = _mm256_add_ps(lhs_ia, ring_inf);
+                    _mm256_store_ps(&lhs[jl * m.nb_panels_wing() + il], lhs_ia);
+                }
+            }
+        }
+    }
+}
+
+template<bool Overwrite>
 inline void macro_kernel_avx2(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 lidx) {
     const u32 v0 = lidx + lidx / m.ns;
     const u32 v1 = v0 + 1;
@@ -340,13 +402,20 @@ void Solver::compute_lhs() {
     Mesh& m = mesh;
     tbb::affinity_partitioner ap;
 
-    const u32 start_wing = 0;
-    const u32 end_wing = (m.nc - 1) * m.ns;
-    tbb::parallel_for(tbb::blocked_range<u32>(start_wing, end_wing),[&](const tbb::blocked_range<u32> &r) {
-    for (u32 i = r.begin(); i < r.end(); i++) {
-        macro_kernel_avx2<true>(m, lhs, i, i);
+    tbb::parallel_for(tbb::blocked_range<u32>(0, m.nc - 1),[&](const tbb::blocked_range<u32> &r) {
+    for (u32 ji = r.begin(); ji < r.end(); ji++) {
+        for (u32 bjj = 0; bjj < m.ns; bjj+=BLOCK_J) {
+            macro_block_kernel_avx2<true>(m, lhs, ji, bjj);
+        }
     }
     }, ap);
+    // const u32 start_wing = 0;
+    // const u32 end_wing = (m.nc - 1) * m.ns;
+    // tbb::parallel_for(tbb::blocked_range<u32>(start_wing, end_wing),[&](const tbb::blocked_range<u32> &r) {
+    // for (u32 i = r.begin(); i < r.end(); i++) {
+    //     macro_kernel_avx2<true>(m, lhs, i, i);
+    // }
+    // }, ap);
 
     for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
         tbb::parallel_for(tbb::blocked_range<u32>(0, m.ns),[&](const tbb::blocked_range<u32> &r) {
