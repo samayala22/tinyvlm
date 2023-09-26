@@ -145,4 +145,10 @@ void IO::read_config(Config &config) {
     conf.read(filename_config);
     config.alphas = conf().section("solver").get_vector<f32>("alphas", {0.0f});
     config.wake_included = conf().section("solver").get<bool>("wake_included", false);
+    config.S_ref = conf().section("solver").get<f32>("S_ref", 1.0f);
+    std::vector<f32> ref_pt = conf().section("solver").get_vector<f32>("ref_pt", {0.25f, 0.0f, 0.0f});
+
+    config.ref_pt.x = ref_pt[0];
+    config.ref_pt.y = ref_pt[1];
+    config.ref_pt.z = ref_pt[2];
 }

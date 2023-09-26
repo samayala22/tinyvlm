@@ -10,14 +10,18 @@
 
 #include <algorithm>
 #include <iostream>
+#include <fstream>
+#include <immintrin.h>
 
-#include <Eigen/IterativeLinearSolvers>
-#include <Eigen/Dense>
+#include "oneapi/tbb/blocked_range.h"
+#include "oneapi/tbb/parallel_for.h"
+
+#include "mkl.h"
 
 using namespace vlm;
 
 Solver::Solver(Mesh& mesh, Data& data, IO& io, Config& config) : mesh(mesh), data(data), io(io), config(config) {
-    lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
+    lhs.resize((u64)mesh.nb_panels_wing() * (u64)mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
 }
 
@@ -91,52 +95,268 @@ inline void influence(Vec3& inf, f32 x, f32 y, f32 z, f32 x1, f32 y1, f32 z1, f3
     }
 }
 
-#include <fstream>
+// void Solver::compute_lhs() {
+//     SimpleTimer timer("LHS");
+//     Mesh& m = mesh;
+//     const u32 v_ns = m.ns + 1;
+
+//     for (u32 i = 0; i < m.nc - 1; i++) {
+//         for (u32 j = 0; j < m.ns; j++) {
+//             const u32 ia = i * m.ns + j;
+//             const u32 v0 = i * v_ns + j;
+//             const u32 v1 = v0 + 1;
+//             const u32 v3 = (i + 1) * v_ns + j;
+//             const u32 v2 = v3 + 1;
+//             // in reality only load v1 & v2 and reuse data from previous v1 & v2 to be new v0 & v3 respectively
+//             // 12 regs (6 loads + 6 reuse) -> these will get spilled once we get in the influence function
+//             f32 v0x = m.v.x[v0];
+//             f32 v0y = m.v.y[v0];
+//             f32 v0z = m.v.z[v0];
+//             f32 v1x = m.v.x[v1];
+//             f32 v1y = m.v.y[v1];
+//             f32 v1z = m.v.z[v1];
+//             f32 v2x = m.v.x[v2];
+//             f32 v2y = m.v.y[v2];
+//             f32 v2z = m.v.z[v2];
+//             f32 v3x = m.v.x[v3];
+//             f32 v3y = m.v.y[v3];
+//             f32 v3z = m.v.z[v3];
+//             for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2++) {
+//                 // loads (3 regs)
+//                 const f32 colloc_x = m.colloc.x[ia2];
+//                 const f32 colloc_y = m.colloc.y[ia2];
+//                 const f32 colloc_z = m.colloc.z[ia2];
+
+//                 // 3 regs to store induced velocity 
+//                 Vec3 inf;
+//                 influence(inf, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
+//                 influence(inf, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
+//                 influence(inf, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
+//                 influence(inf, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
+
+//                 // storing in col major order
+//                 lhs[ia * m.nb_panels_wing() + ia2] = inf.x * m.normal.x[ia2] + inf.y * m.normal.y[ia2] + inf.z * m.normal.z[ia2];
+//             }
+//         }
+//     }
+
+//     for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
+//         for (u32 j = 0; j < m.ns; j++) {
+//             const u32 ia = (m.nc - 1) * m.ns + j;
+//             const u32 v0 = i * v_ns + j;
+//             const u32 v1 = v0 + 1;
+//             const u32 v3 = (i + 1) * v_ns + j;
+//             const u32 v2 = v3 + 1;
+//             // in reality only load v1 & v2 and reuse data from previous v1 & v2 to be new v0 & v3 respectively
+//             // 12 regs (6 loads + 6 reuse) -> these will get spilled once we get in the influence function
+//             f32 v0x = m.v.x[v0];
+//             f32 v0y = m.v.y[v0];
+//             f32 v0z = m.v.z[v0];
+//             f32 v1x = m.v.x[v1];
+//             f32 v1y = m.v.y[v1];
+//             f32 v1z = m.v.z[v1];
+//             f32 v2x = m.v.x[v2];
+//             f32 v2y = m.v.y[v2];
+//             f32 v2z = m.v.z[v2];
+//             f32 v3x = m.v.x[v3];
+//             f32 v3y = m.v.y[v3];
+//             f32 v3z = m.v.z[v3];
+//             for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2++) {
+//                 // loads (3 regs)
+//                 const f32 colloc_x = m.colloc.x[ia2];
+//                 const f32 colloc_y = m.colloc.y[ia2];
+//                 const f32 colloc_z = m.colloc.z[ia2];
+
+//                 // 3 regs to store induced velocity 
+//                 Vec3 inf;
+//                 influence(inf, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
+//                 influence(inf, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
+//                 influence(inf, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
+//                 influence(inf, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
+
+//                 // storing in col major order
+//                 lhs[ia * m.nb_panels_wing() + ia2] += inf.x * m.normal.x[ia2] + inf.y * m.normal.y[ia2] + inf.z * m.normal.z[ia2];
+//             }
+//         }
+//     }
+// }
+
+inline void influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, __m256 x, __m256 y, __m256 z, __m256 x1, __m256 y1, __m256 z1, __m256 x2, __m256 y2, __m256 z2) {
+    // r cutoff
+    static const __m256 threshold = _mm256_set1_ps(1.0e-12f);
+    static const __m256 pi4 = _mm256_set1_ps(4.0f * PI_f);
+    static const __m256 zero = _mm256_set1_ps(0.0f);
+    {
+        // define vectors
+        __m256 r1x = _mm256_sub_ps(x, x1);
+        __m256 r1y = _mm256_sub_ps(y, y1);
+        __m256 r1z = _mm256_sub_ps(z, z1);
+        __m256 r2x = _mm256_sub_ps(x, x2);
+        __m256 r2y = _mm256_sub_ps(y, y2);
+        __m256 r2z = _mm256_sub_ps(z, z2);
+
+        // crossproduct
+        // (v0y*v1z - v0z*v1y);
+        // (v0z*v1x - v0x*v1z);
+        // (v0x*v1y - v0y*v1x);
+        __m256 r1r2x = _mm256_fmsub_ps(r1y, r2z, _mm256_mul_ps(r1z, r2y));
+        __m256 r1r2y = _mm256_fmsub_ps(r1z, r2x, _mm256_mul_ps(r1x, r2z));
+        __m256 r1r2z = _mm256_fmsub_ps(r1x, r2y, _mm256_mul_ps(r1y, r2x));
+
+        // magnitude & mag squared of crossproduct
+        __m256 square = _mm256_add_ps(_mm256_mul_ps(r1r2x, r1r2x), _mm256_add_ps(_mm256_mul_ps(r1r2y, r1r2y), _mm256_mul_ps(r1r2z, r1r2z)));
+        __m256 r1 = _mm256_sqrt_ps(_mm256_fmadd_ps(r1x, r1x, _mm256_fmadd_ps(r1y, r1y, _mm256_mul_ps(r1z, r1z))));
+        __m256 r2 = _mm256_sqrt_ps(_mm256_fmadd_ps(r2x, r2x, _mm256_fmadd_ps(r2y, r2y, _mm256_mul_ps(r2z, r2z))));
+
+        // vector from point 1 to point 2 of segment
+        __m256 r0x = _mm256_sub_ps(x2, x1);
+        __m256 r0y = _mm256_sub_ps(y2, y1);
+        __m256 r0z = _mm256_sub_ps(z2, z1);
+
+        // dot product r0.r1 and r0.r2
+        __m256 r0r1 = _mm256_fmadd_ps(r0x, r1x, _mm256_fmadd_ps(r0y, r1y, _mm256_mul_ps(r0z, r1z)));
+        __m256 r0r2 = _mm256_fmadd_ps(r0x, r2x, _mm256_fmadd_ps(r0y, r2y, _mm256_mul_ps(r0z, r2z)));
+
+        __m256 numerator = _mm256_fmsub_ps(r0r1, r2, _mm256_mul_ps(r0r2, r1));
+        __m256 denominator = _mm256_mul_ps(pi4, _mm256_mul_ps(square, _mm256_mul_ps(r1, r2)));
+        __m256 coeff = _mm256_div_ps(numerator, denominator);
+
+        // add the influence and blend with mask
+        // the masks should be done independently for optimal ILP but if compiler smart he can do it
+        __m256 mask = _mm256_cmp_ps(r1, threshold, _CMP_LT_OS);
+        mask = _mm256_or_ps(mask, _mm256_cmp_ps(r2, threshold, _CMP_LT_OS));
+        mask = _mm256_or_ps(mask, _mm256_cmp_ps(square, threshold, _CMP_LT_OS));
+
+        inf_x = _mm256_add_ps(inf_x, _mm256_blendv_ps(_mm256_mul_ps(r1r2x, coeff), zero, mask));
+        inf_y = _mm256_add_ps(inf_y, _mm256_blendv_ps(_mm256_mul_ps(r1r2y, coeff), zero, mask));
+        inf_z = _mm256_add_ps(inf_z, _mm256_blendv_ps(_mm256_mul_ps(r1r2z, coeff), zero, mask));
+    }
+
+    // wing symmetry
+    y = _mm256_xor_ps(y, _mm256_set1_ps(-0.0f));
+
+    {
+        // define vectors
+        __m256 r1x = _mm256_sub_ps(x, x1);
+        __m256 r1y = _mm256_sub_ps(y, y1);
+        __m256 r1z = _mm256_sub_ps(z, z1);
+        __m256 r2x = _mm256_sub_ps(x, x2);
+        __m256 r2y = _mm256_sub_ps(y, y2);
+        __m256 r2z = _mm256_sub_ps(z, z2);
+
+        // crossproduct
+        // (v0y*v1z - v0z*v1y);
+        // (v0z*v1x - v0x*v1z);
+        // (v0x*v1y - v0y*v1x);
+        __m256 r1r2x = _mm256_fmsub_ps(r1y, r2z, _mm256_mul_ps(r1z, r2y));
+        __m256 r1r2y = _mm256_fmsub_ps(r1z, r2x, _mm256_mul_ps(r1x, r2z));
+        __m256 r1r2z = _mm256_fmsub_ps(r1x, r2y, _mm256_mul_ps(r1y, r2x));
+
+        // magnitude & mag squared of crossproduct
+        __m256 square = _mm256_add_ps(_mm256_mul_ps(r1r2x, r1r2x), _mm256_add_ps(_mm256_mul_ps(r1r2y, r1r2y), _mm256_mul_ps(r1r2z, r1r2z)));
+        __m256 r1 = _mm256_sqrt_ps(_mm256_fmadd_ps(r1x, r1x, _mm256_fmadd_ps(r1y, r1y, _mm256_mul_ps(r1z, r1z))));
+        __m256 r2 = _mm256_sqrt_ps(_mm256_fmadd_ps(r2x, r2x, _mm256_fmadd_ps(r2y, r2y, _mm256_mul_ps(r2z, r2z))));
+
+        // vector from point 1 to point 2 of segment
+        __m256 r0x = _mm256_sub_ps(x2, x1);
+        __m256 r0y = _mm256_sub_ps(y2, y1);
+        __m256 r0z = _mm256_sub_ps(z2, z1);
+
+        // dot product r0.r1 and r0.r2
+        __m256 r0r1 = _mm256_fmadd_ps(r0x, r1x, _mm256_fmadd_ps(r0y, r1y, _mm256_mul_ps(r0z, r1z)));
+        __m256 r0r2 = _mm256_fmadd_ps(r0x, r2x, _mm256_fmadd_ps(r0y, r2y, _mm256_mul_ps(r0z, r2z)));
+
+        __m256 numerator = _mm256_fmsub_ps(r0r1, r2, _mm256_mul_ps(r0r2, r1));
+        __m256 denominator = _mm256_mul_ps(pi4, _mm256_mul_ps(square, _mm256_mul_ps(r1, r2)));
+        __m256 coeff = _mm256_div_ps(numerator, denominator);
+
+        // add the influence and blend with mask
+        // the masks should be done independently for optimal ILP but if compiler smart he can do it
+        __m256 mask = _mm256_cmp_ps(r1, threshold, _CMP_LT_OS);
+        mask = _mm256_or_ps(mask, _mm256_cmp_ps(r2, threshold, _CMP_LT_OS));
+        mask = _mm256_or_ps(mask, _mm256_cmp_ps(square, threshold, _CMP_LT_OS));
+
+        inf_x = _mm256_add_ps(inf_x, _mm256_blendv_ps(_mm256_mul_ps(r1r2x, coeff), zero, mask));
+        inf_y = _mm256_sub_ps(inf_y, _mm256_blendv_ps(_mm256_mul_ps(r1r2y, coeff), zero, mask)); // HERE IS SUB INSTEAD OF ADD !
+        inf_z = _mm256_add_ps(inf_z, _mm256_blendv_ps(_mm256_mul_ps(r1r2z, coeff), zero, mask));
+    }
+}
+
+template<bool Overwrite>
+inline void macro_kernel_avx2(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 lidx) {
+    const u32 v0 = lidx + lidx / m.ns;
+    const u32 v1 = v0 + 1;
+    const u32 v3 = v0 + m.ns+1;
+    const u32 v2 = v3 + 1;
+    // in reality only load v1 & v2 and reuse data from previous v1 & v2 to be new v0 & v3 respectively
+    // 12 regs (6 loads + 6 reuse) -> these will get spilled once we get in the influence function
+    __m256 v0x = _mm256_broadcast_ss(&m.v.x[v0]);
+    __m256 v0y = _mm256_broadcast_ss(&m.v.y[v0]);
+    __m256 v0z = _mm256_broadcast_ss(&m.v.z[v0]);
+    __m256 v1x = _mm256_broadcast_ss(&m.v.x[v1]);
+    __m256 v1y = _mm256_broadcast_ss(&m.v.y[v1]);
+    __m256 v1z = _mm256_broadcast_ss(&m.v.z[v1]);
+    __m256 v2x = _mm256_broadcast_ss(&m.v.x[v2]);
+    __m256 v2y = _mm256_broadcast_ss(&m.v.y[v2]);
+    __m256 v2z = _mm256_broadcast_ss(&m.v.z[v2]);
+    __m256 v3x = _mm256_broadcast_ss(&m.v.x[v3]);
+    __m256 v3y = _mm256_broadcast_ss(&m.v.y[v3]);
+    __m256 v3z = _mm256_broadcast_ss(&m.v.z[v3]);
+
+    for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2+=8) {
+        // loads (3 regs)
+        __m256 colloc_x = _mm256_load_ps(&m.colloc.x[ia2]);
+        __m256 colloc_y = _mm256_load_ps(&m.colloc.y[ia2]);
+        __m256 colloc_z = _mm256_load_ps(&m.colloc.z[ia2]);
+        // 3 regs to store induced velocity
+        __m256 inf_x = _mm256_setzero_ps();
+        __m256 inf_y = _mm256_setzero_ps();
+        __m256 inf_z = _mm256_setzero_ps();
+
+        influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
+        influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
+        influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
+        influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
+
+        // dot product
+        __m256 nx = _mm256_load_ps(&m.normal.x[ia2]);
+        __m256 ny = _mm256_load_ps(&m.normal.y[ia2]);
+        __m256 nz = _mm256_load_ps(&m.normal.z[ia2]);
+        __m256 ring_inf = _mm256_fmadd_ps(inf_x, nx, _mm256_fmadd_ps(inf_y, ny, _mm256_mul_ps(inf_z, nz)));
+
+        // store in col major order
+        if (Overwrite) {
+            _mm256_store_ps(&lhs[ia * m.nb_panels_wing() + ia2], ring_inf);
+        } else {
+            __m256 lhs_ia = _mm256_load_ps(&lhs[ia * m.nb_panels_wing() + ia2]);
+            lhs_ia = _mm256_add_ps(lhs_ia, ring_inf);
+            _mm256_store_ps(&lhs[ia * m.nb_panels_wing() + ia2], lhs_ia);
+        }
+    }
+}
 
 void Solver::compute_lhs() {
     SimpleTimer timer("LHS");
     Mesh& m = mesh;
-    // influence matrix is row major
-    // loop over rows
-    for (u32 ni = 0; ni < m.nc; ni++) {
-        for (u32 nj = 0; nj < m.ns; nj++) {
-            const u32 i = ni * m.ns + nj;
-            const f32 colloc_x = m.colloc.x[i];
-            const f32 colloc_y = m.colloc.y[i];
-            const f32 colloc_z = m.colloc.z[i];
+    tbb::affinity_partitioner ap;
 
-            for (u32 i2 = 0; i2 < m.nc; i2++) {
-                for (u32 j2 = 0; j2 < m.ns; j2++) {
-                    const u32 ia2 = i2 * m.ns + j2;
-                    Vec3 inf;
-                    // Influence from the 4 edges
-                    influence(inf, colloc_x, colloc_y, colloc_z, m.v0.x[ia2], m.v0.y[ia2], m.v0.z[ia2], m.v1.x[ia2], m.v1.y[ia2], m.v1.z[ia2]);
-                    influence(inf, colloc_x, colloc_y, colloc_z, m.v1.x[ia2], m.v1.y[ia2], m.v1.z[ia2], m.v2.x[ia2], m.v2.y[ia2], m.v2.z[ia2]);
-                    influence(inf, colloc_x, colloc_y, colloc_z, m.v2.x[ia2], m.v2.y[ia2], m.v2.z[ia2], m.v3.x[ia2], m.v3.y[ia2], m.v3.z[ia2]);
-                    influence(inf, colloc_x, colloc_y, colloc_z, m.v3.x[ia2], m.v3.y[ia2], m.v3.z[ia2], m.v0.x[ia2], m.v0.y[ia2], m.v0.z[ia2]);
-
-                    if (i2 == m.nc - 1) {
-                        // TODO: this should be a loop over the wake panels in chordwise direction
-                        const u32 w = m.nc * m.ns + j2;
-                        influence(inf, colloc_x, colloc_y, colloc_z, m.v0.x[w], m.v0.y[w], m.v0.z[w], m.v1.x[w], m.v1.y[w], m.v1.z[w]);
-                        influence(inf, colloc_x, colloc_y, colloc_z, m.v1.x[w], m.v1.y[w], m.v1.z[w], m.v2.x[w], m.v2.y[w], m.v2.z[w]);
-                        influence(inf, colloc_x, colloc_y, colloc_z, m.v2.x[w], m.v2.y[w], m.v2.z[w], m.v3.x[w], m.v3.y[w], m.v3.z[w]);
-                        influence(inf, colloc_x, colloc_y, colloc_z, m.v3.x[w], m.v3.y[w], m.v3.z[w], m.v0.x[w], m.v0.y[w], m.v0.z[w]);
-                    }
-
-                    lhs[i * m.nb_panels_wing() + ia2] = inf.x * m.normal.x[i] + inf.y * m.normal.y[i] + inf.z * m.normal.z[i];
-                }
-            }
-        }
+    const u32 start_wing = 0;
+    const u32 end_wing = (m.nc - 1) * m.ns;
+    tbb::parallel_for(tbb::blocked_range<u32>(start_wing, end_wing),[&](const tbb::blocked_range<u32> &r) {
+    for (u32 i = r.begin(); i < r.end(); i++) {
+        macro_kernel_avx2<true>(m, lhs, i, i);
     }
+    }, ap);
 
-    std::ofstream f("lhs.txt");
-    for (u32 i = 0; i < m.nb_panels_wing(); i++) {
-        for (u32 j = 0; j < m.nb_panels_wing(); j++) {
-            f << lhs[i * m.nb_panels_wing() + j] << "\n";
+    for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
+        tbb::parallel_for(tbb::blocked_range<u32>(0, m.ns),[&](const tbb::blocked_range<u32> &r) {
+        for (u32 j = r.begin(); j < r.end(); j++) {
+            const u32 ia = (m.nc - 1) * m.ns + j;
+            const u32 lidx = i * m.ns + j;
+            macro_kernel_avx2<false>(m, lhs, ia, lidx);
         }
+        }, ap);
     }
-    f.close();
 }
 
 void Solver::compute_rhs() {
@@ -150,17 +370,23 @@ void Solver::compute_rhs() {
 
 void Solver::solve() {
     SimpleTimer timer("Solve");
-    const u32 n = mesh.nb_panels_wing();
-    Eigen::Map<Eigen::Matrix<f32, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> A(lhs.data(), n, n);
-    Eigen::Map<Eigen::VectorXf> x(data.gamma.data(), n);
-    Eigen::Map<Eigen::VectorXf> b(rhs.data(), n);
+    const MKL_INT n = static_cast<MKL_INT>(mesh.nb_panels_wing());
 
-    Eigen::BiCGSTAB<Eigen::MatrixXf> solver;
-    solver.setTolerance(1.0e-6f);
-    solver.compute(A);
-    if (solver.info() != Eigen::Success) throw std::runtime_error("Failed to compute lhs matrix");
-    x = solver.solve(b);
-    if (solver.info() != Eigen::Success) throw std::runtime_error("Failed to converge");
+    std::vector<MKL_INT> ipiv(n);
+
+    // Use LAPACK_COL_MAJOR since the data is stored in column-major format
+    MKL_INT info = LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
+    if (info != 0) {
+        throw std::runtime_error("Failed to compute lhs matrix");
+    }
+
+    info = LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), rhs.data(), n);
+    if (info != 0) {
+        throw std::runtime_error("Failed to solve linear system");
+    }
+
+    // Copy the solution from rhs to data.gamma
+    std::copy(rhs.begin(), rhs.end(), data.gamma.begin());
 }
 
 void Solver::compute_forces() {
