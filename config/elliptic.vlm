@@ -1,7 +1,8 @@
 <solver>
 ref_point = [0.25, 0.0, 0.0]
 alphas = [5]
-S_ref = 18.0
+S_ref = 7.85398 # 5/2 PI
+C_ref = 0.85
 
 <mesh>
 wake_included = false
