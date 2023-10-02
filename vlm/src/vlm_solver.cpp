@@ -46,11 +46,13 @@ void Solver::run(const f32 alpha) {
     std::cout << "Alpha: " << alpha << " CL: " << data.cl << " CD: " << data.cd << " CM: " << data.cm << std::endl;
 }
 
-inline void micro_kernel_influence_scalar(f32& vx, f32& vy, f32& vz, f32 x, f32 y, f32 z, f32 x1, f32 y1, f32 z1, f32 x2, f32 y2, f32 z2) {
+inline void micro_kernel_influence_scalar(f32& vx, f32& vy, f32& vz, f32& x, f32& y, f32& z, f32& x1, f32& y1, f32& z1, f32& x2, f32& y2, f32& z2) {
     static const f32 rcut = 1.0e-12f;
     vx = 0.0f;
     vy = 0.0f;
     vz = 0.0f;
+
+    // Katz Plotkin, Low speed Aero | Eq 10.115
 
     const f32 r1r2x =   (y-y1)*(z-z2) - (z-z1)*(y-y2);
     const f32 r1r2y = -((x-x1)*(z-z2) - (z-z1)*(x-x2));
@@ -171,7 +173,7 @@ inline void kernel_influence_scalar(f32& inf_x, f32& inf_y, f32& inf_z, f32 x, f
 // }
 
 template<bool Overwrite>
-inline void macro_kernel_scalar(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 lidx) {
+inline void macro_kernel_remainder_scalar(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 lidx) {
     // quick return 
     const u32 remainder =  m.nb_panels_wing() % 8;
     if (remainder == 0) return;
@@ -221,13 +223,13 @@ inline void macro_kernel_scalar(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32
 }
 
 inline void micro_kernel_influence_avx2(__m256& vx, __m256& vy, __m256& vz, __m256& x, __m256& y, __m256& z, __m256& x1, __m256& y1, __m256& z1, __m256& x2, __m256& y2, __m256& z2) {
-    static const __m256 threshold = _mm256_set1_ps(1.0e-12f);
+    static const __m256 threshold = _mm256_set1_ps(1.0e-10f);
     static const __m256 pi4 = _mm256_set1_ps(4.0f * PI_f);
     static const __m256 zero = _mm256_set1_ps(0.0f);
     vx = zero;
     vy = zero;
     vz = zero;
-        // define vectors
+    // define vectors
     __m256 r1x = _mm256_sub_ps(x, x1);
     __m256 r1y = _mm256_sub_ps(y, y1);
     __m256 r1z = _mm256_sub_ps(z, z1);
@@ -272,118 +274,17 @@ inline void micro_kernel_influence_avx2(__m256& vx, __m256& vy, __m256& vz, __m2
     vz = _mm256_blendv_ps(_mm256_mul_ps(r1r2z, coeff), zero, mask);
 }
 
-// inline void kernel_influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, __m256 x, __m256 y, __m256 z, __m256 x1, __m256 y1, __m256 z1, __m256 x2, __m256 y2, __m256 z2) {
-//     __m256 vx, vy, vz;
-//     micro_kernel_influence_avx2(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2);
-//     inf_x = _mm256_add_ps(inf_x, vx);
-//     inf_y = _mm256_add_ps(inf_y, vy);
-//     inf_z = _mm256_add_ps(inf_z, vz);
-//     y = _mm256_xor_ps(y, _mm256_set1_ps(-0.0f));
-//     micro_kernel_influence_avx2(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2);
-//     inf_x = _mm256_add_ps(inf_x, vx);
-//     inf_y = _mm256_sub_ps(inf_y, vy); // HERE IS SUB INSTEAD OF ADD !
-//     inf_z = _mm256_add_ps(inf_z, vz);
-// }
-
 inline void kernel_influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, __m256 x, __m256 y, __m256 z, __m256 x1, __m256 y1, __m256 z1, __m256 x2, __m256 y2, __m256 z2) {
-    // r cutoff
-    static const __m256 threshold = _mm256_set1_ps(1.0e-12f);
-    static const __m256 pi4 = _mm256_set1_ps(4.0f * PI_f);
-    static const __m256 zero = _mm256_set1_ps(0.0f);
-    {
-        // define vectors
-        __m256 r1x = _mm256_sub_ps(x, x1);
-        __m256 r1y = _mm256_sub_ps(y, y1);
-        __m256 r1z = _mm256_sub_ps(z, z1);
-        __m256 r2x = _mm256_sub_ps(x, x2);
-        __m256 r2y = _mm256_sub_ps(y, y2);
-        __m256 r2z = _mm256_sub_ps(z, z2);
-
-        // crossproduct
-        // (v0y*v1z - v0z*v1y);
-        // (v0z*v1x - v0x*v1z);
-        // (v0x*v1y - v0y*v1x);
-        __m256 r1r2x = _mm256_fmsub_ps(r1y, r2z, _mm256_mul_ps(r1z, r2y));
-        __m256 r1r2y = _mm256_fmsub_ps(r1z, r2x, _mm256_mul_ps(r1x, r2z));
-        __m256 r1r2z = _mm256_fmsub_ps(r1x, r2y, _mm256_mul_ps(r1y, r2x));
-
-        // magnitude & mag squared of crossproduct
-        __m256 square = _mm256_add_ps(_mm256_mul_ps(r1r2x, r1r2x), _mm256_add_ps(_mm256_mul_ps(r1r2y, r1r2y), _mm256_mul_ps(r1r2z, r1r2z)));
-        __m256 r1 = _mm256_sqrt_ps(_mm256_fmadd_ps(r1x, r1x, _mm256_fmadd_ps(r1y, r1y, _mm256_mul_ps(r1z, r1z))));
-        __m256 r2 = _mm256_sqrt_ps(_mm256_fmadd_ps(r2x, r2x, _mm256_fmadd_ps(r2y, r2y, _mm256_mul_ps(r2z, r2z))));
-
-        // vector from point 1 to point 2 of segment
-        __m256 r0x = _mm256_sub_ps(x2, x1);
-        __m256 r0y = _mm256_sub_ps(y2, y1);
-        __m256 r0z = _mm256_sub_ps(z2, z1);
-
-        // dot product r0.r1 and r0.r2
-        __m256 r0r1 = _mm256_fmadd_ps(r0x, r1x, _mm256_fmadd_ps(r0y, r1y, _mm256_mul_ps(r0z, r1z)));
-        __m256 r0r2 = _mm256_fmadd_ps(r0x, r2x, _mm256_fmadd_ps(r0y, r2y, _mm256_mul_ps(r0z, r2z)));
-
-        __m256 numerator = _mm256_fmsub_ps(r0r1, r2, _mm256_mul_ps(r0r2, r1));
-        __m256 denominator = _mm256_mul_ps(pi4, _mm256_mul_ps(square, _mm256_mul_ps(r1, r2)));
-        __m256 coeff = _mm256_div_ps(numerator, denominator);
-
-        // add the influence and blend with mask
-        // the masks should be done independently for optimal ILP but if compiler smart he can do it
-        __m256 mask = _mm256_cmp_ps(r1, threshold, _CMP_LT_OS);
-        mask = _mm256_or_ps(mask, _mm256_cmp_ps(r2, threshold, _CMP_LT_OS));
-        mask = _mm256_or_ps(mask, _mm256_cmp_ps(square, threshold, _CMP_LT_OS));
-
-        inf_x = _mm256_add_ps(inf_x, _mm256_blendv_ps(_mm256_mul_ps(r1r2x, coeff), zero, mask));
-        inf_y = _mm256_add_ps(inf_y, _mm256_blendv_ps(_mm256_mul_ps(r1r2y, coeff), zero, mask));
-        inf_z = _mm256_add_ps(inf_z, _mm256_blendv_ps(_mm256_mul_ps(r1r2z, coeff), zero, mask));
-    }
-
-    // wing symmetry
-    y = _mm256_xor_ps(y, _mm256_set1_ps(-0.0f));
-
-    {
-        // define vectors
-        __m256 r1x = _mm256_sub_ps(x, x1);
-        __m256 r1y = _mm256_sub_ps(y, y1);
-        __m256 r1z = _mm256_sub_ps(z, z1);
-        __m256 r2x = _mm256_sub_ps(x, x2);
-        __m256 r2y = _mm256_sub_ps(y, y2);
-        __m256 r2z = _mm256_sub_ps(z, z2);
-
-        // crossproduct
-        // (v0y*v1z - v0z*v1y);
-        // (v0z*v1x - v0x*v1z);
-        // (v0x*v1y - v0y*v1x);
-        __m256 r1r2x = _mm256_fmsub_ps(r1y, r2z, _mm256_mul_ps(r1z, r2y));
-        __m256 r1r2y = _mm256_fmsub_ps(r1z, r2x, _mm256_mul_ps(r1x, r2z));
-        __m256 r1r2z = _mm256_fmsub_ps(r1x, r2y, _mm256_mul_ps(r1y, r2x));
-
-        // magnitude & mag squared of crossproduct
-        __m256 square = _mm256_add_ps(_mm256_mul_ps(r1r2x, r1r2x), _mm256_add_ps(_mm256_mul_ps(r1r2y, r1r2y), _mm256_mul_ps(r1r2z, r1r2z)));
-        __m256 r1 = _mm256_sqrt_ps(_mm256_fmadd_ps(r1x, r1x, _mm256_fmadd_ps(r1y, r1y, _mm256_mul_ps(r1z, r1z))));
-        __m256 r2 = _mm256_sqrt_ps(_mm256_fmadd_ps(r2x, r2x, _mm256_fmadd_ps(r2y, r2y, _mm256_mul_ps(r2z, r2z))));
-
-        // vector from point 1 to point 2 of segment
-        __m256 r0x = _mm256_sub_ps(x2, x1);
-        __m256 r0y = _mm256_sub_ps(y2, y1);
-        __m256 r0z = _mm256_sub_ps(z2, z1);
-
-        // dot product r0.r1 and r0.r2
-        __m256 r0r1 = _mm256_fmadd_ps(r0x, r1x, _mm256_fmadd_ps(r0y, r1y, _mm256_mul_ps(r0z, r1z)));
-        __m256 r0r2 = _mm256_fmadd_ps(r0x, r2x, _mm256_fmadd_ps(r0y, r2y, _mm256_mul_ps(r0z, r2z)));
-
-        __m256 numerator = _mm256_fmsub_ps(r0r1, r2, _mm256_mul_ps(r0r2, r1));
-        __m256 denominator = _mm256_mul_ps(pi4, _mm256_mul_ps(square, _mm256_mul_ps(r1, r2)));
-        __m256 coeff = _mm256_div_ps(numerator, denominator);
-
-        // add the influence and blend with mask
-        // the masks should be done independently for optimal ILP but if compiler smart he can do it
-        __m256 mask = _mm256_cmp_ps(r1, threshold, _CMP_LT_OS);
-        mask = _mm256_or_ps(mask, _mm256_cmp_ps(r2, threshold, _CMP_LT_OS));
-        mask = _mm256_or_ps(mask, _mm256_cmp_ps(square, threshold, _CMP_LT_OS));
-
-        inf_x = _mm256_add_ps(inf_x, _mm256_blendv_ps(_mm256_mul_ps(r1r2x, coeff), zero, mask));
-        inf_y = _mm256_sub_ps(inf_y, _mm256_blendv_ps(_mm256_mul_ps(r1r2y, coeff), zero, mask)); // HERE IS SUB INSTEAD OF ADD !
-        inf_z = _mm256_add_ps(inf_z, _mm256_blendv_ps(_mm256_mul_ps(r1r2z, coeff), zero, mask));
-    }
+    __m256 vx, vy, vz;
+    micro_kernel_influence_avx2(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2);
+    inf_x = _mm256_add_ps(inf_x, vx);
+    inf_y = _mm256_add_ps(inf_y, vy);
+    inf_z = _mm256_add_ps(inf_z, vz);
+    y = _mm256_xor_ps(y, _mm256_set1_ps(-0.0f)); // wing symmetry
+    micro_kernel_influence_avx2(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2);
+    inf_x = _mm256_add_ps(inf_x, vx);
+    inf_y = _mm256_sub_ps(inf_y, vy); // HERE IS SUB INSTEAD OF ADD !
+    inf_z = _mm256_add_ps(inf_z, vz);
 }
 
 template<bool Overwrite>
@@ -449,7 +350,7 @@ void Solver::compute_lhs() {
     tbb::parallel_for(tbb::blocked_range<u32>(start_wing, end_wing),[&](const tbb::blocked_range<u32> &r) {
     for (u32 i = r.begin(); i < r.end(); i++) {
         macro_kernel_avx2<true>(m, lhs, i, i);
-        macro_kernel_scalar<true>(m, lhs, i, i);
+        macro_kernel_remainder_scalar<true>(m, lhs, i, i);
     }
     }, ap);
 
@@ -459,7 +360,7 @@ void Solver::compute_lhs() {
             const u32 ia = (m.nc - 1) * m.ns + j;
             const u32 lidx = i * m.ns + j;
             macro_kernel_avx2<false>(m, lhs, ia, lidx);
-            macro_kernel_scalar<false>(m, lhs, i, i);
+            macro_kernel_remainder_scalar<false>(m, lhs, i, i);
         }
         }, ap);
     }
