@@ -1,6 +1,5 @@
 #pragma once
 
-#include "tinyconfig.hpp"
 #include "vlm_types.hpp"
 
 namespace vlm {
@@ -59,6 +58,8 @@ struct Mesh {
     f32 chord_root() const;
     f32 chord_tip() const;
     f32 chord_avg() const;
+
+    void io_read(const std::string& filename);
     Mesh() = default;
     Mesh(tiny::Config& cfg);
 };

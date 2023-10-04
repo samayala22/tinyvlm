@@ -8,13 +8,9 @@ using namespace vlm;
 VLM::VLM(tiny::Config& cfg) : mesh(cfg), data(cfg) {};
 
 void VLM::init() {
-    io.read_mesh(mesh);
-    data.alloc(mesh.nc*mesh.ns);
-}
-
-void VLM::preprocess() {
     mesh.compute_connectivity();
     mesh.compute_metrics_wing();
+    data.alloc(mesh.nc*mesh.ns);
 }
 
 void VLM::solve(tiny::Config& cfg) {
