@@ -1,5 +1,7 @@
 #include "vlm.hpp"
 #include "parser.hpp"
+#include "vlm_types.hpp"
+#include "vlm_solver.hpp"
 
 void cmdl_parser_configure(cmd_line_parser::parser& parser) {
     parser.add("config",                 // name
@@ -36,14 +38,11 @@ int main(int argc, char **argv) {
 
     vlm::VLM vlm(cfg);
 
-    try {
-        vlm.mesh.io_read(filename_mesh);
-        vlm.init();
-        vlm.solve(cfg);
-    } catch (std::exception& e) {
-        std::cout << e.what() << std::endl;
-        return 1;
-    }
-
+    vlm.mesh.io_read(filename_mesh);
+    vlm.init();
+    vlm::Solver solver(vlm.mesh, vlm.data, cfg);
+    float alpha = 0.1f * vlm::PI_f / 180.0f;
+    solver.run(alpha);
+        
     return 0;
 }
