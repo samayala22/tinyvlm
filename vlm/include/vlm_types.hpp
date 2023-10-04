@@ -9,7 +9,9 @@
 #include <array>
 #include <string>
 #include <cmath>
+
 #include "tinyvector.hpp"
+#include "tinyconfig.hpp"
 
 namespace vlm {
 

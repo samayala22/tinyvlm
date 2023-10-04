@@ -5,6 +5,8 @@
 
 using namespace vlm;
 
+Mesh::Mesh(tiny::Config& cfg) {};
+
 void Mesh::alloc() {
     const u32 ncw = nc + nw;
     v.resize((ncw + 1) * (ns + 1));

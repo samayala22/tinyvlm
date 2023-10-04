@@ -166,6 +166,8 @@ class Config {
 
         bool read(const std::string& ifilename);
         bool write(const std::string& ofilename);
+        Config() = default;
+        Config(const std::string& ifilename) {read(ifilename);}
 
     private:
         void read_file(std::ifstream &ifile);
