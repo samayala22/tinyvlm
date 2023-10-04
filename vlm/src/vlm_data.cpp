@@ -1,13 +1,20 @@
 #include "vlm_data.hpp"
-#include "vlm_types.hpp"
 
 using namespace vlm;
 
-void Data::alloc(const u32 nc_, const u32 ns_) {
-        nc = nc_;
-        ns = ns_;
-        gamma.resize(nc_*ns_, 0.0);
-        delta_gamma.resize(nc_*ns_, 0.0);
+Data::Data(tiny::Config& cfg) {
+    s_ref = cfg().section("solver").get<f32>("s_ref", 3.25f);
+    c_ref = cfg().section("solver").get<f32>("c_ref", 0.85f);
+    sigma_vatistas = cfg().section("solver").get<f32>("sigma_vatistas", 0.0f);
+    std::vector<f32> ref_pt_vec = cfg().section("solver").get_vector<f32>("ref_pt", {0.25f, 0.0f, 0.0f});
+    ref_pt.x = ref_pt_vec[0];
+    ref_pt.y = ref_pt_vec[1];
+    ref_pt.z = ref_pt_vec[2];
+};
+
+void Data::alloc(const u32 size) {
+    gamma.resize(size, 0.0);
+    delta_gamma.resize(size, 0.0);
 }
 
 void Data::reset() {
@@ -15,7 +22,9 @@ void Data::reset() {
     std::fill(delta_gamma.begin(), delta_gamma.end(), 0.0f);
     cl = 0.0f;
     cd = 0.0f;
-    cm = 0.0f;
+    cm_x = 0.0f;
+    cm_y = 0.0f;
+    cm_z = 0.0f;
 }
 
 void Data::compute_freestream(f32 alpha) {
@@ -29,14 +38,3 @@ void Data::compute_freestream(f32 alpha) {
     lift_axis.z = std::cos(alpha_rad);
 }
 
-void Data::postprocess() {
-    for (u32 j = 0; j < ns; j++) {
-        delta_gamma[j] = gamma[j];
-    }
-    // note: this is efficient as the memory is contiguous
-    for (u32 i = 1; i < nc; i++) {
-        for (u32 j = 0; j < ns; j++) {
-            delta_gamma[i*ns + j] = gamma[i*ns + j] - gamma[(i-1)*ns + j];
-        }
-    }
-}

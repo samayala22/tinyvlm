@@ -29,16 +29,18 @@ int main(int argc, char **argv) {
     bool success = parser.parse();
     if (!success) return 1;
 
-    vlm::VLM vlm;
+    std::string filename_config = parser.get<std::string>("config");
+    tiny::Config cfg(filename_config);
 
-    vlm.io.filename_config = parser.get<std::string>("config");
+    vlm::VLM vlm(cfg);
+
     vlm.io.filename_mesh = parser.get<std::string>("mesh");
     vlm.io.filename_result = parser.get<std::string>("output");
 
     try {
         vlm.init();
         vlm.preprocess();
-        vlm.solve();
+        vlm.solve(cfg);
     } catch (std::exception& e) {
         std::cout << e.what() << std::endl;
         return 1;

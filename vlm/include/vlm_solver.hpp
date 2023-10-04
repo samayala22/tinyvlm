@@ -8,8 +8,6 @@ namespace vlm {
 struct Solver {
     Mesh& mesh;
     Data& data;
-    IO& io;
-    Config& config;
 
     tiny::vector<f32, 64> lhs; // influence matrix (square non-symmetric, col major)
     tiny::vector<f32, 64> rhs; // right hand side
@@ -20,7 +18,8 @@ struct Solver {
     void compute_rhs();
     void solve();
     void compute_forces();
-    Solver(Mesh& mesh, Data& data, IO& io, Config& config);
+    void compute_delta_gamma();
+    Solver(Mesh& mesh, Data& data, tiny::Config& cfg);
 };
 
 } // namespace vlm

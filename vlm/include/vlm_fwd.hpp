@@ -6,6 +6,5 @@ struct VLM;
 struct Data;
 struct Mesh;
 struct IO;
-struct Config;
 
 }
