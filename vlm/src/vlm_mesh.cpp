@@ -249,7 +249,7 @@ void Mesh::io_read(const std::string& filename) {
 
     std::ifstream f(path);
     if (f.is_open()) {
-        if (path.extension() == ".xyz") {
+        if (path.extension() == ".x") {
             read_plot3d_structured(f, *this);
         } else {
             throw std::runtime_error("Only structured gridpro mesh format is supported");
