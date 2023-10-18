@@ -29,19 +29,21 @@ void Solver::reset() {
     std::fill(rhs.begin(), rhs.end(), 0.0f);
 }
 
-void Solver::run(const f32 alpha) {
+void Solver::run(const f32 alpha_deg) {
     SimpleTimer timer("SOLVER RUN");
+    const f32 alpha_rad = alpha_deg * PI_f / 180.0f;
     reset();
     data.reset();
-    data.compute_freestream(alpha);
+    data.compute_freestream(alpha_rad);
     mesh.update_wake(data.u_inf);
+    mesh.correction_high_aoa(alpha_rad); // must be after update_wake
     compute_lhs();
     compute_rhs();
     solve();
     compute_delta_gamma();
     compute_forces();
 
-    std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha, data.cl, data.cd, data.cm_x, data.cm_y, data.cm_z);
+    std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha_deg, data.cl, data.cd, data.cm_x, data.cm_y, data.cm_z);
 }
 
 void Solver::compute_delta_gamma() {
@@ -129,7 +131,7 @@ inline void kernel_influence_scalar(f32& inf_x, f32& inf_y, f32& inf_z, f32 x, f
 //                 const f32 colloc_z = m.colloc.z[ia2];
 
 //                 // 3 regs to store induced velocity 
-//                 Vec3 inf;
+//                 Vec3<f32> inf;
 //                 influence(inf, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
 //                 influence(inf, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
 //                 influence(inf, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
@@ -169,7 +171,7 @@ inline void kernel_influence_scalar(f32& inf_x, f32& inf_y, f32& inf_z, f32 x, f
 //                 const f32 colloc_z = m.colloc.z[ia2];
 
 //                 // 3 regs to store induced velocity 
-//                 Vec3 inf;
+//                 Vec3<32> inf;
 //                 influence(inf, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
 //                 influence(inf, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
 //                 influence(inf, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
@@ -431,13 +433,15 @@ void Solver::compute_forces() {
         // (v0y*v1z - v0z*v1y);
         // (v0z*v1x - v0x*v1z);
         // (v0x*v1y - v0y*v1x);
-        const f32 dl_x = (mesh.v1.x[i] - mesh.v0.x[i]) * data.rho * data.delta_gamma[i];
-        const f32 dl_y = (mesh.v1.y[i] - mesh.v0.y[i]) * data.rho * data.delta_gamma[i];
-        const f32 dl_z = (mesh.v1.z[i] - mesh.v0.z[i]) * data.rho * data.delta_gamma[i];
+        Vec3<f32> v0 = mesh.get_v0(i);
+        Vec3<f32> v1 = mesh.get_v1(i);
+        const f32 dl_x = (v1.x - v0.x) * data.rho * data.delta_gamma[i];
+        const f32 dl_y = (v1.y - v0.y) * data.rho * data.delta_gamma[i];
+        const f32 dl_z = (v1.z - v0.z) * data.rho * data.delta_gamma[i];
         // distance to reference calculated from the panel's force acting point (note: maybe precompute this?)
-        const f32 dst_to_ref_x = data.ref_pt.x - 0.5f * (mesh.v0.x[i] + mesh.v1.x[i]);
-        const f32 dst_to_ref_y = data.ref_pt.y - 0.5f * (mesh.v0.y[i] + mesh.v1.y[i]);
-        const f32 dst_to_ref_z = data.ref_pt.z - 0.5f * (mesh.v0.z[i] + mesh.v1.z[i]);
+        const f32 dst_to_ref_x = data.ref_pt.x - 0.5f * (v0.x + v1.x);
+        const f32 dst_to_ref_y = data.ref_pt.y - 0.5f * (v0.y + v1.y);
+        const f32 dst_to_ref_z = data.ref_pt.z - 0.5f * (v0.z + v1.z);
 
         const f32 force_x = data.u_inf.y * dl_z - data.u_inf.z * dl_y;
         const f32 force_y = data.u_inf.z * dl_x - data.u_inf.x * dl_z;
@@ -456,14 +460,18 @@ void Solver::compute_forces() {
         const f32 colloc_x = mesh.colloc.x[ia];
         const f32 colloc_y = mesh.colloc.y[ia];
         const f32 colloc_z = mesh.colloc.z[ia];
-        Vec3 inf;
+        Vec3<f32> inf;
         for (u32 ia2 = mesh.nb_panels_wing(); ia2 < mesh.nb_panels_total(); ia2++) {
             f32 inf2_x = 0.0f;
             f32 inf2_y = 0.0f;
             f32 inf2_z = 0.0f;
+            Vec3<f32> v0 = mesh.get_v0(ia2);
+            Vec3<f32> v1 = mesh.get_v1(ia2);
+            Vec3<f32> v2 = mesh.get_v2(ia2);
+            Vec3<f32> v3 = mesh.get_v3(ia2);
             // Influence from the streamwise vortex lines
-            kernel_influence_scalar(inf2_x, inf2_y, inf2_z, colloc_x, colloc_y, colloc_z, m.v1.x[ia2], m.v1.y[ia2], m.v1.z[ia2], m.v2.x[ia2], m.v2.y[ia2], m.v2.z[ia2]);
-            kernel_influence_scalar(inf2_x, inf2_y, inf2_z, colloc_x, colloc_y, colloc_z, m.v3.x[ia2], m.v3.y[ia2], m.v3.z[ia2], m.v0.x[ia2], m.v0.y[ia2], m.v0.z[ia2]);
+            kernel_influence_scalar(inf2_x, inf2_y, inf2_z, colloc_x, colloc_y, colloc_z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+            kernel_influence_scalar(inf2_x, inf2_y, inf2_z, colloc_x, colloc_y, colloc_z, v3.x, v3.y, v3.z, v0.x, v0.y, v0.z);
             f32 gamma_w = data.gamma[(m.nc-1)*m.ns + ia2 % m.ns];
             // This is the induced velocity calculated with the vortex (gamma) calculated earlier (according to kutta condition)
             inf.x += gamma_w * inf2_x;
@@ -472,7 +480,9 @@ void Solver::compute_forces() {
         }
         const f32 w_ind = inf.x * m.normal.x[ia] + inf.y * m.normal.y[ia] + inf.z * m.normal.z[ia];
         const u32 col = ia % m.ns;
-        const f32 dl = std::sqrt(pow<2>(mesh.v1.x[ia] - mesh.v0.x[ia]) + pow<2>(mesh.v1.y[ia] - mesh.v0.y[ia]) + pow<2>(mesh.v1.z[ia] - mesh.v0.z[ia]));
+        Vec3<f32> v0 = mesh.get_v0(ia);
+        Vec3<f32> v1 = mesh.get_v1(ia);
+        const f32 dl = std::sqrt(pow<2>(v1.x - v0.x) + pow<2>(v1.y - v0.y) + pow<2>(v1.z - v0.z));
         
         data.cd -= 0.5f * data.rho * data.gamma[(m.nc-1)*m.ns + col] * w_ind * dl;
     }
