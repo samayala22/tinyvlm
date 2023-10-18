@@ -27,8 +27,8 @@ void Data::reset() {
     cm_z = 0.0f;
 }
 
-void Data::compute_freestream(f32 alpha) {
-    f32 alpha_rad = alpha * PI_f / 180.0f;
+// alpha in radians
+void Data::compute_freestream(f32 alpha_rad) {
     u_inf.x = std::cos(alpha_rad);
     u_inf.y = 0.0f;
     u_inf.z = std::sin(alpha_rad);

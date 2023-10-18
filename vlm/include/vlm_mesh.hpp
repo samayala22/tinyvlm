@@ -24,7 +24,6 @@ struct Mesh {
     // Panels metrics (stored span major order)
     // ---------------------
     // Collocation points of panels
-    f32 alpha = 0.0f; // aoa used for high aoa correction
     SoA_3D_t<f32> colloc; // size ncw*ns
     // Normals of panels
     SoA_3D_t<f32> normal; // size ncw*ns
@@ -39,7 +38,7 @@ struct Mesh {
 
     void alloc(); // allocate memory for all arrays
     void update_wake(const Vec3<f32>& u_inf); // update wake vertices
-    void correction_high_aoa(f32 alpha); // correct collocation points for high aoa
+    void correction_high_aoa(f32 alpha_rad); // correct collocation points for high aoa
     void compute_connectivity(); // fill offsets, connectivity
     void compute_metrics_wing(); // fill colloc, normal, area
     void compute_metrics_wake();

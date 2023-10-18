@@ -79,6 +79,27 @@ void Mesh::update_wake(const Vec3<f32>& u_inf) {
     compute_metrics_wake();
 }
 
+// https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf (Eq 3.4 p21)
+void Mesh::correction_high_aoa(f32 alpha_rad) {
+    const f32 factor = 0.5f * alpha_rad / std::sin(alpha_rad + 1e-7f); // correction factor
+    // this can be vectorized and parallelized
+    for (u32 i = 0; i < nb_panels_total(); i++) {
+        const Vec3<f32> v0 = get_v0(i);
+        const Vec3<f32> v1 = get_v1(i);
+        const Vec3<f32> v2 = get_v2(i);
+        const Vec3<f32> v3 = get_v3(i);
+        // "chord vector" from center of leading line (v0-v1) to trailing line (v3-v2)
+        const f32 cx = 0.5f * (v2.x + v3.x - v0.x - v1.x);
+        const f32 cy = 0.5f * (v2.y + v3.y - v0.y - v1.y);
+        const f32 cz = 0.5f * (v2.z + v3.z - v0.z - v1.z);
+
+        // collocation calculated as a translation of the center of leading line center
+        colloc.x[i] = 0.5f * (v0.x + v1.x) + factor * cx;
+        colloc.y[i] = 0.5f * (v0.y + v1.y) + factor * cy;
+        colloc.z[i] = 0.5f * (v0.z + v1.z) + factor * cz;
+    }
+}
+
 void Mesh::compute_connectivity() {
     // indices of the points forming the quad
     //             span(y) ->
