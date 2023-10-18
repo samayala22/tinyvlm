@@ -21,15 +21,6 @@ struct Mesh {
     // vertices indices of a panel: connectivity[offsets[i]] to connectivity[offsets[i+1]]
     std::vector<u32> connectivity = {}; // size 4*(nc*ns)
 
-    // SIMD members
-    // ---------------------
-    // Vertices of each corner stored in separate arrays for vertical SIMD
-    // POV: above wing (sense -z) leading edge is up, chord root is left
-    SoA_3D_t<f32> v0; // upper left | size ncw*ns
-    SoA_3D_t<f32> v1; // upper right | size ncw*ns
-    SoA_3D_t<f32> v2; // lower right | size ncw*ns
-    SoA_3D_t<f32> v3; // lower left | size ncw*ns
-
     // Panels metrics (stored span major order)
     // ---------------------
     // Collocation points of panels
@@ -46,7 +37,8 @@ struct Mesh {
     const u32 nw = 1; // number of panels in chordwise wake
 
     void alloc(); // allocate memory for all arrays
-    void update_wake(const Vec3& u_inf); // update wake vertices
+    void update_wake(const Vec3<f32>& u_inf); // update wake vertices
+    void correction_high_aoa(f32 alpha_rad); // correct collocation points for high aoa
     void compute_connectivity(); // fill offsets, connectivity
     void compute_metrics_wing(); // fill colloc, normal, area
     void compute_metrics_wake();
@@ -58,6 +50,11 @@ struct Mesh {
     f32 chord_root() const;
     f32 chord_tip() const;
     f32 chord_avg() const;
+    // i panel vertices coordinates
+    Vec3<f32> get_v0(u32 i) const; // upper left
+    Vec3<f32> get_v1(u32 i) const; // upper right
+    Vec3<f32> get_v2(u32 i) const; // lower right
+    Vec3<f32> get_v3(u32 i) const; // lower left
 
     void io_read(const std::string& filename);
     Mesh() = default;

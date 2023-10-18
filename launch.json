@@ -10,7 +10,7 @@
             "name": "Debug elliptic 64",
             "target": "vlm",
             "cwd": "${workspaceFolder}",
-            "args": ["-i", "config/elliptic.vlm", "-m", "mesh/elliptic_64x64.xyz", "-o", "results/elliptic.vtu"],
+            "args": ["-i", "config/elliptic.vlm", "-m", "mesh/elliptic_64x64.x", "-o", "results/elliptic.vtu"],
             "stopAtEntry": false
         }
     ]

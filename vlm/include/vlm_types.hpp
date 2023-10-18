@@ -64,12 +64,13 @@ struct SoA_3D_t {
     }
 };
 
+template<typename T>
 struct Vec3 {
-    f32 x = 0.0;
-    f32 y = 0.0;
-    f32 z = 0.0;
+    T x = 0;
+    T y = 0;
+    T z = 0;
     Vec3() = default;
-    Vec3(f32 x_, f32 y_, f32 z_) : x(x_), y(y_), z(z_) {};
+    Vec3(T x_, T y_, T z_) : x(x_), y(y_), z(z_) {};
 };
 
 } // namespace vlm

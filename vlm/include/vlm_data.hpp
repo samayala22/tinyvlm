@@ -14,9 +14,9 @@ struct Data {
     f32 cm_y = 0.0f;
     f32 cm_z = 0.0f;
     
-    Vec3 u_inf; // freestream velocity (computed in compute_freestream)
-    Vec3 lift_axis; // lift axis (computed in compute_freestream)
-    Vec3 ref_pt = {0.25f, 0.0f, 0.0f}; // reference point (for moment computation
+    Vec3<f32> u_inf; // freestream velocity (computed in compute_freestream)
+    Vec3<f32> lift_axis; // lift axis (computed in compute_freestream)
+    Vec3<f32> ref_pt = {0.25f, 0.0f, 0.0f}; // reference point (for moment computation
 
     f32 rho = 1.0f;
     f32 s_ref = 3.25f; // reference area (of wing)
