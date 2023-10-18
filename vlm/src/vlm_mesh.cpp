@@ -13,11 +13,6 @@ void Mesh::alloc() {
     offsets.resize(nc * ns + 1);
     connectivity.resize(4 * nc * ns);
 
-    v0.resize(ncw * ns);
-    v1.resize(ncw * ns);
-    v2.resize(ncw * ns);
-    v3.resize(ncw * ns);
-
     colloc.resize(ncw * ns);
     normal.resize(ncw * ns);
     area.resize(ncw * ns);
@@ -44,7 +39,27 @@ f32 Mesh::chord_avg() const {
     return 0.5f * (chord_root() + chord_tip());
 }
 
-void Mesh::update_wake(const Vec3& u_inf) {
+Vec3<f32> Mesh::get_v0(u32 i) const {
+    const u32 idx = i + i / ns;
+    return {v.x[idx], v.y[idx], v.z[idx]};
+}
+
+Vec3<f32> Mesh::get_v1(u32 i) const {
+    const u32 idx = i + i / ns + 1;
+    return {v.x[idx], v.y[idx], v.z[idx]};
+}
+
+Vec3<f32> Mesh::get_v2(u32 i) const {
+    const u32 idx = i + i / ns + ns + 2;
+    return {v.x[idx], v.y[idx], v.z[idx]};
+}
+
+Vec3<f32> Mesh::get_v3(u32 i) const {
+    const u32 idx = i + i / ns + ns + 1;
+    return {v.x[idx], v.y[idx], v.z[idx]};
+}
+
+void Mesh::update_wake(const Vec3<f32>& u_inf) {
     const f32 off_x = u_inf.x * 100.0f * chord_root();
     const f32 off_y = u_inf.y * 100.0f * chord_root();
     const f32 off_z = u_inf.z * 100.0f * chord_root();
@@ -61,29 +76,6 @@ void Mesh::update_wake(const Vec3& u_inf) {
         v.y[i + v_ns] = v.y[i] + off_y;
         v.z[i + v_ns] = v.z[i] + off_z;
     }
-
-    // note: this only works for a single row of wake panels
-    for (u32 i = nb_panels_wing(); i < nb_panels_total(); i++) {
-        const u32 row = i / ns; // row is chordwise
-        const u32 ie = i + row; // index of upper left vertex of panel
-        // note: in reality v0 and v1 dont change (only v2 and v3 do)
-        v0.x[i] = v.x[ie];
-        v0.y[i] = v.y[ie];
-        v0.z[i] = v.z[ie];
-
-        v1.x[i] = v.x[ie + 1];
-        v1.y[i] = v.y[ie + 1];
-        v1.z[i] = v.z[ie + 1];
-
-        v2.x[i] = v.x[ie + v_ns + 1];
-        v2.y[i] = v.y[ie + v_ns + 1];
-        v2.z[i] = v.z[ie + v_ns + 1];
-
-        v3.x[i] = v.x[ie + v_ns];
-        v3.y[i] = v.y[ie + v_ns];
-        v3.z[i] = v.z[ie + v_ns];
-    }
-
     compute_metrics_wake();
 }
 
@@ -110,15 +102,20 @@ void Mesh::compute_connectivity() {
 }
 
 void Mesh::compute_metrics_i(u32 i ) {
+    Vec3<f32> v0 = get_v0(i);
+    Vec3<f32> v1 = get_v1(i);
+    Vec3<f32> v2 = get_v2(i);
+    Vec3<f32> v3 = get_v3(i);
+
     // Vector v0 from p1 to p3
-    const f32 v0x = v3.x[i] - v1.x[i];
-    const f32 v0y = v3.y[i] - v1.y[i];
-    const f32 v0z = v3.z[i] - v1.z[i];
+    const f32 v0x = v3.x - v1.x;
+    const f32 v0y = v3.y - v1.y;
+    const f32 v0z = v3.z - v1.z;
 
     // Vector v1 from p0 to p2
-    const f32 v1x = v2.x[i] - v0.x[i];
-    const f32 v1y = v2.y[i] - v0.y[i];
-    const f32 v1z = v2.z[i] - v0.z[i];
+    const f32 v1x = v2.x - v0.x;
+    const f32 v1y = v2.y - v0.y;
+    const f32 v1z = v2.z - v0.z;
 
     normal.x[i] = (v0y*v1z - v0z*v1y);
     normal.y[i] = (v0z*v1x - v0x*v1z);
@@ -133,17 +130,17 @@ void Mesh::compute_metrics_i(u32 i ) {
     // 3 vectors f (P0P2), b (P0P3), e (P0P1) to compute the area:
     // area = 0.5 * (||f x b|| + ||b x e||)
     // this formula might also work: area = || 0.5 * ( f x b + b x e ) ||
-    const f32 fx = v2.x[i] - v0.x[i];
-    const f32 fy = v2.y[i] - v0.y[i];
-    const f32 fz = v2.z[i] - v0.z[i];
+    const f32 fx = v2.x - v0.x;
+    const f32 fy = v2.y - v0.y;
+    const f32 fz = v2.z - v0.z;
 
-    const f32 bx = v3.x[i] - v0.x[i];
-    const f32 by = v3.y[i] - v0.y[i];
-    const f32 bz = v3.z[i] - v0.z[i];
+    const f32 bx = v3.x - v0.x;
+    const f32 by = v3.y - v0.y;
+    const f32 bz = v3.z - v0.z;
 
-    const f32 ex = v1.x[i] - v0.x[i];
-    const f32 ey = v1.y[i] - v0.y[i];
-    const f32 ez = v1.z[i] - v0.z[i];
+    const f32 ex = v1.x - v0.x;
+    const f32 ey = v1.y - v0.y;
+    const f32 ez = v1.z - v0.z;
 
     // s1 = f x b
     const f32 s1x = fy * bz - fz * by;
@@ -159,9 +156,9 @@ void Mesh::compute_metrics_i(u32 i ) {
     area[i] = 0.5f * (std::sqrt(s1x * s1x + s1y * s1y + s1z * s1z) + std::sqrt(s2x * s2x + s2y * s2y + s2z * s2z));
     
     // collocation point (center of the quad)
-    colloc.x[i] = (v0.x[i] + v1.x[i] + v2.x[i] + v3.x[i]) * 0.25f;
-    colloc.y[i] = (v0.y[i] + v1.y[i] + v2.y[i] + v3.y[i]) * 0.25f;
-    colloc.z[i] = (v0.z[i] + v1.z[i] + v2.z[i] + v3.z[i]) * 0.25f;
+    colloc.x[i] = (v0.x + v1.x + v2.x + v3.x) * 0.25f;
+    colloc.y[i] = (v0.y + v1.y + v2.y + v3.y) * 0.25f;
+    colloc.z[i] = (v0.z + v1.z + v2.z + v3.z) * 0.25f;
 }
 
 void Mesh::compute_metrics_wing() {
@@ -217,27 +214,6 @@ void read_plot3d_structured(std::ifstream& f, Mesh& m) {
             f >> z;
             m.v.z[nj*i + j] = z;
         }
-    }
-
-    for (u32 i = 0; i < m.nb_panels_wing(); i++) {
-        const u32 row = i / m.ns; // row is chordwise
-        const u32 ie = i + row; // index of upper left vertex of panel
-        const u32 v_ns = m.ns + 1;
-        m.v0.x[i] = m.v.x[ie];
-        m.v0.y[i] = m.v.y[ie];
-        m.v0.z[i] = m.v.z[ie];
-
-        m.v1.x[i] = m.v.x[ie + 1];
-        m.v1.y[i] = m.v.y[ie + 1];
-        m.v1.z[i] = m.v.z[ie + 1];
-
-        m.v2.x[i] = m.v.x[ie + v_ns + 1];
-        m.v2.y[i] = m.v.y[ie + v_ns + 1];
-        m.v2.z[i] = m.v.z[ie + v_ns + 1];
-
-        m.v3.x[i] = m.v.x[ie + v_ns];
-        m.v3.y[i] = m.v.y[ie + v_ns];
-        m.v3.z[i] = m.v.z[ie + v_ns];
     }
 }
 
