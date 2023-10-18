@@ -12,7 +12,7 @@ struct Solver {
     tiny::vector<f32, 64> lhs; // influence matrix (square non-symmetric, col major)
     tiny::vector<f32, 64> rhs; // right hand side
 
-    void run(const f32 alpha);
+    void run(const f32 alpha_deg);
     void reset();
     void compute_lhs();
     void compute_rhs();

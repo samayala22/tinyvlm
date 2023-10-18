@@ -29,19 +29,21 @@ void Solver::reset() {
     std::fill(rhs.begin(), rhs.end(), 0.0f);
 }
 
-void Solver::run(const f32 alpha) {
+void Solver::run(const f32 alpha_deg) {
     SimpleTimer timer("SOLVER RUN");
+    const f32 alpha_rad = alpha_deg * PI_f / 180.0f;
     reset();
     data.reset();
-    data.compute_freestream(alpha);
+    data.compute_freestream(alpha_rad);
     mesh.update_wake(data.u_inf);
+    mesh.correction_high_aoa(alpha_rad); // must be after update_wake
     compute_lhs();
     compute_rhs();
     solve();
     compute_delta_gamma();
     compute_forces();
 
-    std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha, data.cl, data.cd, data.cm_x, data.cm_y, data.cm_z);
+    std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha_deg, data.cl, data.cd, data.cm_x, data.cm_y, data.cm_z);
 }
 
 void Solver::compute_delta_gamma() {
