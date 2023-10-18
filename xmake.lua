@@ -5,16 +5,18 @@ add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.asan")
 
 -- set_toolchains("clang")
 -- set_toolset("cxx", "clang")
-
+-- set_policy("build.sanitizer.address", true)
 set_policy("build.warning", true)
+-- set_policy("build.optimization.lto")
 set_warnings("all")
 set_languages("c++20", "c99")
 set_runtimes("MD")
--- set_policy("build.optimization.lto")
+
+add_vectorexts("avx2", "fma")
 
 if is_mode("release", "releasedbg") then
-    add_vectorexts("avx2", "fma")
     -- add_cxxflags("/openmp:llvm", {tools = "msvc"})
+    -- add_cxxflags("-march=native", {tools = "gcc"})
 end
 
 if is_mode("debug", "releasedbg") then

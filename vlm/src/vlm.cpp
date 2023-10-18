@@ -1,6 +1,7 @@
 #include "vlm.hpp"
 #include "vlm_solver.hpp"
 
+#include <iostream>
 #include <oneapi/tbb/global_control.h>
 
 using namespace vlm;
@@ -20,4 +21,5 @@ void VLM::solve(tiny::Config& cfg) {
     for (auto alpha : alphas) {
         solver.run(alpha);
     }
+    std::cin.get();
 }
