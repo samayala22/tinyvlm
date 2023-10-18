@@ -14,10 +14,9 @@ set_runtimes("MD")
 
 add_vectorexts("avx2", "fma")
 
-if is_mode("release", "releasedbg") then
-    -- add_cxxflags("/openmp:llvm", {tools = "msvc"})
-    -- add_cxxflags("-march=native", {tools = "gcc"})
-end
+-- if is_mode("release", "releasedbg") then
+--     add_cxxflags("/openmp:llvm", {tools = "msvc"})
+-- end
 
 if is_mode("debug", "releasedbg") then
     add_defines("TBB_USE_THREADING_TOOLS")
