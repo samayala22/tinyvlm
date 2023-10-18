@@ -335,11 +335,11 @@ inline void macro_kernel_avx2(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 l
     __m256 v3y = _mm256_broadcast_ss(&m.v.y[v3]);
     __m256 v3z = _mm256_broadcast_ss(&m.v.z[v3]);
 
-    for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2+=8) {
+    for (u32 ia2 = 0; ia2 <= m.nb_panels_wing()-8; ia2+=8) {
         // loads (3 regs)
-        __m256 colloc_x = _mm256_load_ps(&m.colloc.x[ia2]);
-        __m256 colloc_y = _mm256_load_ps(&m.colloc.y[ia2]);
-        __m256 colloc_z = _mm256_load_ps(&m.colloc.z[ia2]);
+        __m256 colloc_x = _mm256_loadu_ps(&m.colloc.x[ia2]);
+        __m256 colloc_y = _mm256_loadu_ps(&m.colloc.y[ia2]);
+        __m256 colloc_z = _mm256_loadu_ps(&m.colloc.z[ia2]);
         // 3 regs to store induced velocity
         __m256 inf_x = _mm256_setzero_ps();
         __m256 inf_y = _mm256_setzero_ps();
@@ -351,18 +351,18 @@ inline void macro_kernel_avx2(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 l
         kernel_influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z, sigma_p4);
 
         // dot product
-        __m256 nx = _mm256_load_ps(&m.normal.x[ia2]);
-        __m256 ny = _mm256_load_ps(&m.normal.y[ia2]);
-        __m256 nz = _mm256_load_ps(&m.normal.z[ia2]);
+        __m256 nx = _mm256_loadu_ps(&m.normal.x[ia2]);
+        __m256 ny = _mm256_loadu_ps(&m.normal.y[ia2]);
+        __m256 nz = _mm256_loadu_ps(&m.normal.z[ia2]);
         __m256 ring_inf = _mm256_fmadd_ps(inf_x, nx, _mm256_fmadd_ps(inf_y, ny, _mm256_mul_ps(inf_z, nz)));
 
         // store in col major order
         if (Overwrite) {
-            _mm256_store_ps(&lhs[ia * m.nb_panels_wing() + ia2], ring_inf);
-        } else {
-            __m256 lhs_ia = _mm256_load_ps(&lhs[ia * m.nb_panels_wing() + ia2]);
+            _mm256_storeu_ps(&lhs[ia * m.nb_panels_wing() + ia2], ring_inf);
+        } else {                
+            __m256 lhs_ia = _mm256_loadu_ps(&lhs[ia * m.nb_panels_wing() + ia2]);
             lhs_ia = _mm256_add_ps(lhs_ia, ring_inf);
-            _mm256_store_ps(&lhs[ia * m.nb_panels_wing() + ia2], lhs_ia);
+            _mm256_storeu_ps(&lhs[ia * m.nb_panels_wing() + ia2], lhs_ia);
         }
     }
 }
