@@ -21,5 +21,6 @@ void VLM::solve(tiny::Config& cfg) {
     for (auto alpha : alphas) {
         solver.run(alpha);
     }
+    std::cout << "Done ..." << std::endl;
     std::cin.get();
 }

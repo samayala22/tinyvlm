@@ -14,7 +14,9 @@
 #include "oneapi/tbb/blocked_range.h"
 #include "oneapi/tbb/parallel_for.h"
 
-#include "mkl.h"
+//#include "mkl.h"
+#include <Eigen/IterativeLinearSolvers>
+#include <Eigen/Dense>
 
 using namespace vlm;
 
@@ -403,25 +405,36 @@ void Solver::compute_rhs() {
     }
 }
 
+// void Solver::solve() {
+//     SimpleTimer timer("Solve");
+//     const MKL_INT n = static_cast<MKL_INT>(mesh.nb_panels_wing());
+
+//     std::vector<MKL_INT> ipiv(n);
+
+//     // Use LAPACK_COL_MAJOR since the data is stored in column-major format
+//     MKL_INT info = LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
+//     if (info != 0) {
+//         throw std::runtime_error("Failed to compute lhs matrix");
+//     }
+
+//     info = LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), rhs.data(), n);
+//     if (info != 0) {
+//         throw std::runtime_error("Failed to solve linear system");
+//     }
+
+//     // Copy the solution from rhs to data.gamma
+//     std::copy(rhs.begin(), rhs.end(), data.gamma.begin());
+// }
+
 void Solver::solve() {
     SimpleTimer timer("Solve");
-    const MKL_INT n = static_cast<MKL_INT>(mesh.nb_panels_wing());
-
-    std::vector<MKL_INT> ipiv(n);
-
-    // Use LAPACK_COL_MAJOR since the data is stored in column-major format
-    MKL_INT info = LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
-    if (info != 0) {
-        throw std::runtime_error("Failed to compute lhs matrix");
-    }
-
-    info = LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), rhs.data(), n);
-    if (info != 0) {
-        throw std::runtime_error("Failed to solve linear system");
-    }
-
-    // Copy the solution from rhs to data.gamma
-    std::copy(rhs.begin(), rhs.end(), data.gamma.begin());
+    const u32 n = mesh.nb_panels_wing();
+    Eigen::Map<Eigen::Matrix<f32, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> A(lhs.data(), n, n);
+    Eigen::Map<Eigen::VectorXf> x(data.gamma.data(), n);
+    Eigen::Map<Eigen::VectorXf> b(rhs.data(), n);
+    
+    Eigen::PartialPivLU<Eigen::MatrixXf> lu(A);
+    x = lu.solve(b);
 }
 
 void Solver::compute_forces() {
