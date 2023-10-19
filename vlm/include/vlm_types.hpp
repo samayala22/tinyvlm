@@ -1,9 +1,6 @@
 #pragma once
 
-#pragma warning(push)
-#pragma warning(disable: 4267)
 #include <utility>
-#pragma warning(pop)
 #include <cstdint>
 #include <vector>
 #include <array>
