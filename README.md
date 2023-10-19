@@ -12,7 +12,14 @@
 
 ## Build and run
 
-Requirement: Windows or Linux machine with a CPU that supports AVX2. 
+Requirements: 
+- Windows (MSVC compiler) or Linux (GCC or Clang)
+- CPU that supports AVX2
+- [xmake](https://xmake.io/#/) build system
+    - For Windows, the [installer](https://github.com/xmake-io/xmake/releases) is recommended
+    - For Linux, run `curl -fsSL https://xmake.io/shget.text | bash`
+
+Then build and run the default config:
 
 ```bash
 xmake -y -v && xmake run
@@ -20,7 +27,6 @@ xmake -y -v && xmake run
 
 The solver should run and output the aerodynamic coefficients along with some time metrics:
 
-Example:
 ```
 reading plot3d mesh
 number of panels: 4096
