@@ -1,8 +1,4 @@
-#include "vlm_data.hpp"
-#include "vlm_mesh.hpp"
-
-#include "vlm_solver.hpp"
-#include "vlm_types.hpp"
+#include "vlm_backend_avx2.hpp"
 
 #include "simpletimer.hpp"
 
@@ -11,8 +7,9 @@
 #include <fstream>
 #include <immintrin.h>
 
-#include "oneapi/tbb/blocked_range.h"
-#include "oneapi/tbb/parallel_for.h"
+#include <oneapi/tbb/global_control.h>
+#include <oneapi/tbb/blocked_range.h>
+#include <oneapi/tbb/parallel_for.h>
 
 //#include "mkl.h"
 #include <Eigen/IterativeLinearSolvers>
@@ -20,35 +17,19 @@
 
 using namespace vlm;
 
-Solver::Solver(Mesh& mesh, Data& data, tiny::Config& cfg) : mesh(mesh), data(data) {
+BackendAVX2::BackendAVX2(Mesh& mesh, Data& data) : Backend(mesh, data) {
+    //tbb::global_control global_limit(oneapi::tbb::global_control::max_allowed_parallelism, 1);
     lhs.resize((u64)mesh.nb_panels_wing() * (u64)mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
 }
 
-void Solver::reset() {
+void BackendAVX2::reset() {
     std::fill(data.gamma.begin(), data.gamma.end(), 0.0f);
     std::fill(lhs.begin(), lhs.end(), 0.0f);
     std::fill(rhs.begin(), rhs.end(), 0.0f);
 }
 
-void Solver::run(const f32 alpha_deg) {
-    SimpleTimer timer("SOLVER RUN");
-    const f32 alpha_rad = alpha_deg * PI_f / 180.0f;
-    reset();
-    data.reset();
-    data.compute_freestream(alpha_rad);
-    mesh.update_wake(data.u_inf);
-    mesh.correction_high_aoa(alpha_rad); // must be after update_wake
-    compute_lhs();
-    compute_rhs();
-    solve();
-    compute_delta_gamma();
-    compute_forces();
-
-    std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha_deg, data.cl, data.cd, data.cm_x, data.cm_y, data.cm_z);
-}
-
-void Solver::compute_delta_gamma() {
+void BackendAVX2::compute_delta_gamma() {
     for (u32 j = 0; j < mesh.ns; j++) {
         data.delta_gamma[j] = data.gamma[j];
     }
@@ -75,7 +56,6 @@ inline void micro_kernel_influence_scalar(f32& vx, f32& vy, f32& vz, f32& x, f32
     const f32 r1 = std::sqrt(pow<2>(x-x1)+pow<2>(y-y1)+pow<2>(z-z1));
     const f32 r2 = std::sqrt(pow<2>(x-x2)+pow<2>(y-y2)+pow<2>(z-z2));
     const f32 square = pow<2>(r1r2x) + pow<2>(r1r2y) + pow<2>(r1r2z);
-
     if ((r1<rcut) || (r2<rcut) || (square<rcut)) return;
 
     const f32 r0r1 = (x2-x1)*(x-x1)+(y2-y1)*(y-y1)+(z2-z1)*(z-z1);
@@ -100,94 +80,8 @@ inline void kernel_influence_scalar(f32& inf_x, f32& inf_y, f32& inf_z, f32 x, f
     inf_z += vz;
 }
 
-// void Solver::compute_lhs() {
-//     SimpleTimer timer("LHS");
-//     Mesh& m = mesh;
-//     const u32 v_ns = m.ns + 1;
-
-//     for (u32 i = 0; i < m.nc - 1; i++) {
-//         for (u32 j = 0; j < m.ns; j++) {
-//             const u32 ia = i * m.ns + j;
-//             const u32 v0 = i * v_ns + j;
-//             const u32 v1 = v0 + 1;
-//             const u32 v3 = (i + 1) * v_ns + j;
-//             const u32 v2 = v3 + 1;
-//             // in reality only load v1 & v2 and reuse data from previous v1 & v2 to be new v0 & v3 respectively
-//             // 12 regs (6 loads + 6 reuse) -> these will get spilled once we get in the influence function
-//             f32 v0x = m.v.x[v0];
-//             f32 v0y = m.v.y[v0];
-//             f32 v0z = m.v.z[v0];
-//             f32 v1x = m.v.x[v1];
-//             f32 v1y = m.v.y[v1];
-//             f32 v1z = m.v.z[v1];
-//             f32 v2x = m.v.x[v2];
-//             f32 v2y = m.v.y[v2];
-//             f32 v2z = m.v.z[v2];
-//             f32 v3x = m.v.x[v3];
-//             f32 v3y = m.v.y[v3];
-//             f32 v3z = m.v.z[v3];
-//             for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2++) {
-//                 // loads (3 regs)
-//                 const f32 colloc_x = m.colloc.x[ia2];
-//                 const f32 colloc_y = m.colloc.y[ia2];
-//                 const f32 colloc_z = m.colloc.z[ia2];
-
-//                 // 3 regs to store induced velocity 
-//                 Vec3<f32> inf;
-//                 influence(inf, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
-//                 influence(inf, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
-//                 influence(inf, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
-//                 influence(inf, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
-
-//                 // storing in col major order
-//                 lhs[ia * m.nb_panels_wing() + ia2] = inf.x * m.normal.x[ia2] + inf.y * m.normal.y[ia2] + inf.z * m.normal.z[ia2];
-//             }
-//         }
-//     }
-
-//     for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
-//         for (u32 j = 0; j < m.ns; j++) {
-//             const u32 ia = (m.nc - 1) * m.ns + j;
-//             const u32 v0 = i * v_ns + j;
-//             const u32 v1 = v0 + 1;
-//             const u32 v3 = (i + 1) * v_ns + j;
-//             const u32 v2 = v3 + 1;
-//             // in reality only load v1 & v2 and reuse data from previous v1 & v2 to be new v0 & v3 respectively
-//             // 12 regs (6 loads + 6 reuse) -> these will get spilled once we get in the influence function
-//             f32 v0x = m.v.x[v0];
-//             f32 v0y = m.v.y[v0];
-//             f32 v0z = m.v.z[v0];
-//             f32 v1x = m.v.x[v1];
-//             f32 v1y = m.v.y[v1];
-//             f32 v1z = m.v.z[v1];
-//             f32 v2x = m.v.x[v2];
-//             f32 v2y = m.v.y[v2];
-//             f32 v2z = m.v.z[v2];
-//             f32 v3x = m.v.x[v3];
-//             f32 v3y = m.v.y[v3];
-//             f32 v3z = m.v.z[v3];
-//             for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2++) {
-//                 // loads (3 regs)
-//                 const f32 colloc_x = m.colloc.x[ia2];
-//                 const f32 colloc_y = m.colloc.y[ia2];
-//                 const f32 colloc_z = m.colloc.z[ia2];
-
-//                 // 3 regs to store induced velocity 
-//                 Vec3<32> inf;
-//                 influence(inf, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
-//                 influence(inf, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
-//                 influence(inf, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
-//                 influence(inf, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
-
-//                 // storing in col major order
-//                 lhs[ia * m.nb_panels_wing() + ia2] += inf.x * m.normal.x[ia2] + inf.y * m.normal.y[ia2] + inf.z * m.normal.z[ia2];
-//             }
-//         }
-//     }
-// }
-
 template<bool Overwrite>
-inline void macro_kernel_remainder_scalar(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 lidx) {
+inline void macro_kernel_remainder_scalar(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx) {
     // quick return 
     const u32 remainder =  m.nb_panels_wing() % 8;
     if (remainder == 0) return;
@@ -317,7 +211,7 @@ inline void kernel_influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, _
 }
 
 template<bool Overwrite>
-inline void macro_kernel_avx2(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 lidx, f32 sigma_p4) {
+inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx, f32 sigma_p4) {
     const u32 v0 = lidx + lidx / m.ns;
     const u32 v1 = v0 + 1;
     const u32 v3 = v0 + m.ns+1;
@@ -369,7 +263,7 @@ inline void macro_kernel_avx2(Mesh& m, tiny::vector<f32, 64>& lhs, u32 ia, u32 l
     }
 }
 
-void Solver::compute_lhs() {
+void BackendAVX2::compute_lhs() {
     SimpleTimer timer("LHS");
     Mesh& m = mesh;
     const f32 sigma_p4 = pow<4>(data.sigma_vatistas); // Vatistas coeffcient (^2n with n=2)
@@ -396,7 +290,7 @@ void Solver::compute_lhs() {
     }
 }
 
-void Solver::compute_rhs() {
+void BackendAVX2::compute_rhs() {
     SimpleTimer timer("RHS");
     Data& d = data;
     Mesh& m = mesh;
@@ -405,7 +299,7 @@ void Solver::compute_rhs() {
     }
 }
 
-// void Solver::solve() {
+// void BackendAVX2::solve() {
 //     SimpleTimer timer("Solve");
 //     const MKL_INT n = static_cast<MKL_INT>(mesh.nb_panels_wing());
 
@@ -426,7 +320,7 @@ void Solver::compute_rhs() {
 //     std::copy(rhs.begin(), rhs.end(), data.gamma.begin());
 // }
 
-void Solver::solve() {
+void BackendAVX2::solve() {
     SimpleTimer timer("Solve");
     const u32 n = mesh.nb_panels_wing();
     Eigen::Map<Eigen::Matrix<f32, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> A(lhs.data(), n, n);
@@ -437,7 +331,12 @@ void Solver::solve() {
     x = lu.solve(b);
 }
 
-void Solver::compute_forces() {
+// void BackendAVX2::solve() {
+//     SimpleTimer timer("Solve");
+//     solve(lhs, rhs, x, mesh.nb_panels_wing());
+// }
+
+void BackendAVX2::compute_forces() {
     Mesh& m = mesh;
     SimpleTimer timer("Compute forces");
     for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
