@@ -41,15 +41,16 @@ using namespace vlm;
     } while (0)
 
 void printCudaInfo() {
-    // print out stats about the GPU in the machine.  Useful if
-    // students want to know what GPU they are running on.
-
     int deviceCount = 0;
     cudaError_t err = cudaGetDeviceCount(&deviceCount);
 
     std::printf("----- CUDA Device information -----\n");
     std::printf("Found %d device(s)\n", deviceCount);
-
+    // Get CUDA Runtime version
+    int cudaRuntimeVersion = 0;
+    cudaRuntimeGetVersion(&cudaRuntimeVersion);
+    std::printf("CUDA Runtime: %d.%d\n", cudaRuntimeVersion / 1000, (cudaRuntimeVersion % 100) / 10);
+    
     for (int i=0; i<deviceCount; i++) {
         cudaDeviceProp deviceProps;
         cudaGetDeviceProperties(&deviceProps, i);
