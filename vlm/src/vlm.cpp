@@ -1,6 +1,7 @@
 #include "vlm.hpp"
 // #include "vlm_solver.hpp"
 #include "vlm_backend.hpp"
+#include "tinycpuid.hpp"
 
 #ifdef VLM_AVX2
 #include "vlm_backend_avx2.hpp"
@@ -26,9 +27,11 @@ void VLM::init() {
 // Backend factory
 std::unique_ptr<Backend> create_backend(const std::string& backend_name, Mesh& mesh, Data& data) {
     std::unique_ptr<Backend> backend;
+    tiny::CPUID cpuid;
+    cpuid.print_info();
 
     #ifdef VLM_AVX2
-    if (backend_name == "avx2") {
+    if (backend_name == "avx2" && cpuid.has("AVX2")) {
         backend = std::make_unique<BackendAVX2>(mesh, data);
         return backend;
     }
@@ -62,6 +65,7 @@ void VLM::solve(tiny::Config& cfg) {
         std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha, data.cl, data.cd, data.cm_x, data.cm_y, data.cm_z);
     }
 
-    std::cout << "Done ..." << std::endl;
-    std::cin.get();
+    // Pause for memory reading
+    // std::cout << "Done ..." << std::endl;
+    // std::cin.get();
 }
