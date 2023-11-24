@@ -27,18 +27,14 @@ end
 
 add_includedirs("headeronly", {public = true}) -- must be set before options
 
-option("avx2")
+option("build-avx2")
     set_default(true)
     set_showmenu(true)
-    add_defines("VLM_AVX2")
-    -- add_deps("backend-avx2")
 option_end()
 
-option("cuda")
+option("build-cuda")
     set_default(false)
     set_showmenu(true)
-    add_defines("VLM_CUDA")
-    -- add_deps("backend-cuda")
 option_end()
 
 includes("**/xmake.lua")
