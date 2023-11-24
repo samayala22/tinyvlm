@@ -2,21 +2,17 @@ add_requires("openmp")
 
 target("libvlm")
     set_kind("static")
-    -- add_options("avx2", "cuda")
+    set_options("avx2", "cuda")
 
-    -- there has to be a better way to do this
-    -- if get_config("avx2") == "y" then
-    --     add_deps("backend-avx2")
-    -- end
+    if get_config("build-avx2") == true then
+        add_defines("VLM_AVX2")
+        add_deps("backend-avx2")
+    end
 
-    -- if get_config("cuda") == "y" then
-    --     add_deps("backend-cuda")
-    -- end
-
-    add_defines("VLM_AVX2")
-    add_deps("backend-avx2")
-    add_defines("VLM_CUDA")
-    add_deps("backend-cuda")
+    if get_config("build-cuda") == true then
+        add_defines("VLM_CUDA")
+        add_deps("backend-cuda")
+    end
 
     add_packages("openmp")
     add_files("src/*.cpp")
