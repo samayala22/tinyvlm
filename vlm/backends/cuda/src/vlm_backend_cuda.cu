@@ -6,6 +6,7 @@
 #include <cusolverDn.h>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
+#include <cstdio>
 
 using namespace vlm;
 
@@ -38,6 +39,28 @@ using namespace vlm;
             exit(EXIT_FAILURE); \
         } \
     } while (0)
+
+void printCudaInfo() {
+    // print out stats about the GPU in the machine.  Useful if
+    // students want to know what GPU they are running on.
+
+    int deviceCount = 0;
+    cudaError_t err = cudaGetDeviceCount(&deviceCount);
+
+    std::printf("----- CUDA Device information -----\n");
+    std::printf("Found %d device(s)\n", deviceCount);
+
+    for (int i=0; i<deviceCount; i++) {
+        cudaDeviceProp deviceProps;
+        cudaGetDeviceProperties(&deviceProps, i);
+        std::printf("Device %d: %s\n", i, deviceProps.name);
+        std::printf("   SMs:        %d\n", deviceProps.multiProcessorCount);
+        std::printf("   Global mem: %.0f MB\n",
+               static_cast<float>(deviceProps.totalGlobalMem) / (1024 * 1024));
+        std::printf("   CUDA Cap:   %d.%d\n", deviceProps.major, deviceProps.minor);
+    }
+    std::printf("-----------------------------------\n");
+}
 
 // Singleton class to manage CUDA context (handle)
 class CtxManager {
@@ -80,6 +103,7 @@ private:
 };
 
 BackendCUDA::BackendCUDA(Mesh& mesh, Data& data) : default_backend(mesh, data), Backend(mesh, data) {
+    printCudaInfo();
     auto& ctx = CtxManager::getInstance();
     ctx.create();
 
