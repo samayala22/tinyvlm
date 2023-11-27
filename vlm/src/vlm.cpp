@@ -46,7 +46,8 @@ std::unique_ptr<Backend> create_backend(const std::string& backend_name, Mesh& m
 }
 
 void VLM::solve(tiny::Config& cfg) {
-    std::string backend_name = "cuda";
+    std::string backend_name = cfg().section("solver").get<std::string>("backend", "avx2");
+
     auto backend = create_backend(backend_name, mesh, data);
 
     std::vector<f32> alphas = cfg().section("solver").get_vector<f32>("alphas", {0.0f});
