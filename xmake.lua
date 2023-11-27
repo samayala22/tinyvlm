@@ -37,4 +37,11 @@ option("build-cuda")
     set_showmenu(true)
 option_end()
 
-includes("**/xmake.lua")
+-- includes("**/xmake.lua")
+if has_config("build-cuda") then
+    includes("vlm/backends/cuda/xmake.lua")
+end
+if has_config("build-avx2") then
+    includes("vlm/backends/avx2/xmake.lua")
+end
+includes("vlm/xmake.lua")
