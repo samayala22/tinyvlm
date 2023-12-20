@@ -25,6 +25,7 @@ void VLM::init() {
 }
 
 // Backend factory
+// Note: should refactor this to separate CPU and GPU backends
 std::unique_ptr<Backend> create_backend(const std::string& backend_name, Mesh& mesh, Data& data) {
     std::unique_ptr<Backend> backend;
     tiny::CPUID cpuid;
