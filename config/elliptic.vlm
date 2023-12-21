@@ -4,6 +4,7 @@ alphas = [5]
 s_ref = 3.92699 # half wing area
 c_ref = 0.85
 sigma_vatistas = 0.0
+backend = "avx2"
 
 <mesh>
 wake_included = false
