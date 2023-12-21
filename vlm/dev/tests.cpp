@@ -111,9 +111,12 @@ bool elliptic_coeffs() {
 
     vlm::VLM vlm(cfg);
 
+    // std::vector<int> alphas = {
+    //     2, 4, 6, 8, 10, 12, 14, 16
+    // }; // degrees
     std::vector<int> alphas = {
-        5, 10
-    }; // degrees
+        5
+    };
     const float a = 1.0f; // wing chord root
     const float b = 5.0f; // half wing span
 
@@ -126,13 +129,22 @@ bool elliptic_coeffs() {
         solver.run(alpha);
         std::printf("Analytical cl: %f\n", analytical_cl(alpha, a, b));
         std::printf("Analytical cd: %f\n", analytical_cd(analytical_cl(alpha, a, b), a, b));
+
+        int begin = (vlm.mesh.nc - 1) * vlm.mesh.ns;
+        int end = vlm.mesh.nc * vlm.mesh.ns;
+        std::ofstream file(std::format("gamma_{}.txt", alpha));
+        // loop over last row of panels
+        for (int i = begin; i < end; i++) {
+            file << vlm.mesh.colloc.y[i] << " " << vlm.data.gamma[i] << "\n";
+        }
+        file.close();
     };
     return 0;
 }
 
 int main(int argc, char **argv) {
     try {
-        std::printf(">>> Elliptic convergence | %d", elliptic_convergence());
+        //std::printf(">>> Elliptic convergence | %d", elliptic_convergence());
         std::printf(">>> Elliptic coefficients | %d", elliptic_coeffs());
     } catch (std::exception& e) {
         std::cout << e.what() << std::endl;

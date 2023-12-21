@@ -7,7 +7,6 @@
 #include <string>
 #include <cmath>
 
-#include "tinyvector.hpp"
 #include "tinyconfig.hpp"
 
 namespace vlm {
@@ -41,9 +40,9 @@ inline T pow(T x) {
 // Structure of arrays struct to store 3D data (coordinates or vectors)
 template<typename T>
 struct SoA_3D_t {
-    tiny::vector<T, 64> x = {};
-    tiny::vector<T, 64> y = {};
-    tiny::vector<T, 64> z = {};
+    std::vector<T> x = {};
+    std::vector<T> y = {};
+    std::vector<T> z = {};
     u32 size = 0;
     
     void resize(u32 size_) {
