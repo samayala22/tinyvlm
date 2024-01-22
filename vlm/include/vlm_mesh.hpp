@@ -53,10 +53,6 @@ struct Mesh {
     f32 chord_length(const u32 j) const;
     f32 chord_mean(const u32 j, const u32 n) const;
 
-    f32 chord_root() const;
-    f32 chord_tip() const;
-    f32 chord_avg() const;
-
     // i panel vertices coordinates
     Eigen::Vector3f get_v0(u32 i) const; // upper left
     Eigen::Vector3f get_v1(u32 i) const; // upper right

@@ -70,9 +70,9 @@ void VLM::solve(tiny::Config& cfg) {
         std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha, data.cl, data.cd, data.cm.x(), data.cm.y(), data.cm.z());
     }
 
-    std::cout << mesh.chord_mean(0, mesh.ns+1) << std::endl;
-    std::cout << mesh.panels_area_xy(0,0, mesh.nc, mesh.ns) << std::endl;
-    std::cout << mesh.panels_area(0,0, mesh.nc, mesh.ns) << std::endl;
+    // std::cout << mesh.chord_mean(0, mesh.ns+1) << std::endl;
+    // std::cout << mesh.panels_area_xy(0,0, mesh.nc, mesh.ns) << std::endl;
+    // std::cout << mesh.panels_area(0,0, mesh.nc, mesh.ns) << std::endl;
 
     // Pause for memory reading
     // std::cout << "Done ..." << std::endl;

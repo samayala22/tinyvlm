@@ -1,9 +1,11 @@
 #include "vlm_mesh.hpp"
 #include "Eigen/src/Core/Matrix.h"
+#include "vlm_types.hpp"
 
 #include <Eigen/Dense>
 #include <cassert>
 #include <iostream>
+#include <limits>
 
 using namespace vlm;
 using namespace Eigen;
@@ -25,23 +27,6 @@ u32 Mesh::nb_panels_wing() const { return nc * ns; };
 u32 Mesh::nb_panels_total() const { return (nc+nw) * ns; };
 u32 Mesh::nb_vertices_wing() const { return (nc + 1) * (ns + 1); };
 u32 Mesh::nb_vertices_total() const { return (nc + nw + 1) * (ns + 1); };
-
-// TODO: These 3 routines need to be replaced ASAP by a proper MAC integration
-f32 Mesh::chord_root() const {
-    const u32 first = 0;
-    const u32 last = (ns+1) * nc;
-    return std::sqrt(pow<2>(v.x[first] - v.x[last]) + pow<2>(v.y[first] - v.y[last]) + pow<2>(v.z[first] - v.z[last]));
-}
-
-f32 Mesh::chord_tip() const {
-    u32 first = ns;
-    u32 last = (nc + 1) * (ns + 1) - 1;
-    return std::sqrt(pow<2>(v.x[first] - v.x[last]) + pow<2>(v.y[first] - v.y[last]) + pow<2>(v.z[first] - v.z[last]));
-}
-
-f32 Mesh::chord_avg() const {
-    return 0.5f * (chord_root() + chord_tip());
-}
 
 /// @brief Computes the mean chord of a set of panels
 /// @details
@@ -162,9 +147,10 @@ Eigen::Vector3f Mesh::get_v3(u32 i) const {
 }
 
 void Mesh::update_wake(const Eigen::Vector3f& u_inf) {
-    const f32 off_x = u_inf.x() * 100.0f * chord_root();
-    const f32 off_y = u_inf.y() * 100.0f * chord_root();
-    const f32 off_z = u_inf.z() * 100.0f * chord_root();
+    const f32 chord_root = chord_length(0); 
+    const f32 off_x = u_inf.x() * 100.0f * chord_root;
+    const f32 off_y = u_inf.y() * 100.0f * chord_root;
+    const f32 off_z = u_inf.z() * 100.0f * chord_root;
 
     const u32 v_ns = ns + 1;
     const u32 begin_trailing_edge = nb_vertices_wing()-v_ns;
@@ -234,11 +220,11 @@ void Mesh::compute_metrics_i(u32 i ) {
     normal.y[i] = normal_vec.y();
     normal.z[i] = normal_vec.z();
 
-    // 3 vectors f (P0P2), b (P0P3), e (P0P1) to compute the area:
+    // 3 vectors f (P0P3), b (P0P2), e (P0P1) to compute the area:
     // area = 0.5 * (||f x b|| + ||b x e||)
     // this formula might also work: area = || 0.5 * ( f x b + b x e ) ||
-    const Vector3f vec_f = v2 - v0;
-    const Vector3f vec_b = v3 - v0;
+    const Vector3f vec_f = v3 - v0;
+    const Vector3f vec_b = v2 - v0;
     const Vector3f vec_e = v1 - v0;
 
     area[i] = 0.5f * (vec_f.cross(vec_b).norm() + vec_b.cross(vec_e).norm());
@@ -305,10 +291,12 @@ void read_plot3d_structured(std::ifstream& f, Mesh& m) {
         }
     }
 
+    // TODO: this validation is not robust enough when eventually we will be using multiple bodies
     // Validation
-    if (m.v.x[0] != 0.0 || m.v.y[0] != 0.0) {
-        throw std::runtime_error("First vertex of plot3d mesh must be at origin");
-    }
+    // const f32 eps = std::numeric_limits<f32>::epsilon();
+    // if (std::abs(m.v.x[0]) != eps || std::abs(m.v.y[0]) != eps) {
+    //     throw std::runtime_error("First vertex of plot3d mesh must be at origin");
+    // }
     f32 first_y = m.v.y[0];
     for (u32 i = 1; i < ni; i++) {
         if (m.v.y[i * nj] != first_y) {
