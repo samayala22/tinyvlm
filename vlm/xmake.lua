@@ -1,4 +1,4 @@
-add_requires("openmp")
+add_requires("openmp", "eigen")
 
 target("libvlm")
     set_kind("static")
@@ -10,7 +10,7 @@ target("libvlm")
         end
     end
     
-    add_packages("openmp")
+    add_packages("openmp", "eigen", {public = true})
     add_files("src/*.cpp")
     add_includedirs("include", {public = true})
     
@@ -18,14 +18,14 @@ target("vlm")
     set_kind("binary")
     set_default(true)
     add_rpathdirs("$ORIGIN") -- tbb dll must be in same dir as exe
-    add_packages("openmp") -- need to add this or doesnt compile
     add_deps("libvlm") -- core library
-    set_runargs({"-i"}, {"../../../../config/elliptic.vlm"}, {"-m"}, {"../../../../mesh/elliptic_90x90.x"}, {"-o"}, {"../../../../results/elliptic.vtu"})
+    set_runargs({"-i"}, {"../../../../config/elliptic.vlm"}, {"-m"}, {"../../../../mesh/elliptic_64x64.x"}, {"-o"}, {"../../../../results/elliptic.vtu"})
     add_files("dev/main.cpp")
+
+-- xmake run vlm -i ../../../../config/swept.vlm -m ../../../../mesh/rectangular_4x4.x -o ../../../../results/rec.vtu
 
 target("vlm-tests")
     set_kind("binary")
     set_default(false)
-    add_packages("openmp")
     add_deps("libvlm")
     add_files("dev/tests.cpp")

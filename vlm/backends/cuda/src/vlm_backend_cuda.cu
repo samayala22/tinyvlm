@@ -182,7 +182,9 @@ int CUDA_LU_solver(cusolverDnHandle_t handle, float *d_A,
     return 0;
 }
 
-void BackendCUDA::solve() {
+void BackendCUDA::lu_factor() {};
+
+void BackendCUDA::lu_solve() {
     SimpleTimer timer("Solve");
     //default_backend.solve();
     auto& ctx = CtxManager::getInstance();
@@ -199,8 +201,8 @@ void BackendCUDA::solve() {
     CHECK_CUDA(cudaMemcpy(data.gamma.data(), d_rhs, N * sizeof(float), cudaMemcpyDeviceToHost));
 }
 
-void BackendCUDA::compute_forces() {
-    default_backend.compute_forces();
+void BackendCUDA::compute_coefficients() {
+    default_backend.compute_coefficients();
 }
 
 void BackendCUDA::compute_delta_gamma() {

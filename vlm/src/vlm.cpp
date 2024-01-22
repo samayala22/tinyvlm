@@ -21,6 +21,8 @@ VLM::VLM(tiny::Config& cfg) : mesh(cfg), data(cfg) {};
 void VLM::init() {
     mesh.compute_connectivity();
     mesh.compute_metrics_wing();
+    if (data.c_ref == 0.0f) data.c_ref = mesh.chord_mean(0, mesh.ns+1);
+    if (data.s_ref == 0.0f) data.s_ref = mesh.panels_area_xy(0,0, mesh.nc, mesh.ns);
     data.alloc(mesh.nc*mesh.ns);
 }
 
@@ -61,11 +63,16 @@ void VLM::solve(tiny::Config& cfg) {
         mesh.correction_high_aoa(alpha_rad); // must be after update_wake
         backend->compute_lhs();
         backend->compute_rhs();
-        backend->solve();
+        backend->lu_factor();
+        backend->lu_solve();
         backend->compute_delta_gamma();
-        backend->compute_forces();
-        std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha, data.cl, data.cd, data.cm_x, data.cm_y, data.cm_z);
+        backend->compute_coefficients();
+        std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha, data.cl, data.cd, data.cm.x(), data.cm.y(), data.cm.z());
     }
+
+    std::cout << mesh.chord_mean(0, mesh.ns+1) << std::endl;
+    std::cout << mesh.panels_area_xy(0,0, mesh.nc, mesh.ns) << std::endl;
+    std::cout << mesh.panels_area(0,0, mesh.nc, mesh.ns) << std::endl;
 
     // Pause for memory reading
     // std::cout << "Done ..." << std::endl;

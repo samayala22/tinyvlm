@@ -21,8 +21,10 @@ class BackendCUDA : public Backend {
         void reset() override;
         void compute_lhs() override;
         void compute_rhs() override;
-        void solve() override;
-        void compute_forces() override;
+        void rebuild_rhs(const std::vector<f32>& section_alphas) override; 
+        void lu_factor() override;
+        void lu_solve() override;
+        void compute_coefficients() override;
         void compute_delta_gamma() override;
 };
 

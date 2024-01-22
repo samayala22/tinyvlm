@@ -1,6 +1,7 @@
 #include "vlm_backend_avx2.hpp"
 
 #include "simpletimer.hpp"
+#include "vlm_types.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -11,11 +12,17 @@
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/parallel_for.h>
 
-//#include "mkl.h"
-#include <Eigen/IterativeLinearSolvers>
+// #include "mkl.h"
+
 #include <Eigen/Dense>
 
 using namespace vlm;
+
+struct BackendAVX2::linear_solver_t {
+    Eigen::PartialPivLU<Eigen::Ref<Eigen::MatrixXf>> lu;
+    linear_solver_t(Eigen::Map<Eigen::MatrixXf>& A) : lu(A) {};
+    ~linear_solver_t() = default;
+};
 
 BackendAVX2::BackendAVX2(Mesh& mesh, Data& data) : Backend(mesh, data) {
     //tbb::global_control global_limit(oneapi::tbb::global_control::max_allowed_parallelism, 1);
@@ -295,11 +302,15 @@ void BackendAVX2::compute_rhs() {
     Data& d = data;
     Mesh& m = mesh;
     for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
-        rhs[i] = - (d.u_inf.x * m.normal.x[i] + d.u_inf.y * m.normal.y[i] + d.u_inf.z * m.normal.z[i]);
+        rhs[i] = - (d.u_inf.x() * m.normal.x[i] + d.u_inf.y() * m.normal.y[i] + d.u_inf.z() * m.normal.z[i]);
     }
 }
 
-// void BackendAVX2::solve() {
+void BackendAVX2::rebuild_rhs(const std::vector<f32>& section_alphas) {
+
+}
+
+// void BackendAVX2::lu_solve() {
 //     SimpleTimer timer("Solve");
 //     const MKL_INT n = static_cast<MKL_INT>(mesh.nb_panels_wing());
 
@@ -320,51 +331,52 @@ void BackendAVX2::compute_rhs() {
 //     std::copy(rhs.begin(), rhs.end(), data.gamma.begin());
 // }
 
-void BackendAVX2::solve() {
+void BackendAVX2::lu_factor() {
+    SimpleTimer timer("Factor");
+    const u32 n = mesh.nb_panels_wing();
+    Eigen::Map<Eigen::MatrixXf> A(lhs.data(), n, n);
+    solver = std::make_unique<linear_solver_t>(A);
+}
+
+void BackendAVX2::lu_solve() {
     SimpleTimer timer("Solve");
     const u32 n = mesh.nb_panels_wing();
-    Eigen::Map<Eigen::Matrix<f32, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> A(lhs.data(), n, n);
     Eigen::Map<Eigen::VectorXf> x(data.gamma.data(), n);
     Eigen::Map<Eigen::VectorXf> b(rhs.data(), n);
     
-    Eigen::PartialPivLU<Eigen::MatrixXf> lu(A);
-    x = lu.solve(b);
+    x = solver->lu.solve(b);
 }
 
-// void BackendAVX2::solve() {
-//     SimpleTimer timer("Solve");
-//     solve(lhs, rhs, x, mesh.nb_panels_wing());
-// }
+/// @brief Compute some helping variables for the cm computation
+/// @param m Mesh object
+/// @param d Data object
+/// @param dl Leading edge vector pointing outward from wing root
+/// @param dst_to_ref Distance from the center of leading edge to the reference point
+/// @param i Panel index
+inline void compute_panel_vectors(const Mesh& m, const Data& d, Eigen::Vector3f& dl, Eigen::Vector3f& dst_to_ref, u32 i) {
+    Eigen::Vector3f v0 = m.get_v0(i);
+    Eigen::Vector3f v1 = m.get_v1(i);
+    // Leading edge vector pointing outward from wing root
+    dl = v1 - v0;
+    // Distance from the center of leading edge to the reference point
+    dst_to_ref = d.ref_pt - 0.5f * (v0 + v1);
+}
 
-void BackendAVX2::compute_forces() {
+inline Eigen::Vector3f compute_panel_forces(const Mesh& m, const Data& d, const Eigen::Vector3f& dl, u32 i) {
+    // force = U_inf x (panel_dl * rho * delta_gamma)
+    return d.u_inf.cross(dl) * d.rho * d.delta_gamma[i];
+}
+
+void BackendAVX2::compute_coefficients() {
     Mesh& m = mesh;
-    SimpleTimer timer("Compute forces");
-    for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
-        // force = U_inf x (panel_dy * rho * delta_gamma)
-        // crossproduct:
-        // (v0y*v1z - v0z*v1y);
-        // (v0z*v1x - v0x*v1z);
-        // (v0x*v1y - v0y*v1x);
-        Vec3<f32> v0 = mesh.get_v0(i);
-        Vec3<f32> v1 = mesh.get_v1(i);
-        const f32 dl_x = (v1.x - v0.x) * data.rho * data.delta_gamma[i];
-        const f32 dl_y = (v1.y - v0.y) * data.rho * data.delta_gamma[i];
-        const f32 dl_z = (v1.z - v0.z) * data.rho * data.delta_gamma[i];
-        // distance to reference calculated from the panel's force acting point (note: maybe precompute this?)
-        const f32 dst_to_ref_x = data.ref_pt.x - 0.5f * (v0.x + v1.x);
-        const f32 dst_to_ref_y = data.ref_pt.y - 0.5f * (v0.y + v1.y);
-        const f32 dst_to_ref_z = data.ref_pt.z - 0.5f * (v0.z + v1.z);
+    SimpleTimer timer("Compute coefficients");
 
-        const f32 force_x = data.u_inf.y * dl_z - data.u_inf.z * dl_y;
-        const f32 force_y = data.u_inf.z * dl_x - data.u_inf.x * dl_z;
-        const f32 force_z = data.u_inf.x * dl_y - data.u_inf.y * dl_x;
-        
-        // cl += force . lift_axis
-        data.cl += force_x * data.lift_axis.x + force_y * data.lift_axis.y + force_z * data.lift_axis.z;
-        // cm += force x distance_to_ref
-        data.cm_x += force_y * dst_to_ref_z - force_z * dst_to_ref_y;
-        data.cm_y += force_z * dst_to_ref_x - force_x * dst_to_ref_z;
-        data.cm_z += force_x * dst_to_ref_y - force_y * dst_to_ref_x;
+    for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
+        Eigen::Vector3f dl, dst_to_ref;
+        compute_panel_vectors(m, data, dl, dst_to_ref, i);
+        Eigen::Vector3f force = compute_panel_forces(m, data, dl, i);
+        data.cl += force.dot(data.lift_axis);
+        data.cm += force.cross(dst_to_ref);
     }
 
     // Drag coefficent computed using Trefftz plane
@@ -372,40 +384,32 @@ void BackendAVX2::compute_forces() {
         const f32 colloc_x = mesh.colloc.x[ia];
         const f32 colloc_y = mesh.colloc.y[ia];
         const f32 colloc_z = mesh.colloc.z[ia];
-        Vec3<f32> inf;
+        Eigen::Vector3f inf = Eigen::Vector3f::Zero();
         for (u32 ia2 = mesh.nb_panels_wing(); ia2 < mesh.nb_panels_total(); ia2++) {
-            f32 inf2_x = 0.0f;
-            f32 inf2_y = 0.0f;
-            f32 inf2_z = 0.0f;
-            Vec3<f32> v0 = mesh.get_v0(ia2);
-            Vec3<f32> v1 = mesh.get_v1(ia2);
-            Vec3<f32> v2 = mesh.get_v2(ia2);
-            Vec3<f32> v3 = mesh.get_v3(ia2);
+            Eigen::Vector3f inf2 = Eigen::Vector3f::Zero();
+            Eigen::Vector3f v0 = mesh.get_v0(ia2);
+            Eigen::Vector3f v1 = mesh.get_v1(ia2);
+            Eigen::Vector3f v2 = mesh.get_v2(ia2);
+            Eigen::Vector3f v3 = mesh.get_v3(ia2);
             // Influence from the streamwise vortex lines
-            kernel_influence_scalar(inf2_x, inf2_y, inf2_z, colloc_x, colloc_y, colloc_z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-            kernel_influence_scalar(inf2_x, inf2_y, inf2_z, colloc_x, colloc_y, colloc_z, v3.x, v3.y, v3.z, v0.x, v0.y, v0.z);
+            kernel_influence_scalar(inf2.x(), inf2.y(), inf2.z(), colloc_x, colloc_y, colloc_z, v1.x(), v1.y(), v1.z(), v2.x(), v2.y(), v2.z());
+            kernel_influence_scalar(inf2.x(), inf2.y(), inf2.z(), colloc_x, colloc_y, colloc_z, v3.x(), v3.y(), v3.z(), v0.x(), v0.y(), v0.z());
             f32 gamma_w = data.gamma[(m.nc-1)*m.ns + ia2 % m.ns];
             // This is the induced velocity calculated with the vortex (gamma) calculated earlier (according to kutta condition)
-            inf.x += gamma_w * inf2_x;
-            inf.y += gamma_w * inf2_y;
-            inf.z += gamma_w * inf2_z;
+            inf += gamma_w * inf2;
         }
-        const f32 w_ind = inf.x * m.normal.x[ia] + inf.y * m.normal.y[ia] + inf.z * m.normal.z[ia];
+        const Eigen::Vector3f normal{m.normal.x[ia], m.normal.y[ia], m.normal.z[ia]};
+        const f32 w_ind = inf.dot(normal);
         const u32 col = ia % m.ns;
-        Vec3<f32> v0 = mesh.get_v0(ia);
-        Vec3<f32> v1 = mesh.get_v1(ia);
-        const f32 dl = std::sqrt(pow<2>(v1.x - v0.x) + pow<2>(v1.y - v0.y) + pow<2>(v1.z - v0.z));
-        
+        Eigen::Vector3f v0 = mesh.get_v0(ia);
+        Eigen::Vector3f v1 = mesh.get_v1(ia);
+        const f32 dl = (v1 - v0).norm();
         data.cd -= 0.5f * data.rho * data.gamma[(m.nc-1)*m.ns + col] * w_ind * dl;
     }
 
-    // |U_ref|^2 = 1 
-    const f32 u_ref_mag_p2 = pow<2>(data.u_inf.x) + pow<2>(data.u_inf.y) + pow<2>(data.u_inf.z);
-    const f32 common = 0.5f * data.rho * u_ref_mag_p2 * data.s_ref;
+    const f32 common = 0.5f * data.rho * data.u_inf.squaredNorm() * data.s_ref;
     data.cl /= common;
-    data.cm_x /= common * data.c_ref;
-    data.cm_y /= common * data.c_ref;
-    data.cm_z /= common * data.c_ref;
+    data.cm /= common * data.c_ref;
     data.cd /= common;
 
     // Cd = Cl^2 / (pi * AR * e) with AR = b^2 / S_ref
