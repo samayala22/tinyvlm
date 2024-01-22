@@ -1,3 +1,7 @@
+# Elliptic wing
+# Chord root = 1
+# Half wing span = 5
+
 <solver>
 ref_point = [0.25, 0.0, 0.0]
 alphas = [5]

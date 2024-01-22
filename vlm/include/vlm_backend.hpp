@@ -14,8 +14,10 @@ class Backend {
         virtual void reset() = 0;
         virtual void compute_lhs() = 0;
         virtual void compute_rhs() = 0;
-        virtual void solve() = 0;
-        virtual void compute_forces() = 0;
+        virtual void rebuild_rhs(const std::vector<f32>& section_alphas) = 0; 
+        virtual void lu_factor() = 0;
+        virtual void lu_solve() = 0;
+        virtual void compute_coefficients() = 0;
         virtual void compute_delta_gamma() = 0;
         virtual ~Backend() = default;
 };
