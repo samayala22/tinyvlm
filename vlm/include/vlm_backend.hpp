@@ -18,6 +18,9 @@ class Backend {
         virtual void lu_factor() = 0;
         virtual void lu_solve() = 0;
         virtual void compute_coefficients() = 0;
+        virtual f32 compute_coefficient_cl(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) = 0;
+        virtual Eigen::Vector3f compute_coefficient_cm(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area, const f32 chord) = 0;
+        virtual f32 compute_coefficient_cd(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) = 0;
         virtual void compute_delta_gamma() = 0;
         virtual ~Backend() = default;
 };

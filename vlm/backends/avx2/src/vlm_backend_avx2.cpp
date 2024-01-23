@@ -37,6 +37,7 @@ void BackendAVX2::reset() {
 }
 
 void BackendAVX2::compute_delta_gamma() {
+    // Copy the values for the leading edge panels
     for (u32 j = 0; j < mesh.ns; j++) {
         data.delta_gamma[j] = data.gamma[j];
     }
@@ -365,6 +366,84 @@ inline void compute_panel_vectors(const Mesh& m, const Data& d, Eigen::Vector3f&
 inline Eigen::Vector3f compute_panel_forces(const Mesh& m, const Data& d, const Eigen::Vector3f& dl, u32 i) {
     // force = U_inf x (panel_dl * rho * delta_gamma)
     return d.u_inf.cross(dl) * d.rho * d.delta_gamma[i];
+}
+
+f32 BackendAVX2::compute_coefficient_cl(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) {
+    f32 cl = 0.0f;
+    for (u32 u = 0; u < mesh.nc; u++) {
+        for (u32 v = j; v < j + n; v++) {
+            const u32 li = u * mesh.ns + v; // linear index
+            const Eigen::Vector3f v0 = mesh.get_v0(li);
+            const Eigen::Vector3f v1 = mesh.get_v1(li);
+            // Leading edge vector pointing outward from wing root
+            const Eigen::Vector3f dl = v1 - v0;
+            // Distance from the center of leading edge to the reference point
+            const Eigen::Vector3f force = data.u_inf.cross(dl) * data.rho * data.delta_gamma[li];
+            cl += force.dot(data.lift_axis);
+        }
+    }
+    cl /= 0.5f * data.rho * data.u_inf.squaredNorm() * area;
+
+    return cl;
+}
+
+Eigen::Vector3f BackendAVX2::compute_coefficient_cm(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area, const f32 chord) {
+    Eigen::Vector3f cm = Eigen::Vector3f::Zero();
+    for (u32 u = 0; u < mesh.nc; u++) {
+        for (u32 v = j; v < j + n; v++) {
+            const u32 li = u * mesh.ns + v; // linear index
+            const Eigen::Vector3f v0 = mesh.get_v0(li);
+            const Eigen::Vector3f v1 = mesh.get_v1(li);
+            // Leading edge vector pointing outward from wing root
+            const Eigen::Vector3f dl = v1 - v0;
+            // Distance from the center of leading edge to the reference point
+            const Eigen::Vector3f dst_to_ref = data.ref_pt - 0.5f * (v0 + v1);
+            // Distance from the center of leading edge to the reference point
+            const Eigen::Vector3f force = data.u_inf.cross(dl) * data.rho * data.delta_gamma[li];
+            cm += force.cross(dst_to_ref);
+        }
+    }
+    cm /= 0.5f * data.rho * data.u_inf.squaredNorm() * area * chord;
+    return cm;
+}
+
+f32 BackendAVX2::compute_coefficient_cd(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) {
+    assert(n > 0);
+    assert(j > 0 and j+n <= mesh.ns);
+
+    f32 cd = 0.0f;
+    // Drag coefficent computed using Trefftz plane
+    const u32 begin = j + mesh.nb_panels_wing();
+    const u32 end = begin + n;
+    // parallel for
+    for (u32 ia = begin; ia < end; ia++) {
+        const f32 colloc_x = mesh.colloc.x[ia];
+        const f32 colloc_y = mesh.colloc.y[ia];
+        const f32 colloc_z = mesh.colloc.z[ia];
+        Eigen::Vector3f inf = Eigen::Vector3f::Zero();
+        for (u32 ia2 = begin; ia2 < end; ia2++) {
+            Eigen::Vector3f inf2 = Eigen::Vector3f::Zero();
+            Eigen::Vector3f v0 = mesh.get_v0(ia2);
+            Eigen::Vector3f v1 = mesh.get_v1(ia2);
+            Eigen::Vector3f v2 = mesh.get_v2(ia2);
+            Eigen::Vector3f v3 = mesh.get_v3(ia2);
+            // Influence from the streamwise vortex lines
+            kernel_influence_scalar(inf2.x(), inf2.y(), inf2.z(), colloc_x, colloc_y, colloc_z, v1.x(), v1.y(), v1.z(), v2.x(), v2.y(), v2.z());
+            kernel_influence_scalar(inf2.x(), inf2.y(), inf2.z(), colloc_x, colloc_y, colloc_z, v3.x(), v3.y(), v3.z(), v0.x(), v0.y(), v0.z());
+            f32 gamma_w = data.gamma[(mesh.nc-1)*mesh.ns + ia2 % mesh.ns];
+            // This is the induced velocity calculated with the vortex (gamma) calculated earlier (according to kutta condition)
+            inf += gamma_w * inf2;
+        }
+        const Eigen::Vector3f normal{mesh.normal.x[ia], mesh.normal.y[ia], mesh.normal.z[ia]};
+        const f32 w_ind = inf.dot(normal);
+        const u32 col = ia % mesh.ns;
+        Eigen::Vector3f v0 = mesh.get_v0(ia);
+        Eigen::Vector3f v1 = mesh.get_v1(ia);
+        const f32 dl = (v1 - v0).norm();
+        cd -= 0.5f * data.rho * data.gamma[(mesh.nc-1)*mesh.ns + col] * w_ind * dl;
+    }
+    cd /= 0.5f * data.rho * data.u_inf.squaredNorm() * area;
+    return cd;
 }
 
 void BackendAVX2::compute_coefficients() {

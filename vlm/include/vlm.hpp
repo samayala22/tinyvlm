@@ -12,6 +12,7 @@ struct VLM {
 
     void init();
     void solve(tiny::Config& cfg);
+    void solve_nonlinear(tiny::Config& cfg);
     VLM() = default;
     VLM(tiny::Config& cfg);
 };
