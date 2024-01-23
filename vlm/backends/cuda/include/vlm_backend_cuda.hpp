@@ -25,6 +25,9 @@ class BackendCUDA : public Backend {
         void lu_factor() override;
         void lu_solve() override;
         void compute_coefficients() override;
+        f32 compute_coefficient_cl(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) override;
+        Eigen::Vector3f compute_coefficient_cm(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area, const f32 chord) override;
+        f32 compute_coefficient_cd(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) override;
         void compute_delta_gamma() override;
 };
 
