@@ -1,5 +1,6 @@
 #include "vlm_backend_avx2.hpp"
 
+#include "Eigen/src/Core/Matrix.h"
 #include "simpletimer.hpp"
 #include "vlm_types.hpp"
 
@@ -300,15 +301,26 @@ void BackendAVX2::compute_lhs() {
 
 void BackendAVX2::compute_rhs() {
     SimpleTimer timer("RHS");
-    Data& d = data;
-    Mesh& m = mesh;
+    const Data& d = data;
+    const Mesh& m = mesh;
+    Eigen::Vector3f freestream = d.freestream(d.alpha, d.beta);
+
     for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
-        rhs[i] = - (d.u_inf.x() * m.normal.x[i] + d.u_inf.y() * m.normal.y[i] + d.u_inf.z() * m.normal.z[i]);
+        rhs[i] = - (freestream.x() * m.normal.x[i] + freestream.y() * m.normal.y[i] + freestream.z() * m.normal.z[i]);
     }
 }
 
-void BackendAVX2::rebuild_rhs(const std::vector<f32>& section_alphas) {
-
+void BackendAVX2::compute_rhs(const std::vector<f32>& section_alphas) {
+    SimpleTimer timer("Rebuild RHS");
+    assert(section_alphas.size() == mesh.ns);
+    const Mesh& m = mesh;
+    for (u32 i = 0; i < mesh.nc; i++) {
+        for (u32 j = 0; j < mesh.ns; j++) {
+            const u32 li = i * mesh.ns + j; // linear index
+            const Eigen::Vector3f freestream = data.freestream(section_alphas[j], data.beta);
+            rhs[li] = - (freestream.x() * m.normal.x[li] + freestream.y() * m.normal.y[li] + freestream.z() * m.normal.z[li]);
+        }
+    }
 }
 
 // void BackendAVX2::lu_solve() {
@@ -348,28 +360,12 @@ void BackendAVX2::lu_solve() {
     x = solver->lu.solve(b);
 }
 
-/// @brief Compute some helping variables for the cm computation
-/// @param m Mesh object
-/// @param d Data object
-/// @param dl Leading edge vector pointing outward from wing root
-/// @param dst_to_ref Distance from the center of leading edge to the reference point
-/// @param i Panel index
-inline void compute_panel_vectors(const Mesh& m, const Data& d, Eigen::Vector3f& dl, Eigen::Vector3f& dst_to_ref, u32 i) {
-    Eigen::Vector3f v0 = m.get_v0(i);
-    Eigen::Vector3f v1 = m.get_v1(i);
-    // Leading edge vector pointing outward from wing root
-    dl = v1 - v0;
-    // Distance from the center of leading edge to the reference point
-    dst_to_ref = d.ref_pt - 0.5f * (v0 + v1);
-}
-
-inline Eigen::Vector3f compute_panel_forces(const Mesh& m, const Data& d, const Eigen::Vector3f& dl, u32 i) {
-    // force = U_inf x (panel_dl * rho * delta_gamma)
-    return d.u_inf.cross(dl) * d.rho * d.delta_gamma[i];
-}
-
-f32 BackendAVX2::compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) {
+f32 BackendAVX2::compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area,
+    const Eigen::Vector3f& freestream, const u32 j, const u32 n) {
     f32 cl = 0.0f;
+    // const Eigen::Vector3f freestream = data.freestream(data.alpha, data.beta);
+    const Eigen::Vector3f lift_axis = data.lift_axis(freestream);
+
     for (u32 u = 0; u < mesh.nc; u++) {
         for (u32 v = j; v < j + n; v++) {
             const u32 li = u * mesh.ns + v; // linear index
@@ -378,17 +374,24 @@ f32 BackendAVX2::compute_coefficient_cl(const Mesh& mesh, const Data& data, cons
             // Leading edge vector pointing outward from wing root
             const Eigen::Vector3f dl = v1 - v0;
             // Distance from the center of leading edge to the reference point
-            const Eigen::Vector3f force = data.u_inf.cross(dl) * data.rho * data.delta_gamma[li];
-            cl += force.dot(data.lift_axis);
+            const Eigen::Vector3f force = freestream.cross(dl) * data.rho * data.delta_gamma[li];
+            cl += force.dot(lift_axis);
         }
     }
-    cl /= 0.5f * data.rho * data.u_inf.squaredNorm() * area;
+    cl /= 0.5f * data.rho * freestream.squaredNorm() * area;
 
     return cl;
 }
 
-Eigen::Vector3f BackendAVX2::compute_coefficient_cm(const Mesh& mesh, const Data& data, const f32 area, const f32 chord, const u32 j, const u32 n) {
+Eigen::Vector3f BackendAVX2::compute_coefficient_cm(
+    const Mesh& mesh,
+    const Data& data,
+    const f32 area,
+    const f32 chord,
+    const u32 j,
+    const u32 n) {
     Eigen::Vector3f cm = Eigen::Vector3f::Zero();
+    const Eigen::Vector3f freestream = data.freestream(data.alpha, data.beta);
     for (u32 u = 0; u < mesh.nc; u++) {
         for (u32 v = j; v < j + n; v++) {
             const u32 li = u * mesh.ns + v; // linear index
@@ -399,11 +402,11 @@ Eigen::Vector3f BackendAVX2::compute_coefficient_cm(const Mesh& mesh, const Data
             // Distance from the center of leading edge to the reference point
             const Eigen::Vector3f dst_to_ref = data.ref_pt - 0.5f * (v0 + v1);
             // Distance from the center of leading edge to the reference point
-            const Eigen::Vector3f force = data.u_inf.cross(dl) * data.rho * data.delta_gamma[li];
+            const Eigen::Vector3f force = freestream.cross(dl) * data.rho * data.delta_gamma[li];
             cm += force.cross(dst_to_ref);
         }
     }
-    cm /= 0.5f * data.rho * data.u_inf.squaredNorm() * area * chord;
+    cm /= 0.5f * data.rho * freestream.squaredNorm() * area * chord;
     return cm;
 }
 
@@ -442,6 +445,6 @@ f32 BackendAVX2::compute_coefficient_cd(const Mesh& mesh, const Data& data, cons
         const f32 dl = (v1 - v0).norm();
         cd -= 0.5f * data.rho * data.gamma[(mesh.nc-1)*mesh.ns + col] * w_ind * dl;
     }
-    cd /= 0.5f * data.rho * data.u_inf.squaredNorm() * area;
+    cd /= 0.5f * data.rho * data.freestream(data.alpha, data.beta).squaredNorm() * area;
     return cd;
 }

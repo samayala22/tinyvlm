@@ -6,7 +6,7 @@ using namespace vlm;
 
 // Overload for the whole mesh body
 f32 Backend::compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area) {
-    return compute_coefficient_cl(mesh, data, area, 0, mesh.ns);
+    return compute_coefficient_cl(mesh, data, area, data.freestream(data.alpha, data.beta), 0, mesh.ns);
 }
 
 // Overload for the whole mesh body

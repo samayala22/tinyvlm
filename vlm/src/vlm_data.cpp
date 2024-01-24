@@ -1,4 +1,6 @@
 #include "vlm_data.hpp"
+#include "Eigen/src/Core/Matrix.h"
+#include <cmath>
 
 using namespace vlm;
 
@@ -25,14 +27,58 @@ void Data::reset() {
     cm.setZero();
 }
 
-// alpha in radians
-void Data::compute_freestream(f32 alpha_rad) {
-    u_inf.x() = std::cos(alpha_rad);
-    u_inf.y() = 0.0f;
-    u_inf.z() = std::sin(alpha_rad);
-
-    lift_axis.x() = - std::sin(alpha_rad);
-    lift_axis.y() = 0.0f;
-    lift_axis.z() = std::cos(alpha_rad);
+Eigen::Vector3f Data::freestream(f32 alpha, f32 beta) const {
+    return Eigen::Vector3f{
+        u_inf * std::cos(alpha) * std::cos(beta),
+        - u_inf * std::cos(alpha) * std::sin(beta),
+        u_inf * std::sin(alpha),
+    };
 }
 
+Eigen::Vector3f Data::lift_axis(const Eigen::Vector3f& freestream_) const {
+    return (freestream_.cross(Eigen::Vector3f::UnitY()).normalized());
+}
+
+Eigen::Vector3f Data::stream_axis(const Eigen::Vector3f& freestream_) const {
+    return (freestream_.normalized());
+}
+
+Eigen::Vector3f Data::freestream() const {
+    return freestream(alpha, beta);
+}
+
+Eigen::Vector3f Data::lift_axis() const {
+    return lift_axis(freestream());
+}
+
+Eigen::Vector3f Data::stream_axis() const {
+    return stream_axis(freestream());
+}
+
+
+
+
+///////// 
+
+FlowData::FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_): 
+    alpha(alpha_), beta(beta_), u_inf(u_inf_), rho(rho_),
+    freestream(f_freestream(alpha, beta)),
+    lift_axis(f_lift_axis(freestream)),
+    stream_axis(f_stream_axis(freestream)) {
+}
+
+Eigen::Vector3f FlowData::f_freestream(f32 alpha, f32 beta) const {
+    return Eigen::Vector3f{
+        u_inf * std::cos(alpha) * std::cos(beta),
+        - u_inf * std::cos(alpha) * std::sin(beta),
+        u_inf * std::sin(alpha),
+    };
+}
+
+Eigen::Vector3f FlowData::f_lift_axis(const Eigen::Vector3f& freestream_) const {
+    return (freestream_.cross(Eigen::Vector3f::UnitY()).normalized());
+}
+
+Eigen::Vector3f FlowData::f_stream_axis(const Eigen::Vector3f& freestream_) const {
+    return (freestream_.normalized());
+}

@@ -148,11 +148,11 @@ Eigen::Vector3f Mesh::get_v3(u32 i) const {
     return {v.x[idx], v.y[idx], v.z[idx]};
 }
 
-void Mesh::update_wake(const Eigen::Vector3f& u_inf) {
+void Mesh::update_wake(const Eigen::Vector3f& freestream) {
     const f32 chord_root = chord_length(0); 
-    const f32 off_x = u_inf.x() * 100.0f * chord_root;
-    const f32 off_y = u_inf.y() * 100.0f * chord_root;
-    const f32 off_z = u_inf.z() * 100.0f * chord_root;
+    const f32 off_x = freestream.x() * 100.0f * chord_root;
+    const f32 off_y = freestream.y() * 100.0f * chord_root;
+    const f32 off_z = freestream.z() * 100.0f * chord_root;
 
     const u32 v_ns = ns + 1;
     const u32 begin_trailing_edge = nb_vertices_wing()-v_ns;
