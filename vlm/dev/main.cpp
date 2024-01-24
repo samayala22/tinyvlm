@@ -1,5 +1,6 @@
 #include "vlm.hpp"
 #include "parser.hpp"
+#include <iostream>
 
 void cmdl_parser_configure(cmd_line_parser::parser& parser) {
     parser.add("config",                 // name
@@ -12,6 +13,12 @@ void cmdl_parser_configure(cmd_line_parser::parser& parser) {
                "Mesh file",  // description
                "-m",                   // shorthand
                true,                   // required argument
+               false                   // is boolean option
+    );
+    parser.add("database",                 // name
+               "Viscous database file",  // description
+               "-db",                   // shorthand
+               false,                   // required argument
                false                   // is boolean option
     );
     parser.add("output",                 // name
@@ -31,15 +38,22 @@ int main(int argc, char **argv) {
 
     std::string filename_config = parser.get<std::string>("config");
     std::string filename_mesh = parser.get<std::string>("mesh");
+    std::string filename_database = parser.get<std::string>("database");
 
     tiny::Config cfg(filename_config);
-
-    vlm::VLM vlm(cfg);
+    cfg().section("files", true).map_.insert({
+        {"mesh", filename_mesh},
+        {"database", filename_database}
+    });
 
     try {
-        vlm.mesh.io_read(filename_mesh);
+        vlm::VLM vlm(cfg);
         vlm.init();
         vlm.solve(cfg);
+
+        // Pause for memory reading
+        // std::cout << "Done ..." << std::endl;
+        // std::cin.get();
     } catch (std::exception& e) {
         std::cout << e.what() << std::endl;
         return 1;

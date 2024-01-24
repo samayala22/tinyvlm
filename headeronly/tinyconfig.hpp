@@ -68,15 +68,7 @@ inline T convert_value(std::string s) {
 
 template<>
 inline std::string convert_value(std::string s) {
-    if (s.front() == '"' && s.back() == '"') {
-        if (s.size() > 2) {
-            return s.substr(1, s.size() - 2);
-        } else {
-            return "";
-        }
-    } else {
-        throw std::runtime_error("String value must be enclosed in double quotes. String: " + s);
-    }
+    return s;
 }
 
 template<>
@@ -117,7 +109,9 @@ template<typename T>
 struct BaseEntries {
     std::unordered_map<std::string, T> map_;
     bool has(const std::string &key) const { return map_.find(key) != map_.end(); }
-    const T& section(const std::string &key) const {
+    // not const as it can be used to modify the map
+    T& section(const std::string &key, bool create = false) {
+        if (create) return map_[key];
         auto elem = map_.find(key);
         if (elem == map_.end()) err_missing_section(key);
         return elem->second;
@@ -161,8 +155,10 @@ class Config {
         BaseEntries<std::vector<KeyEntries>> config_vec;
         std::vector<std::string> sections;
 
-        const auto& operator()() {return config;}
-        const auto& vector() {return config_vec;}
+        auto& operator()() {return config;}
+        auto& vector() {return config_vec;}
+        const auto& operator()() const {return config;}
+        const auto& vector() const {return config_vec;}
 
         bool read(const std::string& ifilename);
         bool write(const std::string& ofilename);
@@ -188,7 +184,7 @@ inline bool Config::read(const std::string& ifilename) {
 
 inline bool Config::write(const std::string& ofilename) {
     std::filesystem::path path(ofilename);
-    //if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
+    // if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
     std::ofstream f(path);
 	if (f.is_open()) {
         write_file(f);
@@ -221,6 +217,7 @@ inline void Config::read_file(std::ifstream &f) {
     int line_nb = 0;
     while (std::getline(f, line)) {
         line_nb++;
+        // strip the line with everything after the # character
         if (auto comment = line.find("#"); comment != std::string::npos) {
             line = line.substr(0, comment);
         }

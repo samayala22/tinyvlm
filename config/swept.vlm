@@ -7,7 +7,7 @@
 <solver>
 ref_point = [0.25, 0.0, 0.0]
 alphas = [5]
-backend = "avx2"
+backend = avx2
 
 <mesh>
 wake_included = false
