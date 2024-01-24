@@ -54,17 +54,17 @@ namespace tiny {
                 }
                 // Compute spline coefficients
                 m_s[0] = m_m[0];
-                m_s[1] = 0.5 * (m_m[0] + m_m[1]);
+                m_s[1] = 0.5f * (m_m[0] + m_m[1]);
                 for (size_t i = 2; i < n-2; ++i) {
                     T d1 = std::abs(m_m[i+1] - m_m[i]);
                     T d2 = std::abs(m_m[i-1] - m_m[i-2]);
-                    if (d1 + d2 > 0.0) {
+                    if (d1 + d2 > 0.0f) {
                         m_s[i] = (d1 * m_m[i-1] + d2 * m_m[i]) / (d1 + d2);
                     } else {
-                        m_s[i] = 0.5 * (m_m[i] + m_m[i-1]);
+                        m_s[i] = 0.5f * (m_m[i] + m_m[i-1]);
                     }
                 }
-                m_s[n-2] = 0.5 * (m_m[n-3] + m_m[n-2]);
+                m_s[n-2] = 0.5f * (m_m[n-3] + m_m[n-2]);
                 m_s[n-1] = m_m[n-2];
             }
 

@@ -201,16 +201,16 @@ void BackendCUDA::lu_solve() {
     CHECK_CUDA(cudaMemcpy(data.gamma.data(), d_rhs, N * sizeof(float), cudaMemcpyDeviceToHost));
 }
 
-f32 BackendCUDA::compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) {
-    return default_backend.compute_coefficient_cl(mesh, data, j, n, area);
+f32 BackendCUDA::compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area, const Eigen::Vector3f& freestream, const u32 j, const u32 n) {
+    return default_backend.compute_coefficient_cl(mesh, data, area, freestream, j, n);
 }
 
 f32 BackendCUDA::compute_coefficient_cd(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) {
-    return default_backend.compute_coefficient_cd(mesh, data, j, n, area);
+    return default_backend.compute_coefficient_cd(mesh, data, area, j, n);
 }
 
 Eigen::Vector3f BackendCUDA::compute_coefficient_cm(const Mesh& mesh, const Data& data, const f32 area, const f32 chord, const u32 j, const u32 n) {
-    return default_backend.compute_coefficient_cm(mesh, data, j, n, area, chord);
+    return default_backend.compute_coefficient_cm(mesh, data, area, chord, j, n);
 }
 
 void BackendCUDA::compute_delta_gamma() {
