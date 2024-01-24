@@ -368,7 +368,7 @@ inline Eigen::Vector3f compute_panel_forces(const Mesh& m, const Data& d, const 
     return d.u_inf.cross(dl) * d.rho * d.delta_gamma[i];
 }
 
-f32 BackendAVX2::compute_coefficient_cl(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) {
+f32 BackendAVX2::compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) {
     f32 cl = 0.0f;
     for (u32 u = 0; u < mesh.nc; u++) {
         for (u32 v = j; v < j + n; v++) {
@@ -387,7 +387,7 @@ f32 BackendAVX2::compute_coefficient_cl(const Mesh& mesh, const Data& data, cons
     return cl;
 }
 
-Eigen::Vector3f BackendAVX2::compute_coefficient_cm(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area, const f32 chord) {
+Eigen::Vector3f BackendAVX2::compute_coefficient_cm(const Mesh& mesh, const Data& data, const f32 area, const f32 chord, const u32 j, const u32 n) {
     Eigen::Vector3f cm = Eigen::Vector3f::Zero();
     for (u32 u = 0; u < mesh.nc; u++) {
         for (u32 v = j; v < j + n; v++) {
@@ -407,7 +407,7 @@ Eigen::Vector3f BackendAVX2::compute_coefficient_cm(const Mesh& mesh, const Data
     return cm;
 }
 
-f32 BackendAVX2::compute_coefficient_cd(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) {
+f32 BackendAVX2::compute_coefficient_cd(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) {
     assert(n > 0);
     assert(j > 0 and j+n <= mesh.ns);
 
@@ -444,53 +444,4 @@ f32 BackendAVX2::compute_coefficient_cd(const Mesh& mesh, const Data& data, cons
     }
     cd /= 0.5f * data.rho * data.u_inf.squaredNorm() * area;
     return cd;
-}
-
-void BackendAVX2::compute_coefficients() {
-    Mesh& m = mesh;
-    SimpleTimer timer("Compute coefficients");
-
-    for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
-        Eigen::Vector3f dl, dst_to_ref;
-        compute_panel_vectors(m, data, dl, dst_to_ref, i);
-        Eigen::Vector3f force = compute_panel_forces(m, data, dl, i);
-        data.cl += force.dot(data.lift_axis);
-        data.cm += force.cross(dst_to_ref);
-    }
-
-    // Drag coefficent computed using Trefftz plane
-    for (u32 ia = mesh.nb_panels_wing(); ia < mesh.nb_panels_total(); ia++) {
-        const f32 colloc_x = mesh.colloc.x[ia];
-        const f32 colloc_y = mesh.colloc.y[ia];
-        const f32 colloc_z = mesh.colloc.z[ia];
-        Eigen::Vector3f inf = Eigen::Vector3f::Zero();
-        for (u32 ia2 = mesh.nb_panels_wing(); ia2 < mesh.nb_panels_total(); ia2++) {
-            Eigen::Vector3f inf2 = Eigen::Vector3f::Zero();
-            Eigen::Vector3f v0 = mesh.get_v0(ia2);
-            Eigen::Vector3f v1 = mesh.get_v1(ia2);
-            Eigen::Vector3f v2 = mesh.get_v2(ia2);
-            Eigen::Vector3f v3 = mesh.get_v3(ia2);
-            // Influence from the streamwise vortex lines
-            kernel_influence_scalar(inf2.x(), inf2.y(), inf2.z(), colloc_x, colloc_y, colloc_z, v1.x(), v1.y(), v1.z(), v2.x(), v2.y(), v2.z());
-            kernel_influence_scalar(inf2.x(), inf2.y(), inf2.z(), colloc_x, colloc_y, colloc_z, v3.x(), v3.y(), v3.z(), v0.x(), v0.y(), v0.z());
-            f32 gamma_w = data.gamma[(m.nc-1)*m.ns + ia2 % m.ns];
-            // This is the induced velocity calculated with the vortex (gamma) calculated earlier (according to kutta condition)
-            inf += gamma_w * inf2;
-        }
-        const Eigen::Vector3f normal{m.normal.x[ia], m.normal.y[ia], m.normal.z[ia]};
-        const f32 w_ind = inf.dot(normal);
-        const u32 col = ia % m.ns;
-        Eigen::Vector3f v0 = mesh.get_v0(ia);
-        Eigen::Vector3f v1 = mesh.get_v1(ia);
-        const f32 dl = (v1 - v0).norm();
-        data.cd -= 0.5f * data.rho * data.gamma[(m.nc-1)*m.ns + col] * w_ind * dl;
-    }
-
-    const f32 common = 0.5f * data.rho * data.u_inf.squaredNorm() * data.s_ref;
-    data.cl /= common;
-    data.cm /= common * data.c_ref;
-    data.cd /= common;
-
-    // Cd = Cl^2 / (pi * AR * e) with AR = b^2 / S_ref
-    // std::cout << "CD analytic: " << 2.0f * (data.cl * data.cl) / (PI_f * (10.0f*10.0f / data.s_ref)) << std::endl;
 }

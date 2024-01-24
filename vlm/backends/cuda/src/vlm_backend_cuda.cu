@@ -201,19 +201,15 @@ void BackendCUDA::lu_solve() {
     CHECK_CUDA(cudaMemcpy(data.gamma.data(), d_rhs, N * sizeof(float), cudaMemcpyDeviceToHost));
 }
 
-void BackendCUDA::compute_coefficients() {
-    default_backend.compute_coefficients();
-}
-
-f32 BackendCUDA::compute_coefficient_cl(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) {
+f32 BackendCUDA::compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) {
     return default_backend.compute_coefficient_cl(mesh, data, j, n, area);
 }
 
-f32 BackendCUDA::compute_coefficient_cd(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) {
+f32 BackendCUDA::compute_coefficient_cd(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) {
     return default_backend.compute_coefficient_cd(mesh, data, j, n, area);
 }
 
-Eigen::Vector3f BackendCUDA::compute_coefficient_cm(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area, const f32 chord) {
+Eigen::Vector3f BackendCUDA::compute_coefficient_cm(const Mesh& mesh, const Data& data, const f32 area, const f32 chord, const u32 j, const u32 n) {
     return default_backend.compute_coefficient_cm(mesh, data, j, n, area, chord);
 }
 

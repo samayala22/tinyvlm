@@ -10,7 +10,9 @@
 using namespace vlm;
 using namespace Eigen;
 
-Mesh::Mesh(tiny::Config& cfg) {};
+Mesh::Mesh(tiny::Config& cfg) {
+    io_read(cfg().section("files").get<std::string>("mesh"));
+};
 
 void Mesh::alloc() {
     const u32 ncw = nc + nw;

@@ -22,10 +22,9 @@ class BackendAVX2 : public Backend {
         void rebuild_rhs(const std::vector<f32>& section_alphas) override; 
         void lu_factor() override;
         void lu_solve() override;
-        void compute_coefficients() override;
-        f32 compute_coefficient_cl(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) override;
-        Eigen::Vector3f compute_coefficient_cm(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area, const f32 chord) override;
-        f32 compute_coefficient_cd(const Mesh& mesh, const Data& data, const u32 j, const u32 n, const f32 area) override;
+        f32 compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) override;
+        Eigen::Vector3f compute_coefficient_cm(const Mesh& mesh, const Data& data, const f32 area, const f32 chord, const u32 j, const u32 n) override;
+        f32 compute_coefficient_cd(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) override;
         void compute_delta_gamma() override;
 };
 
