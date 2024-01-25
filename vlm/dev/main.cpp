@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
     try {
         vlm::VLM vlm(cfg);
         vlm.init();
-        vlm.solve(cfg);
+        vlm.solve_nonlinear(cfg);
 
         // Pause for memory reading
         // std::cout << "Done ..." << std::endl;

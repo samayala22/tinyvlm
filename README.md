@@ -1,14 +1,37 @@
 # TinyVLM
 
-### Toy potential flow to experiment and learn high performance techniques
+### High Performance Potential Flow Solver
 ---
 
-## Main features roadmap:
+## Features:
 
 - [X] Stationary VLM
-- [ ] Non-linear
+- [X] Non-linear (2D single airfoil)
 - [ ] Panel-method
 - [ ] Spectral domain
+
+# Correctors
+
+- [X] High angle of attack correction
+- [ ] Dihedral / Anhedral Wings (local coordinate projection in force calculation)
+- [ ] Swept Wings (coordinate rotation & non linear correction)
+- [ ] Compressibility Effects (Prandtl Glauert corrector)
+
+# Backends
+
+- [ ] Generic (already implemented but mixed up with AVX2 backend)
+- [X] AVX2 (going to be replaced by ISPC)
+- [X] CUDA (wip, some kernels are missing)
+- [ ] SYCL ? HIP ? Vulkan ?
+
+# Maintainability
+
+- [X] Clangd
+- [ ] Clang-Tidy
+- [ ] Testing framework (via `xmake test`)
+- [ ] Compilation CI
+- [ ] Performance regression CI
+- [ ] Documented code (doxygen style)
 
 ## Build and run
 
