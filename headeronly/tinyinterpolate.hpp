@@ -4,13 +4,17 @@
 #include <cmath>
 #include <stdexcept>
 #include <vector>
+#include <cassert>
 
 namespace tiny {
 
     template<typename T>
     class Interpolator {
         public:
-            Interpolator(const std::vector<T>& x, const std::vector<T>& y) : m_x(x), m_y(y) {};
+            Interpolator(const std::vector<T>& x, const std::vector<T>& y) : m_x(x), m_y(y) {
+                assert (x.size() == y.size());
+                assert (x.size() > 1);
+            };
             virtual ~Interpolator() = default;
             virtual const T operator()(const T x) const = 0;
         protected:
@@ -69,8 +73,8 @@ namespace tiny {
             };
 
         private:
-            const std::vector<T> m_m; // segment slopes (per segment)
-            const std::vector<T> m_s; // spline coefficients (per point)
+            std::vector<T> m_m; // segment slopes (per segment)
+            std::vector<T> m_s; // spline coefficients (per point)
     };
 
     template<typename T>
@@ -102,6 +106,6 @@ namespace tiny {
             };
 
         private:
-            const std::vector<T> m_m; // segment slopes (per segment)
+            std::vector<T> m_m; // segment slopes (per segment)
     };
 } // namespace tiny
