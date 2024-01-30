@@ -22,6 +22,19 @@ class FlowData {
     FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_);
 };
 
+class AeroCoefficients {
+    public:
+    const f32 cl;
+    const f32 cd;
+    const Eigen::Vector3f cm;
+
+    AeroCoefficients(const f32 cl_, const f32 cd_, const Eigen::Vector3f& cm_) :
+        cl(cl_),
+        cd(cd_),
+        cm(cm_)
+    {}
+};
+
 template<class Interpolator>
 class WingProfile {
     static_assert(std::is_base_of<tiny::Interpolator<f32>, Interpolator>::value, "Invalid interpolator type");
@@ -41,12 +54,12 @@ class WingProfile {
     const Interpolator CMz_interpolator;
 
     WingProfile(
-        std::vector<f32>& alphas,
-        std::vector<f32>& CL,
-        std::vector<f32>& CD,
-        std::vector<f32>& CMx,
-        std::vector<f32>& CMy,
-        std::vector<f32>& CMz
+        const std::vector<f32>& alphas,
+        const std::vector<f32>& CL,
+        const std::vector<f32>& CD,
+        const std::vector<f32>& CMx,
+        const std::vector<f32>& CMy,
+        const std::vector<f32>& CMz
     ) :
         CL(CL),
         CD(CD),
@@ -64,8 +77,8 @@ class WingProfile {
 template<typename Interpolator>
 class Database2D {
     public:
-    const std::vector<WingProfile<Interpolator>> profiles; // profiles
-    const std::vector<f32> profiles_pos; // y position of profiles
+    std::vector<WingProfile<Interpolator>> profiles; // profiles
+    std::vector<f32> profiles_pos; // y position of profiles
     Database2D() = default;
     f32 interpolate_CL(f32 alpha, f32 y) const {
         // TODO: perform linear blending between the two profiles closest to y

@@ -345,6 +345,9 @@ void BackendAVX2::lu_solve() {
 
 f32 BackendAVX2::compute_coefficient_cl(const FlowData& flow, const f32 area,
     const u32 j, const u32 n) {
+    assert(n > 0);
+    assert(j >= 0 and j+n <= mesh.ns);
+    
     f32 cl = 0.0f;
 
     for (u32 u = 0; u < mesh.nc; u++) {
@@ -371,6 +374,8 @@ Eigen::Vector3f BackendAVX2::compute_coefficient_cm(
     const u32 j,
     const u32 n)
 {
+    assert(n > 0);
+    assert(j >= 0 and j+n <= mesh.ns);
     Eigen::Vector3f cm = Eigen::Vector3f::Zero();
 
     for (u32 u = 0; u < mesh.nc; u++) {
@@ -398,7 +403,7 @@ f32 BackendAVX2::compute_coefficient_cd(
     const u32 n) 
 {
     assert(n > 0);
-    assert(j > 0 and j+n <= mesh.ns);
+    assert(j >= 0 and j+n <= mesh.ns);
 
     f32 cd = 0.0f;
     // Drag coefficent computed using Trefftz plane

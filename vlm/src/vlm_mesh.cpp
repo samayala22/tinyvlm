@@ -6,6 +6,7 @@
 #include <cassert>
 #include <iostream>
 #include <limits>
+#include <memory>
 
 using namespace vlm;
 using namespace Eigen;
@@ -23,9 +24,21 @@ Mesh::Mesh(const tiny::Config& cfg)
     init();
 }
 
-Mesh::Mesh(const std::string& filename) {
+Mesh::Mesh(
+    const std::string& filename,
+    const f32 s_ref_ = 0.0f,
+    const f32 c_ref_ = 0.0f,
+    const Eigen::Vector3f& ref_pt_ = {0.25f, 0.0f, 0.0f}
+    ) {
+    s_ref = s_ref_;
+    c_ref = c_ref_;
+    ref_pt = ref_pt_;    
     io_read(filename);
     init();
+}
+
+std::unique_ptr<Mesh> vlm::create_mesh(const std::string filename) {
+    return std::make_unique<Mesh>(filename);
 }
 
 void Mesh::init() {

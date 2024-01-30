@@ -67,12 +67,20 @@ class Mesh {
 
     void io_read(const std::string& filename);
     Mesh(const tiny::Config& cfg);
-    Mesh(const std::string& filename);
+    Mesh(
+        const std::string& filename,
+        const f32 s_ref_,
+        const f32 c_ref_,
+        const Eigen::Vector3f& ref_pt_
+    );
     
     private:
     void alloc(); // allocate memory for all buffers
     void init(); // called at the end of constructor
     void io_read_plot3d_structured(std::ifstream& f);
 };
+
+// todo, update this to mirror the constructor
+std::unique_ptr<Mesh> create_mesh(const std::string filename);
 
 } // namespace vlm

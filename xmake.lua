@@ -46,3 +46,13 @@ for _,name in ipairs(backends) do
 end
 
 includes("vlm/xmake.lua") -- library and main driver
+
+for _, file in ipairs(os.files("tests/test_*.cpp")) do
+    local name = path.basename(file)
+    target(name)
+        set_kind("binary")
+        set_default(false)
+        add_deps("libvlm")
+        add_files("tests/" .. name .. ".cpp")
+        add_tests("default")
+end
