@@ -3,7 +3,7 @@
 namespace vlm {
 
 struct VLM;
-struct Data;
+class FlowData;
 struct Mesh;
 
 }

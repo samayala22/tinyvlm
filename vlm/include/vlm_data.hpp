@@ -2,58 +2,79 @@
 
 #include "vlm_types.hpp"
 #include "vlm_fwd.hpp"
+#include "tinyinterpolate.hpp"
 
 namespace vlm {
 
-struct Data {
-    std::vector<f32> gamma = {}; // unknowns to solve for (vortex strengths))
-    std::vector<f32> delta_gamma = {};
-    f32 cl = 0.0f; // lift coefficient
-    f32 cd = 0.0f; // drag coefficient
-    Eigen::Vector3f cm = {}; // moment coefficients
-    
-    f32 alpha = 0.0f; // global angle of attack
-    f32 beta = 0.0f; // global sideslip angle
-    f32 u_inf = 1.0f; // freestream velocity magnitude
-    Eigen::Vector3f ref_pt = {0.25f, 0.0f, 0.0f}; // reference point (for moment computation
-
-    f32 rho = 1.0f;
-    f32 s_ref = 0.0f; // reference area (of wing)
-    f32 c_ref = 0.0f; // reference chord (of wing)
-    f32 sigma_vatistas = 0.0f; // vatistas coefficient
-
-    void alloc(const u32 size);
-    void reset();
-    
-    // Global values
-    Eigen::Vector3f freestream() const;
-    Eigen::Vector3f lift_axis() const;
-    Eigen::Vector3f stream_axis() const;
-    // Local values
-    Eigen::Vector3f freestream(f32 alpha, f32 beta) const;
-    Eigen::Vector3f lift_axis(const Eigen::Vector3f& freestream_) const;
-    Eigen::Vector3f stream_axis(const Eigen::Vector3f& freestream_) const;
-
-    Data() = default;
-    Data(tiny::Config& cfg);
-};
-
-// Light Class for local flow characteristics
+// Flow characteristics
 class FlowData {
     public:
-    const f32 alpha;
-    const f32 beta;
-    const f32 u_inf;
-    const f32 rho;
+    const f32 alpha; // global angle of attack
+    const f32 beta; // global sideslip angle
+    const f32 u_inf; // freestream velocity magnitude
+    const f32 rho; // fluid density
+    const f32 sigma_vatistas = 0.0f; // vatistas coefficient
+
     const Eigen::Vector3f freestream;
     const Eigen::Vector3f lift_axis;
     const Eigen::Vector3f stream_axis;
 
     FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_);
-    private:
-    Eigen::Vector3f f_freestream(f32 alpha, f32 beta) const;
-    Eigen::Vector3f f_lift_axis(const Eigen::Vector3f& freestream_) const;
-    Eigen::Vector3f f_stream_axis(const Eigen::Vector3f& freestream_) const;
 };
+
+template<class Interpolator>
+class WingProfile {
+    static_assert(std::is_base_of<tiny::Interpolator<f32>, Interpolator>::value, "Invalid interpolator type");
+
+    public:
+    const std::vector<f32> alphas;
+    const std::vector<f32> CL;
+    const std::vector<f32> CD;
+    const std::vector<f32> CMx;
+    const std::vector<f32> CMy;
+    const std::vector<f32> CMz;
+
+    const Interpolator CL_interpolator;
+    const Interpolator CD_interpolator;
+    const Interpolator CMx_interpolator;
+    const Interpolator CMy_interpolator;
+    const Interpolator CMz_interpolator;
+
+    WingProfile(
+        std::vector<f32>& alphas,
+        std::vector<f32>& CL,
+        std::vector<f32>& CD,
+        std::vector<f32>& CMx,
+        std::vector<f32>& CMy,
+        std::vector<f32>& CMz
+    ) :
+        CL(CL),
+        CD(CD),
+        CMx(CMx),
+        CMy(CMy),
+        CMz(CMz),
+        CL_interpolator(alphas, CL),
+        CD_interpolator(alphas, CD),
+        CMx_interpolator(alphas, CMx),
+        CMy_interpolator(alphas, CMy),
+        CMz_interpolator(alphas, CMz)
+    {}
+};
+
+template<typename Interpolator>
+class Database2D {
+    public:
+    const std::vector<WingProfile<Interpolator>> profiles; // profiles
+    const std::vector<f32> profiles_pos; // y position of profiles
+    Database2D() = default;
+    f32 interpolate_CL(f32 alpha, f32 y) const {
+        // TODO: perform linear blending between the two profiles closest to y
+        const auto& profile = profiles[0];
+        const f32 CL = profile.CL_interpolator(alpha);
+        return CL;
+    }
+};
+
+using Database = Database2D<tiny::AkimaInterpolator<f32>>;
 
 } // namespace vlm

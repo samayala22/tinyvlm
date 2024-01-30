@@ -1,6 +1,10 @@
 #include "vlm.hpp"
 #include "parser.hpp"
+#include "vlm_types.hpp"
 #include <iostream>
+#include <algorithm>
+
+using namespace vlm;
 
 void cmdl_parser_configure(cmd_line_parser::parser& parser) {
     parser.add("config",                 // name
@@ -41,15 +45,24 @@ int main(int argc, char **argv) {
     std::string filename_database = parser.get<std::string>("database");
 
     tiny::Config cfg(filename_config);
-    cfg().section("files", true).map_.insert({
+    cfg.create_section("files");
+    cfg().section("files").insert({
         {"mesh", filename_mesh},
         {"database", filename_database}
     });
 
     try {
-        vlm::VLM vlm(cfg);
-        vlm.init();
-        vlm.solve_nonlinear(cfg);
+        LinearVLM solver(cfg);
+        std::vector<f32> alphas = cfg().section("solver").get_vector<f32>("alphas", {0.0f});
+        std::transform(alphas.begin(), alphas.end(), alphas.begin(), 
+        [](f32 deg) {
+            return deg * PI_f / 180.0;
+        });
+        
+        for (auto alpha : alphas) {
+            FlowData flow(alpha, 0.0f, 1.0f, 1.0f);
+            solver.solve(flow);
+        }
 
         // Pause for memory reading
         // std::cout << "Done ..." << std::endl;
