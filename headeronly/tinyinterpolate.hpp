@@ -69,8 +69,8 @@ namespace tiny {
             };
 
         private:
-            std::vector<T> m_m; // segment slopes (per segment)
-            std::vector<T> m_s; // spline coefficients (per point)
+            const std::vector<T> m_m; // segment slopes (per segment)
+            const std::vector<T> m_s; // spline coefficients (per point)
     };
 
     template<typename T>
@@ -102,6 +102,6 @@ namespace tiny {
             };
 
         private:
-            std::vector<T> m_m; // segment slopes (per segment)
+            const std::vector<T> m_m; // segment slopes (per segment)
     };
 } // namespace tiny

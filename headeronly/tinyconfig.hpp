@@ -34,6 +34,7 @@ SOFTWARE.
 #include <fstream>
 #include <filesystem>
 #include <stdexcept>
+#include <initializer_list>
 
 namespace tiny {
 
@@ -106,14 +107,26 @@ inline std::vector<T> convert_vector(std::string s) {
 }
 
 template<typename T>
-struct BaseEntries {
+class BaseEntries {
+    public:
     std::unordered_map<std::string, T> map_;
+
     bool has(const std::string &key) const { return map_.find(key) != map_.end(); }
-    // not const as it can be used to modify the map
-    T& section(const std::string &key, bool create = false) {
-        if (create) return map_[key];
-        auto elem = map_.find(key);
-        if (elem == map_.end()) err_missing_section(key);
+
+    T& section(const std::string &key) {
+        return section_impl(this, key);
+    }
+
+    const T& section(const std::string &key) const {
+        return section_impl(this, key);
+    }
+
+    private:
+
+    template <typename Self>
+    static auto& section_impl(Self* self, const std::string& key) {
+        auto elem = self->map_.find(key);
+        if (elem == self->map_.end()) err_missing_section(key);
         return elem->second;
     }
 };
@@ -133,6 +146,10 @@ struct KeyEntries {
     T get(const std::string& key, const T default_val) const {
         if (has(key)) return get<T>(key);
         else return default_val;
+    }
+
+    void insert(const std::initializer_list<std::pair<std::string, std::string>>& pairs) {
+        for (const auto& pair : pairs) map_.insert(pair);
     }
 
     template<typename T>
@@ -156,9 +173,16 @@ class Config {
         std::vector<std::string> sections;
 
         auto& operator()() {return config;}
-        auto& vector() {return config_vec;}
         const auto& operator()() const {return config;}
+
+        auto& vector() {return config_vec;}
         const auto& vector() const {return config_vec;}
+
+        void create_section(const std::string& section) {
+            config.map_[section];
+            config_vec.map_[section];
+            sections.push_back(section);
+        }
 
         bool read(const std::string& ifilename);
         bool write(const std::string& ofilename);

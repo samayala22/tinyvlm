@@ -9,7 +9,8 @@ namespace vlm {
 // ns : number of panels spanwise
 // nw : number of panels in chordwise wake
 // ncw : nc + nw
-struct Mesh {
+class Mesh {
+    public:
     // Unstructured members (for exporting results)
     // ---------------------
     // All vertices stored in single SoA for result exporting
@@ -36,7 +37,12 @@ struct Mesh {
     u32 ns = 1; // number of panels spanwise
     const u32 nw = 1; // number of panels in chordwise wake
 
-    void alloc(); // allocate memory for all arrays
+    // Analytical quanities when provided
+    // ---------------------
+    f32 s_ref = 0.0f; // reference area (of wing)
+    f32 c_ref = 0.0f; // reference chord (of wing)
+    Eigen::Vector3f ref_pt = {0.25f, 0.0f, 0.0f};
+
     void update_wake(const Eigen::Vector3f& u_inf); // update wake vertices
     void correction_high_aoa(f32 alpha_rad); // correct collocation points for high aoa
     void compute_connectivity(); // fill offsets, connectivity
@@ -60,8 +66,13 @@ struct Mesh {
     Eigen::Vector3f get_v3(u32 i) const; // lower left
 
     void io_read(const std::string& filename);
-    Mesh() = default;
-    Mesh(tiny::Config& cfg);
+    Mesh(const tiny::Config& cfg);
+    Mesh(const std::string& filename);
+    
+    private:
+    void alloc(); // allocate memory for all buffers
+    void init(); // called at the end of constructor
+    void io_read_plot3d_structured(std::ifstream& f);
 };
 
 } // namespace vlm

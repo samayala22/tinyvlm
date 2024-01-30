@@ -10,9 +10,30 @@
 using namespace vlm;
 using namespace Eigen;
 
-Mesh::Mesh(tiny::Config& cfg) {
+Mesh::Mesh(const tiny::Config& cfg)
+{
+    s_ref = cfg().section("solver").get<f32>("s_ref", 0.0f);
+    c_ref = cfg().section("solver").get<f32>("c_ref", 0.0f);
+    const std::vector<f32> ref_pt_vec = cfg().section("solver").get_vector<f32>("ref_pt", {0.25f, 0.0f, 0.0f});
+    // TODO: maybe need an assert here in case vector size != 3
+    ref_pt.x() = ref_pt_vec[0];
+    ref_pt.y() = ref_pt_vec[1];
+    ref_pt.z() = ref_pt_vec[2];
     io_read(cfg().section("files").get<std::string>("mesh"));
-};
+    init();
+}
+
+Mesh::Mesh(const std::string& filename) {
+    io_read(filename);
+    init();
+}
+
+void Mesh::init() {
+    if (c_ref == 0.0f) c_ref = chord_mean(0, ns+1);
+    if (s_ref == 0.0f) s_ref = panels_area_xy(0,0, nc, ns);
+    compute_connectivity();
+    compute_metrics_wing();
+}
 
 void Mesh::alloc() {
     const u32 ncw = nc + nw;
@@ -252,7 +273,7 @@ void Mesh::compute_metrics_wake() {
 }
 
 // plot3d is chordwise major
-void read_plot3d_structured(std::ifstream& f, Mesh& m) {
+void Mesh::io_read_plot3d_structured(std::ifstream& f) {
     std::cout << "reading plot3d mesh" << std::endl;
     u32 ni = 0; // number of vertices chordwise
     u32 nj = 0; // number of vertices spanwise
@@ -267,29 +288,31 @@ void read_plot3d_structured(std::ifstream& f, Mesh& m) {
     if (nk != 1) {
         throw std::runtime_error("Only 2D plot3d mesh is supported");
     }
-    m.ns = nj - 1;
-    m.nc = ni - 1;
-    m.alloc();
-    std::cout << "number of panels: " << m.nb_panels_wing() << std::endl;
-    std::cout << "ns: " << m.ns << std::endl;
-    std::cout << "nc: " << m.nc << std::endl;
+
+    ns = nj - 1;
+    nc = ni - 1;
+    alloc();
+
+    std::cout << "number of panels: " << nb_panels_wing() << std::endl;
+    std::cout << "ns: " << ns << std::endl;
+    std::cout << "nc: " << nc << std::endl;
     
     for (u32 j = 0; j < nj; j++) {
         for (u32 i = 0; i < ni; i++) {
             f >> x;
-            m.v.x[nj*i + j] = x;
+            v.x[nj*i + j] = x;
         }
     }
     for (u32 j = 0; j < nj; j++) {
         for (u32 i = 0; i < ni; i++) {
             f >> y;
-            m.v.y[nj*i + j] = y;
+            v.y[nj*i + j] = y;
         }
     }
     for (u32 j = 0; j < nj; j++) {
         for (u32 i = 0; i < ni; i++) {
             f >> z;
-            m.v.z[nj*i + j] = z;
+            v.z[nj*i + j] = z;
         }
     }
 
@@ -299,9 +322,9 @@ void read_plot3d_structured(std::ifstream& f, Mesh& m) {
     // if (std::abs(m.v.x[0]) != eps || std::abs(m.v.y[0]) != eps) {
     //     throw std::runtime_error("First vertex of plot3d mesh must be at origin");
     // }
-    f32 first_y = m.v.y[0];
+    f32 first_y = v.y[0];
     for (u32 i = 1; i < ni; i++) {
-        if (m.v.y[i * nj] != first_y) {
+        if (v.y[i * nj] != first_y) {
             throw std::runtime_error("Mesh vertices should be ordered in chordwise direction");
         }
     }
@@ -316,7 +339,7 @@ void Mesh::io_read(const std::string& filename) {
     std::ifstream f(path);
     if (f.is_open()) {
         if (path.extension() == ".x") {
-            read_plot3d_structured(f, *this);
+            io_read_plot3d_structured(f);
         } else {
             throw std::runtime_error("Only structured gridpro mesh format is supported");
         }
