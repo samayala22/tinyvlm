@@ -61,14 +61,16 @@ AeroCoefficients NonLinearVLM::solve(const FlowData& flow, const Database& db) {
                 const FlowData strip_flow = {strip_alphas[j], flow.beta, flow.u_inf, flow.rho};
                 const f32 strip_cl = backend->compute_coefficient_cl(strip_flow, strip_area, j, 1);
                 const f32 effective_aoa = strip_cl / (2.f*PI_f) - strip_flow.alpha + flow.alpha;
+
                 // TODO: interpolated value should be computed at the y mid point of the strip
                 const f32 correction = (db.interpolate_CL(effective_aoa, 0.f) - strip_cl) / (2.f*PI_f);
+                // std::printf(">>> Strip: %d | CL: %.3f | Interpolated: %.3f | Correction: %.3e\n", j, strip_cl, db.interpolate_CL(effective_aoa, 0.f), correction);
                 strip_alphas[j] += correction;
                 err += (f64)std::abs(correction);
             }
         }
         err /= (f64)mesh->ns; // normalize l1 error
-        std::printf(">>> Iter: %d | Error: %.3e \n", iter, err);
+        //std::printf(">>> Iter: %d | Error: %.3e \n", iter, err);
     }
     return AeroCoefficients{
         backend->compute_coefficient_cl(flow),

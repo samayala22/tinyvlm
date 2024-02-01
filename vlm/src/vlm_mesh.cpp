@@ -261,7 +261,7 @@ void Mesh::compute_metrics_i(u32 i ) {
     const linalg::alias::float3 vec_b = v2 - v0;
     const linalg::alias::float3 vec_e = v1 - v0;
 
-    area[i] = 0.5f * linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e));
+    area[i] = 0.5f * (linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e)));
     
     // collocation point (center of the quad)
     const linalg::alias::float3 colloc_pt = 0.25f * (v0 + v1 + v2 + v3);
