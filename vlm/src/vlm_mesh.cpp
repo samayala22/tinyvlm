@@ -1,15 +1,13 @@
 #include "vlm_mesh.hpp"
-#include "Eigen/src/Core/Matrix.h"
+#include "linalg.h"
 #include "vlm_types.hpp"
 
-#include <Eigen/Dense>
 #include <cassert>
 #include <iostream>
 #include <limits>
 #include <memory>
 
 using namespace vlm;
-using namespace Eigen;
 
 Mesh::Mesh(const tiny::Config& cfg)
 {
@@ -17,9 +15,9 @@ Mesh::Mesh(const tiny::Config& cfg)
     c_ref = cfg().section("solver").get<f32>("c_ref", 0.0f);
     const std::vector<f32> ref_pt_vec = cfg().section("solver").get_vector<f32>("ref_pt", {0.25f, 0.0f, 0.0f});
     // TODO: maybe need an assert here in case vector size != 3
-    ref_pt.x() = ref_pt_vec[0];
-    ref_pt.y() = ref_pt_vec[1];
-    ref_pt.z() = ref_pt_vec[2];
+    ref_pt.x = ref_pt_vec[0];
+    ref_pt.y = ref_pt_vec[1];
+    ref_pt.z = ref_pt_vec[2];
     io_read(cfg().section("files").get<std::string>("mesh"));
     init();
 }
@@ -28,7 +26,7 @@ Mesh::Mesh(
     const std::string& filename,
     const f32 s_ref_ = 0.0f,
     const f32 c_ref_ = 0.0f,
-    const Eigen::Vector3f& ref_pt_ = {0.25f, 0.0f, 0.0f}
+    const linalg::alias::float3& ref_pt_ = {0.25f, 0.0f, 0.0f}
     ) {
     s_ref = s_ref_;
     c_ref = c_ref_;
@@ -126,11 +124,11 @@ f32 Mesh::panels_area_xy(const u32 i, const u32 j, const u32 m, const u32 n) con
     for (u32 u = 0; u < m; u++) {
         for (u32 v = 0; v < n; v++) {
             const u32 idx = j + v + (i+u) * ns;
-            const Vector3f d1 = get_v0(idx) - get_v2(idx);
-            const Vector3f d2 = get_v1(idx) - get_v3(idx);
-            const Vector3f cross = d1.cross(d2);
+            const linalg::alias::float3 d1 = get_v0(idx) - get_v2(idx);
+            const linalg::alias::float3 d2 = get_v1(idx) - get_v3(idx);
+            const linalg::alias::float3 cross = linalg::cross(d1, d2);
             
-            total_area += 0.5f * std::abs(cross.z());
+            total_area += 0.5f * std::abs(cross.z);
             // std::cout << "area xy: " << 0.5f * std::abs(cross.z()) << "\n";
             // std::cout << "area: " << area[idx] << "\n";
         }
@@ -162,31 +160,31 @@ f32 Mesh::chord_length(const u32 j) const {
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-Eigen::Vector3f Mesh::get_v0(u32 i) const {
+linalg::alias::float3 Mesh::get_v0(u32 i) const {
     const u32 idx = i + i / ns;
     return {v.x[idx], v.y[idx], v.z[idx]};
 }
 
-Eigen::Vector3f Mesh::get_v1(u32 i) const {
+linalg::alias::float3 Mesh::get_v1(u32 i) const {
     const u32 idx = i + i / ns + 1;
     return {v.x[idx], v.y[idx], v.z[idx]};
 }
 
-Eigen::Vector3f Mesh::get_v2(u32 i) const {
+linalg::alias::float3 Mesh::get_v2(u32 i) const {
     const u32 idx = i + i / ns + ns + 2;
     return {v.x[idx], v.y[idx], v.z[idx]};
 }
 
-Eigen::Vector3f Mesh::get_v3(u32 i) const {
+linalg::alias::float3 Mesh::get_v3(u32 i) const {
     const u32 idx = i + i / ns + ns + 1;
     return {v.x[idx], v.y[idx], v.z[idx]};
 }
 
-void Mesh::update_wake(const Eigen::Vector3f& freestream) {
+void Mesh::update_wake(const linalg::alias::float3& freestream) {
     const f32 chord_root = chord_length(0); 
-    const f32 off_x = freestream.x() * 100.0f * chord_root;
-    const f32 off_y = freestream.y() * 100.0f * chord_root;
-    const f32 off_z = freestream.z() * 100.0f * chord_root;
+    const f32 off_x = freestream.x * 100.0f * chord_root;
+    const f32 off_y = freestream.y * 100.0f * chord_root;
+    const f32 off_z = freestream.z * 100.0f * chord_root;
 
     const u32 v_ns = ns + 1;
     const u32 begin_trailing_edge = nb_vertices_wing()-v_ns;
@@ -207,12 +205,12 @@ void Mesh::correction_high_aoa(f32 alpha_rad) {
     // Note: this can be vectorized and parallelized
     for (u32 i = 0; i < nb_panels_total(); i++) {
         // "chord vector" from center of leading line (v0-v1) to trailing line (v3-v2)
-        const Vector3f chord_vec = 0.5f * (get_v2(i) + get_v3(i) - get_v0(i) - get_v1(i));
-        const Vector3f colloc_pt = 0.5 * (get_v0(i) + get_v1(i)) + factor * chord_vec;
+        const linalg::alias::float3 chord_vec = 0.5f * (get_v2(i) + get_v3(i) - get_v0(i) - get_v1(i));
+        const linalg::alias::float3 colloc_pt = 0.5f * (get_v0(i) + get_v1(i)) + factor * chord_vec;
         // collocation calculated as a translation of the center of leading line center
-        colloc.x[i] = colloc_pt.x();
-        colloc.y[i] = colloc_pt.y();
-        colloc.z[i] = colloc_pt.z();
+        colloc.x[i] = colloc_pt.x;
+        colloc.y[i] = colloc_pt.y;
+        colloc.z[i] = colloc_pt.z;
     }
 }
 
@@ -239,38 +237,38 @@ void Mesh::compute_connectivity() {
 }
 
 void Mesh::compute_metrics_i(u32 i ) {
-    const Vector3f v0 = get_v0(i);
-    const Vector3f v1 = get_v1(i);
-    const Vector3f v2 = get_v2(i);
-    const Vector3f v3 = get_v3(i);
+    const linalg::alias::float3 v0 = get_v0(i);
+    const linalg::alias::float3 v1 = get_v1(i);
+    const linalg::alias::float3 v2 = get_v2(i);
+    const linalg::alias::float3 v3 = get_v3(i);
 
     // Vector v0 from p1 to p3
-    const Vector3f vec_0 = v3 - v1;
+    const linalg::alias::float3 vec_0 = v3 - v1;
 
     // Vector v1 from p0 to p2
-    const Vector3f vec_1 = v2 - v0;
+    const linalg::alias::float3 vec_1 = v2 - v0;
 
     // Normal = v0 x v1
-    const Vector3f normal_vec = vec_0.cross(vec_1).normalized();
-    normal.x[i] = normal_vec.x();
-    normal.y[i] = normal_vec.y();
-    normal.z[i] = normal_vec.z();
+    const linalg::alias::float3 normal_vec = linalg::normalize(linalg::cross(vec_0, vec_1));
+    normal.x[i] = normal_vec.x;
+    normal.y[i] = normal_vec.y;
+    normal.z[i] = normal_vec.z;
 
     // 3 vectors f (P0P3), b (P0P2), e (P0P1) to compute the area:
     // area = 0.5 * (||f x b|| + ||b x e||)
     // this formula might also work: area = || 0.5 * ( f x b + b x e ) ||
-    const Vector3f vec_f = v3 - v0;
-    const Vector3f vec_b = v2 - v0;
-    const Vector3f vec_e = v1 - v0;
+    const linalg::alias::float3 vec_f = v3 - v0;
+    const linalg::alias::float3 vec_b = v2 - v0;
+    const linalg::alias::float3 vec_e = v1 - v0;
 
-    area[i] = 0.5f * (vec_f.cross(vec_b).norm() + vec_b.cross(vec_e).norm());
+    area[i] = 0.5f * linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e));
     
     // collocation point (center of the quad)
-    const Vector3f colloc_pt = 0.25f * (v0 + v1 + v2 + v3);
+    const linalg::alias::float3 colloc_pt = 0.25f * (v0 + v1 + v2 + v3);
     
-    colloc.x[i] = colloc_pt.x();
-    colloc.y[i] = colloc_pt.y();
-    colloc.z[i] = colloc_pt.z();
+    colloc.x[i] = colloc_pt.x;
+    colloc.y[i] = colloc_pt.y;
+    colloc.z[i] = colloc_pt.z;
 }
 
 void Mesh::compute_metrics_wing() {

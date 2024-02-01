@@ -1,10 +1,10 @@
 #include "vlm_backend_avx2.hpp"
 
-#include "Eigen/src/Core/Matrix.h"
+#include "linalg.h"
 #include "simpletimer.hpp"
-#include "vlm_fwd.hpp"
-#include "vlm_types.hpp"
-#include "vlm_inline.hpp"
+#include "vlm_mesh.hpp"
+#include "vlm_data.hpp"
+#include "vlm_utils.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -26,6 +26,8 @@ struct BackendAVX2::linear_solver_t {
     linear_solver_t(Eigen::Map<Eigen::MatrixXf>& A) : lu(A) {};
     ~linear_solver_t() = default;
 };
+
+BackendAVX2::~BackendAVX2() = default; // Destructor definition
 
 BackendAVX2::BackendAVX2(Mesh& mesh) : Backend(mesh) {
     //tbb::global_control global_limit(oneapi::tbb::global_control::max_allowed_parallelism, 1);
@@ -310,7 +312,7 @@ void BackendAVX2::compute_rhs(const FlowData& flow) {
     const Mesh& m = mesh;
 
     for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
-        rhs[i] = - (flow.freestream.x() * m.normal.x[i] + flow.freestream.y() * m.normal.y[i] + flow.freestream.z() * m.normal.z[i]);
+        rhs[i] = - (flow.freestream.x * m.normal.x[i] + flow.freestream.y * m.normal.y[i] + flow.freestream.z * m.normal.z[i]);
     }
 }
 
@@ -321,8 +323,8 @@ void BackendAVX2::compute_rhs(const FlowData& flow, const std::vector<f32>& sect
     for (u32 i = 0; i < mesh.nc; i++) {
         for (u32 j = 0; j < mesh.ns; j++) {
             const u32 li = i * mesh.ns + j; // linear index
-            const Eigen::Vector3f freestream = compute_freestream(flow.u_inf, section_alphas[j], flow.beta);
-            rhs[li] = - (freestream.x() * m.normal.x[li] + freestream.y() * m.normal.y[li] + freestream.z() * m.normal.z[li]);
+            const linalg::alias::float3 freestream = compute_freestream(flow.u_inf, section_alphas[j], flow.beta);
+            rhs[li] = - (freestream.x * m.normal.x[li] + freestream.y * m.normal.y[li] + freestream.z * m.normal.z[li]);
         }
     }
 }
@@ -353,21 +355,21 @@ f32 BackendAVX2::compute_coefficient_cl(const FlowData& flow, const f32 area,
     for (u32 u = 0; u < mesh.nc; u++) {
         for (u32 v = j; v < j + n; v++) {
             const u32 li = u * mesh.ns + v; // linear index
-            const Eigen::Vector3f v0 = mesh.get_v0(li);
-            const Eigen::Vector3f v1 = mesh.get_v1(li);
+            const linalg::alias::float3 v0 = mesh.get_v0(li);
+            const linalg::alias::float3 v1 = mesh.get_v1(li);
             // Leading edge vector pointing outward from wing root
-            const Eigen::Vector3f dl = v1 - v0;
+            const linalg::alias::float3 dl = v1 - v0;
             // Distance from the center of leading edge to the reference point
-            const Eigen::Vector3f force = flow.freestream.cross(dl) * flow.rho * delta_gamma[li];
-            cl += force.dot(flow.lift_axis);
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
+            cl += linalg::dot(force, flow.lift_axis);
         }
     }
-    cl /= 0.5f * flow.rho * flow.freestream.squaredNorm() * area;
+    cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
 
     return cl;
 }
 
-Eigen::Vector3f BackendAVX2::compute_coefficient_cm(
+linalg::alias::float3 BackendAVX2::compute_coefficient_cm(
     const FlowData& flow,
     const f32 area,
     const f32 chord,
@@ -376,23 +378,23 @@ Eigen::Vector3f BackendAVX2::compute_coefficient_cm(
 {
     assert(n > 0);
     assert(j >= 0 and j+n <= mesh.ns);
-    Eigen::Vector3f cm = Eigen::Vector3f::Zero();
+    linalg::alias::float3 cm(0.f, 0.f, 0.f);
 
     for (u32 u = 0; u < mesh.nc; u++) {
         for (u32 v = j; v < j + n; v++) {
             const u32 li = u * mesh.ns + v; // linear index
-            const Eigen::Vector3f v0 = mesh.get_v0(li);
-            const Eigen::Vector3f v1 = mesh.get_v1(li);
+            const linalg::alias::float3 v0 = mesh.get_v0(li);
+            const linalg::alias::float3 v1 = mesh.get_v1(li);
             // Leading edge vector pointing outward from wing root
-            const Eigen::Vector3f dl = v1 - v0;
+            const linalg::alias::float3 dl = v1 - v0;
             // Distance from the center of leading edge to the reference point
-            const Eigen::Vector3f dst_to_ref = mesh.ref_pt - 0.5f * (v0 + v1);
+            const linalg::alias::float3 dst_to_ref = mesh.ref_pt - 0.5f * (v0 + v1);
             // Distance from the center of leading edge to the reference point
-            const Eigen::Vector3f force = flow.freestream.cross(dl) * flow.rho * delta_gamma[li];
-            cm += force.cross(dst_to_ref);
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
+            cm += linalg::cross(force, dst_to_ref);
         }
     }
-    cm /= 0.5f * flow.rho * flow.freestream.squaredNorm() * area * chord;
+    cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * chord;
     return cm;
 }
 
@@ -414,28 +416,28 @@ f32 BackendAVX2::compute_coefficient_cd(
         const f32 colloc_x = mesh.colloc.x[ia];
         const f32 colloc_y = mesh.colloc.y[ia];
         const f32 colloc_z = mesh.colloc.z[ia];
-        Eigen::Vector3f inf = Eigen::Vector3f::Zero();
+        linalg::alias::float3 inf(0.f, 0.f, 0.f);
         for (u32 ia2 = begin; ia2 < end; ia2++) {
-            Eigen::Vector3f inf2 = Eigen::Vector3f::Zero();
-            Eigen::Vector3f v0 = mesh.get_v0(ia2);
-            Eigen::Vector3f v1 = mesh.get_v1(ia2);
-            Eigen::Vector3f v2 = mesh.get_v2(ia2);
-            Eigen::Vector3f v3 = mesh.get_v3(ia2);
+            linalg::alias::float3 inf2(0.f, 0.f, 0.f);
+            linalg::alias::float3 v0 = mesh.get_v0(ia2);
+            linalg::alias::float3 v1 = mesh.get_v1(ia2);
+            linalg::alias::float3 v2 = mesh.get_v2(ia2);
+            linalg::alias::float3 v3 = mesh.get_v3(ia2);
             // Influence from the streamwise vortex lines
-            kernel_influence_scalar(inf2.x(), inf2.y(), inf2.z(), colloc_x, colloc_y, colloc_z, v1.x(), v1.y(), v1.z(), v2.x(), v2.y(), v2.z());
-            kernel_influence_scalar(inf2.x(), inf2.y(), inf2.z(), colloc_x, colloc_y, colloc_z, v3.x(), v3.y(), v3.z(), v0.x(), v0.y(), v0.z());
+            kernel_influence_scalar(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+            kernel_influence_scalar(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v3.x, v3.y, v3.z, v0.x, v0.y, v0.z);
             f32 gamma_w = gamma[(mesh.nc-1)*mesh.ns + ia2 % mesh.ns];
             // This is the induced velocity calculated with the vortex (gamma) calculated earlier (according to kutta condition)
             inf += gamma_w * inf2;
         }
-        const Eigen::Vector3f normal{mesh.normal.x[ia], mesh.normal.y[ia], mesh.normal.z[ia]};
-        const f32 w_ind = inf.dot(normal);
+        const linalg::alias::float3 normal{mesh.normal.x[ia], mesh.normal.y[ia], mesh.normal.z[ia]};
+        const f32 w_ind = linalg::dot(inf, normal);
         const u32 col = ia % mesh.ns;
-        Eigen::Vector3f v0 = mesh.get_v0(ia);
-        Eigen::Vector3f v1 = mesh.get_v1(ia);
-        const f32 dl = (v1 - v0).norm();
+        linalg::alias::float3 v0 = mesh.get_v0(ia);
+        linalg::alias::float3 v1 = mesh.get_v1(ia);
+        const f32 dl = linalg::length(v1 - v0);
         cd -= 0.5f * flow.rho * gamma[(mesh.nc-1)*mesh.ns + col] * w_ind * dl;
     }
-    cd /= 0.5f * flow.rho * flow.freestream.squaredNorm() * area;
+    cd /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
     return cd;
 }

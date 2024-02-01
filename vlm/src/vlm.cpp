@@ -1,20 +1,10 @@
 #include "vlm.hpp"
 
 #include "vlm_backend.hpp"
-#include "tinycpuid.hpp"
-#include "tinyinterpolate.hpp"
 #include "tinytimer.hpp"
 
 #include "vlm_data.hpp"
-#include <limits>
 #include <utility>
-
-#ifdef VLM_AVX2
-#include "vlm_backend_avx2.hpp"
-#endif
-#ifdef VLM_CUDA
-#include "vlm_backend_cuda.hpp"
-#endif
 
 #include <iostream>
 #include <cstdio>
@@ -22,24 +12,6 @@
 #include <algorithm>
 
 using namespace vlm;
-
-// Backend factory (TODO: move this to the backend.cpp ?)
-std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name, Mesh& mesh) {
-    tiny::CPUID cpuid;
-    cpuid.print_info();
-
-    #ifdef VLM_AVX2
-    if (backend_name == "avx2" && cpuid.has("AVX2")) {
-        return std::make_unique<BackendAVX2>(mesh);
-    }
-    #endif
-    #ifdef VLM_CUDA
-    if (backend_name == "cuda") {
-        return std::make_unique<BackendCUDA>(mesh, data);
-    }
-    #endif
-    throw std::runtime_error("Unsupported backend: " + backend_name);
-}
 
 Solver::Solver(const tiny::Config& cfg) {
     std::string backend_name = cfg().section("solver").get<std::string>("backend", "avx2");
@@ -96,7 +68,7 @@ AeroCoefficients NonLinearVLM::solve(const FlowData& flow, const Database& db) {
             }
         }
         err /= (f64)mesh->ns; // normalize l1 error
-        // std::printf(">>> Iter: %d | Error: %.3e \n", iter, err);
+        std::printf(">>> Iter: %d | Error: %.3e \n", iter, err);
     }
     return AeroCoefficients{
         backend->compute_coefficient_cl(flow),

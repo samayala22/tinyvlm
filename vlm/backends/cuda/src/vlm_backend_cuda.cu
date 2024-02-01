@@ -7,6 +7,7 @@
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include <cstdio>
+#include <vector_types.h>
 
 using namespace vlm;
 
@@ -103,7 +104,7 @@ private:
     ~CtxManager() = default;
 };
 
-BackendCUDA::BackendCUDA(Mesh& mesh, Data& data) : default_backend(mesh, data), Backend(mesh, data) {
+BackendCUDA::BackendCUDA(Mesh& mesh) : default_backend(mesh), Backend(mesh) {
     printCudaInfo();
     auto& ctx = CtxManager::getInstance();
     ctx.create();
@@ -113,6 +114,8 @@ BackendCUDA::BackendCUDA(Mesh& mesh, Data& data) : default_backend(mesh, data), 
     // Allocate device memory
     CHECK_CUDA(cudaMalloc((void**)&d_lhs, n*n * sizeof(float)));
     CHECK_CUDA(cudaMalloc((void**)&d_rhs, n * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&d_gamma, n * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&d_delta_gamma, n * sizeof(float)));
 }
 
 BackendCUDA::~BackendCUDA() {
@@ -129,12 +132,16 @@ void BackendCUDA::reset() {
     default_backend.reset();
 }
 
-void BackendCUDA::compute_lhs() {
-    default_backend.compute_lhs();
+void BackendCUDA::compute_lhs(const FlowData& flow) {
+    default_backend.compute_lhs(flow);
 }
 
-void BackendCUDA::compute_rhs() {
-    default_backend.compute_rhs();
+void BackendCUDA::compute_rhs(const FlowData& flow) {
+    default_backend.compute_rhs(flow);
+}
+
+void BackendCUDA::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
+    default_backend.compute_rhs(flow, section_alphas);
 }
 
 int CUDA_LU_solver(cusolverDnHandle_t handle, float *d_A,
@@ -198,19 +205,32 @@ void BackendCUDA::lu_solve() {
     CUDA_LU_solver(ctx.cusolver(), d_lhs, d_rhs, N);
 
     // copy data back to host
-    CHECK_CUDA(cudaMemcpy(data.gamma.data(), d_rhs, N * sizeof(float), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(default_backend.gamma.data(), d_rhs, N * sizeof(float), cudaMemcpyDeviceToHost));
 }
 
-f32 BackendCUDA::compute_coefficient_cl(const Mesh& mesh, const Data& data, const f32 area, const Eigen::Vector3f& freestream, const u32 j, const u32 n) {
-    return default_backend.compute_coefficient_cl(mesh, data, area, freestream, j, n);
+f32 BackendCUDA::compute_coefficient_cl(
+    const FlowData& flow,
+    const f32 area,
+    const u32 j,
+    const u32 n) {
+    return default_backend.compute_coefficient_cl(flow, area, j, n);
 }
 
-f32 BackendCUDA::compute_coefficient_cd(const Mesh& mesh, const Data& data, const f32 area, const u32 j, const u32 n) {
-    return default_backend.compute_coefficient_cd(mesh, data, area, j, n);
+f32 BackendCUDA::compute_coefficient_cd(
+    const FlowData& flow,
+    const f32 area,
+    const u32 j,
+    const u32 n) {
+    return default_backend.compute_coefficient_cd(flow, area, j, n);
 }
 
-Eigen::Vector3f BackendCUDA::compute_coefficient_cm(const Mesh& mesh, const Data& data, const f32 area, const f32 chord, const u32 j, const u32 n) {
-    return default_backend.compute_coefficient_cm(mesh, data, area, chord, j, n);
+linalg::alias::float3 BackendCUDA::compute_coefficient_cm(
+    const FlowData& flow,
+    const f32 area,
+    const f32 chord,
+    const u32 j,
+    const u32 n) {
+    return default_backend.compute_coefficient_cm(flow, area, chord, j, n);
 }
 
 void BackendCUDA::compute_delta_gamma() {

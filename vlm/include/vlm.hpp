@@ -44,6 +44,4 @@ class LinearVLM final: public Solver {
     AeroCoefficients solve(const FlowData& flow);
 };
 
-std::unique_ptr<Backend> create_backend(const std::string& backend_name, Mesh& mesh);
-
 } // namespace vlm
