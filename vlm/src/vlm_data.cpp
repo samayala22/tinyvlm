@@ -1,7 +1,6 @@
 #include "vlm_data.hpp"
-#include "vlm_inline.hpp"
+#include "vlm_utils.hpp"
 
-#include "Eigen/src/Core/Matrix.h"
 #include <cmath>
 
 using namespace vlm;

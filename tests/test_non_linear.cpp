@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
     lift_curves.emplace_back(std::make_unique<SpallartLiftCurve>(0.72f, 0.28f, 0.04f, 2.f*PI_f, 1.5f*PI_f));
     lift_curves.emplace_back(std::make_unique<ThinAirfoilPolarLiftCurve>());
     std::vector<f32> alphas = {0, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
-    std::transform(alphas.begin(), alphas.end(), alphas.begin(), to_radians);
+    //std::transform(alphas.begin(), alphas.end(), alphas.begin(), to_radians);
 
     std::vector<f32> db_alphas;
     linspace(to_radians(0.f), to_radians(20.f), 100, db_alphas);
@@ -81,9 +81,9 @@ int main(int argc, char** argv) {
             db.profiles_pos.emplace_back(0.0f);
             
             for (const auto& alpha : alphas) {
-                const FlowData flow{alpha, 0.0f, 1.0f, 1.0f};
+                const FlowData flow{to_radians(alpha), 0.0f, 1.0f, 1.0f};
                 auto coeffs = solver.solve(flow, db);
-                std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", flow.alpha, coeffs.cl, coeffs.cd, coeffs.cm.x(), coeffs.cm.y(), coeffs.cm.z());
+                std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", alpha, coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
                 const f32 analytical_cl = (*lift_curve)(flow.alpha);
                 const f32 abs_error = std::abs(coeffs.cl - analytical_cl);
                 const f32 rel_error = 100.0f * abs_error / (analytical_cl + std::numeric_limits<f32>::epsilon());

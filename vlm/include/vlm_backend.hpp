@@ -18,12 +18,14 @@ class Backend {
         virtual void lu_solve() = 0;
         virtual f32 compute_coefficient_cl(const FlowData& flow, const f32 area, const u32 j, const u32 n) = 0;
         f32 compute_coefficient_cl(const FlowData& flow);
-        virtual Eigen::Vector3f compute_coefficient_cm(const FlowData& flow, const f32 area, const f32 chord, const u32 j, const u32 n) = 0;
-        Eigen::Vector3f compute_coefficient_cm(const FlowData& flow);
+        virtual linalg::alias::float3 compute_coefficient_cm(const FlowData& flow, const f32 area, const f32 chord, const u32 j, const u32 n) = 0;
+        linalg::alias::float3 compute_coefficient_cm(const FlowData& flow);
         virtual f32 compute_coefficient_cd(const FlowData& flow, const f32 area, const u32 j, const u32 n) = 0;
         f32 compute_coefficient_cd(const FlowData& flow);
         virtual void compute_delta_gamma() = 0;
         virtual ~Backend() = default;
 };
+
+std::unique_ptr<Backend> create_backend(const std::string& backend_name, Mesh& mesh);
 
 }

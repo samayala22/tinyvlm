@@ -15,9 +15,9 @@ class FlowData {
     const f32 rho; // fluid density
     const f32 sigma_vatistas = 0.0f; // vatistas coefficient
 
-    const Eigen::Vector3f freestream;
-    const Eigen::Vector3f lift_axis;
-    const Eigen::Vector3f stream_axis;
+    const linalg::alias::float3 freestream;
+    const linalg::alias::float3 lift_axis;
+    const linalg::alias::float3 stream_axis;
 
     FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_);
 };
@@ -26,9 +26,9 @@ class AeroCoefficients {
     public:
     const f32 cl;
     const f32 cd;
-    const Eigen::Vector3f cm;
+    const linalg::alias::float3 cm;
 
-    AeroCoefficients(const f32 cl_, const f32 cd_, const Eigen::Vector3f& cm_) :
+    AeroCoefficients(const f32 cl_, const f32 cd_, const linalg::alias::float3& cm_) :
         cl(cl_),
         cd(cd_),
         cm(cm_)

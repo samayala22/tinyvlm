@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
         for (auto alpha : alphas) {
             FlowData flow(alpha, 0.0f, 1.0f, 1.0f);
             auto coeffs = solver.solve(flow);
-            std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", flow.alpha, coeffs.cl, coeffs.cd, coeffs.cm.x(), coeffs.cm.y(), coeffs.cm.z());
+            std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", flow.alpha, coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
         }
 
         // Pause for memory reading

@@ -1,5 +1,3 @@
-add_requires("openmp", "eigen")
-
 target("libvlm")
     set_kind("static")
 
@@ -10,7 +8,6 @@ target("libvlm")
         end
     end
     
-    add_packages("openmp", "eigen", {public = true})
     add_files("src/*.cpp")
     add_includedirs("include", {public = true})
     

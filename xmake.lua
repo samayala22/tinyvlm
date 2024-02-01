@@ -1,6 +1,6 @@
 set_project("vlm")
 set_version("0.1.0")
-set_xmakever("2.8.3") -- autobuild support
+set_xmakever("2.8.6") -- xmake test support
 
 add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.asan")
 

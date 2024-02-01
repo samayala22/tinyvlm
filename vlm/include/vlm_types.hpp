@@ -7,8 +7,8 @@
 #include <string>
 #include <cmath>
 
+#include "linalg.h"
 #include "tinyconfig.hpp"
-#include <Eigen/Dense>
 
 namespace vlm {
 
