@@ -45,13 +45,17 @@ for _,name in ipairs(backends) do
     end
 end
 
+add_requires("openmp")
+
 includes("vlm/xmake.lua") -- library and main driver
 
+-- Create tests
 for _, file in ipairs(os.files("tests/test_*.cpp")) do
     local name = path.basename(file)
     target(name)
         set_kind("binary")
         set_default(false)
+        add_packages("openmp") -- needed for gcc linker (for eigen)
         add_deps("libvlm")
         add_files("tests/" .. name .. ".cpp")
         add_tests("default")
