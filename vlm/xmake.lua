@@ -1,6 +1,8 @@
+add_requires("openmp")
+
 target("libvlm")
     set_kind("static")
-
+    add_packages("openmp") -- needed for gcc linker
     for _,name in ipairs(backends) do
         if has_config(backend_option(name)) then
             add_defines(backend_defines(name))
