@@ -14,7 +14,7 @@ set_policy("run.autobuild", true)
 -- set_policy("build.optimization.lto")
 
 set_warnings("all")
-set_languages("c++20", "c99")
+set_languages("c++17", "c99")
 set_runtimes("MD") -- msvc runtime library (MD/MT/MDd/MTd)
 
 -- TBB macro for profiling parallel objects
