@@ -1,3 +1,7 @@
+[![Windows](https://github.com/samayala22/tinyvlm/actions/workflows/windows.yaml/badge.svg)](https://github.com/AER8875-2022/AeroFLEX/actions/workflows/windows.yaml)
+[![Linux](https://github.com/samayala22/tinyvlm/actions/workflows/linux.yaml/badge.svg)](https://github.com/AER8875-2022/AeroFLEX/actions/workflows/linux.yaml)
+<!-- [![MacOS](https://github.com/AER8875-2022/AeroFLEX/actions/workflows/macos.yaml/badge.svg)](https://github.com/AER8875-2022/AeroFLEX/actions/workflows/macos.yaml) -->
+
 # TinyVLM
 
 ### High Performance Potential Flow Solver
