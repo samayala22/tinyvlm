@@ -9,10 +9,11 @@
 
 ## Features:
 
-- [X] Stationary VLM
-- [X] Non-linear (2D single airfoil)
-- [ ] Panel-method
-- [ ] Spectral domain
+- [X] VLM
+- [X] NL-VLM
+- [ ] UVLM
+- [ ] NL-UVLM
+- [ ] NLHB-UVLM
 
 # Correctors
 
@@ -32,8 +33,8 @@
 
 - [X] Clangd
 - [ ] Clang-Tidy
-- [ ] Testing framework (via `xmake test`)
-- [ ] Compilation CI
+- [X] Testing framework (via `xmake test`)
+- [X] Compilation CI
 - [ ] Performance regression CI
 - [ ] Documented code (doxygen style)
 
