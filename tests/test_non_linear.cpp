@@ -66,7 +66,7 @@ void write_vector_pair(const std::string& filename, const std::vector<T>& vec1, 
 }
 
 int main(int argc, char** argv) {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x1000.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x200.x"};
     const std::vector<std::string> backends = {"avx2"};
     std::vector<std::pair<std::string, std::unique_ptr<LiftCurveFunctor>>> lift_curves;
     lift_curves.emplace_back(std::make_pair("spallart1", std::make_unique<SpallartLiftCurve>(1.2f, 0.28f, 0.02f, 2.f*PI_f, 2.f*PI_f)));
@@ -110,11 +110,11 @@ int main(int argc, char** argv) {
                 const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
                 auto coeffs = solver.solve(flow, db);
                 test_cl[i] = coeffs.cl;
-                //std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", to_degrees(test_alphas[i]), coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
+                std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", to_degrees(test_alphas[i]), coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
                 const f32 analytical_cl = (*lift_curve.second)(flow.alpha);
                 const f32 abs_error = std::abs(coeffs.cl - analytical_cl);
                 const f32 rel_error = 100.0f * abs_error / (analytical_cl + std::numeric_limits<f32>::epsilon());
-                //std::printf(">>> Analytical: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cl, abs_error, rel_error);
+                std::printf(">>> Analytical: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cl, abs_error, rel_error);
                 if (rel_error > 1.f) return 1; // Failure
             }
             write_vector_pair(lift_curve.first + "_nonlinear_cl", test_alphas, test_cl);

@@ -9,6 +9,8 @@
 
 using namespace vlm;
 
+constexpr f32 EPS = std::numeric_limits<f32>::epsilon();
+
 Mesh::Mesh(const tiny::Config& cfg)
 {
     s_ref = cfg().section("solver").get<f32>("s_ref", 0.0f);
@@ -201,7 +203,7 @@ void Mesh::update_wake(const linalg::alias::float3& freestream) {
 
 // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf (Eq 3.4 p21)
 void Mesh::correction_high_aoa(f32 alpha_rad) {
-    const f32 factor = 0.5f * alpha_rad / std::sin(alpha_rad + 1e-7f); // correction factor
+    const f32 factor = 0.5f * alpha_rad / (std::sin(alpha_rad) + EPS); // correction factor
     // Note: this can be vectorized and parallelized
     for (u32 i = 0; i < nb_panels_total(); i++) {
         // "chord vector" from center of leading line (v0-v1) to trailing line (v3-v2)
