@@ -7,6 +7,7 @@
 #include <string>
 #include <cmath>
 
+#include "linalg.h"
 #include "tinyconfig.hpp"
 
 namespace vlm {
@@ -58,15 +59,6 @@ struct SoA_3D_t {
         y.reserve(size);
         z.reserve(size);
     }
-};
-
-template<typename T>
-struct Vec3 {
-    T x = 0;
-    T y = 0;
-    T z = 0;
-    Vec3() = default;
-    Vec3(T x_, T y_, T z_) : x(x_), y(y_), z(z_) {};
 };
 
 } // namespace vlm

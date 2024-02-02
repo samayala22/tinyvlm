@@ -9,7 +9,8 @@ namespace vlm {
 // ns : number of panels spanwise
 // nw : number of panels in chordwise wake
 // ncw : nc + nw
-struct Mesh {
+class Mesh {
+    public:
     // Unstructured members (for exporting results)
     // ---------------------
     // All vertices stored in single SoA for result exporting
@@ -36,8 +37,13 @@ struct Mesh {
     u32 ns = 1; // number of panels spanwise
     const u32 nw = 1; // number of panels in chordwise wake
 
-    void alloc(); // allocate memory for all arrays
-    void update_wake(const Vec3<f32>& u_inf); // update wake vertices
+    // Analytical quanities when provided
+    // ---------------------
+    f32 s_ref = 0.0f; // reference area (of wing)
+    f32 c_ref = 0.0f; // reference chord (of wing)
+    linalg::alias::float3 ref_pt = {0.25f, 0.0f, 0.0f};
+
+    void update_wake(const linalg::alias::float3& u_inf); // update wake vertices
     void correction_high_aoa(f32 alpha_rad); // correct collocation points for high aoa
     void compute_connectivity(); // fill offsets, connectivity
     void compute_metrics_wing(); // fill colloc, normal, area
@@ -47,18 +53,34 @@ struct Mesh {
     u32 nb_panels_total() const;
     u32 nb_vertices_wing() const;
     u32 nb_vertices_total() const;
-    f32 chord_root() const;
-    f32 chord_tip() const;
-    f32 chord_avg() const;
+    f32 panels_area(const u32 i, const u32 j, const u32 m, const u32 n) const;
+    f32 panels_area_xy(const u32 i, const u32 j, const u32 m, const u32 n) const;
+    f32 panel_width_y(const u32 i, const u32 j) const;
+    f32 chord_length(const u32 j) const;
+    f32 chord_mean(const u32 j, const u32 n) const;
+
     // i panel vertices coordinates
-    Vec3<f32> get_v0(u32 i) const; // upper left
-    Vec3<f32> get_v1(u32 i) const; // upper right
-    Vec3<f32> get_v2(u32 i) const; // lower right
-    Vec3<f32> get_v3(u32 i) const; // lower left
+    linalg::alias::float3 get_v0(u32 i) const; // upper left
+    linalg::alias::float3 get_v1(u32 i) const; // upper right
+    linalg::alias::float3 get_v2(u32 i) const; // lower right
+    linalg::alias::float3 get_v3(u32 i) const; // lower left
 
     void io_read(const std::string& filename);
-    Mesh() = default;
-    Mesh(tiny::Config& cfg);
+    Mesh(const tiny::Config& cfg);
+    Mesh(
+        const std::string& filename,
+        const f32 s_ref_,
+        const f32 c_ref_,
+        const linalg::alias::float3& ref_pt_
+    );
+    
+    private:
+    void alloc(); // allocate memory for all buffers
+    void init(); // called at the end of constructor
+    void io_read_plot3d_structured(std::ifstream& f);
 };
+
+// todo, update this to mirror the constructor
+std::unique_ptr<Mesh> create_mesh(const std::string filename);
 
 } // namespace vlm

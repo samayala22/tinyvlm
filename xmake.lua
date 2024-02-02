@@ -1,6 +1,6 @@
 set_project("vlm")
 set_version("0.1.0")
-set_xmakever("2.8.3") -- autobuild support
+set_xmakever("2.8.6") -- xmake test support
 
 add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.asan")
 
@@ -46,3 +46,13 @@ for _,name in ipairs(backends) do
 end
 
 includes("vlm/xmake.lua") -- library and main driver
+
+for _, file in ipairs(os.files("tests/test_*.cpp")) do
+    local name = path.basename(file)
+    target(name)
+        set_kind("binary")
+        set_default(false)
+        add_deps("libvlm")
+        add_files("tests/" .. name .. ".cpp")
+        add_tests("default")
+end
