@@ -2,7 +2,6 @@ add_requires("openmp")
 
 target("libvlm")
     set_kind("static")
-    add_packages("openmp") -- needed for gcc linker
     for _,name in ipairs(backends) do
         if has_config(backend_option(name)) then
             add_defines(backend_defines(name))
@@ -17,14 +16,15 @@ target("vlm")
     set_kind("binary")
     set_default(true)
     add_rpathdirs("$ORIGIN") -- tbb dll must be in same dir as exe
+    add_packages("openmp") -- needed for gcc linker (for eigen)
     add_deps("libvlm") -- core library
     set_runargs({"-i"}, {"../../../../config/elliptic.vlm"}, {"-m"}, {"../../../../mesh/elliptic_64x64.x"}, {"-o"}, {"../../../../results/elliptic.vtu"})
     add_files("dev/main.cpp")
 
 -- xmake run vlm -i ../../../../config/swept.vlm -m ../../../../mesh/rectangular_4x4.x -o ../../../../results/rec.vtu
 
-target("vlm-tests")
-    set_kind("binary")
-    set_default(false)
-    add_deps("libvlm")
-    add_files("dev/tests.cpp")
+-- target("vlm-tests")
+--     set_kind("binary")
+--     set_default(false)
+--     add_deps("libvlm")
+--     add_files("dev/tests.cpp")
