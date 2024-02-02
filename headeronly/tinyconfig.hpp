@@ -34,6 +34,7 @@ SOFTWARE.
 #include <fstream>
 #include <filesystem>
 #include <stdexcept>
+#include <initializer_list>
 
 namespace tiny {
 
@@ -68,15 +69,7 @@ inline T convert_value(std::string s) {
 
 template<>
 inline std::string convert_value(std::string s) {
-    if (s.front() == '"' && s.back() == '"') {
-        if (s.size() > 2) {
-            return s.substr(1, s.size() - 2);
-        } else {
-            return "";
-        }
-    } else {
-        throw std::runtime_error("String value must be enclosed in double quotes. String: " + s);
-    }
+    return s;
 }
 
 template<>
@@ -114,12 +107,26 @@ inline std::vector<T> convert_vector(std::string s) {
 }
 
 template<typename T>
-struct BaseEntries {
+class BaseEntries {
+    public:
     std::unordered_map<std::string, T> map_;
+
     bool has(const std::string &key) const { return map_.find(key) != map_.end(); }
+
+    T& section(const std::string &key) {
+        return section_impl(this, key);
+    }
+
     const T& section(const std::string &key) const {
-        auto elem = map_.find(key);
-        if (elem == map_.end()) err_missing_section(key);
+        return section_impl(this, key);
+    }
+
+    private:
+
+    template <typename Self>
+    static auto& section_impl(Self* self, const std::string& key) {
+        auto elem = self->map_.find(key);
+        if (elem == self->map_.end()) err_missing_section(key);
         return elem->second;
     }
 };
@@ -139,6 +146,10 @@ struct KeyEntries {
     T get(const std::string& key, const T default_val) const {
         if (has(key)) return get<T>(key);
         else return default_val;
+    }
+
+    void insert(const std::initializer_list<std::pair<std::string, std::string>>& pairs) {
+        for (const auto& pair : pairs) map_.insert(pair);
     }
 
     template<typename T>
@@ -161,8 +172,17 @@ class Config {
         BaseEntries<std::vector<KeyEntries>> config_vec;
         std::vector<std::string> sections;
 
-        const auto& operator()() {return config;}
-        const auto& vector() {return config_vec;}
+        auto& operator()() {return config;}
+        const auto& operator()() const {return config;}
+
+        auto& vector() {return config_vec;}
+        const auto& vector() const {return config_vec;}
+
+        void create_section(const std::string& section) {
+            config.map_[section];
+            config_vec.map_[section];
+            sections.push_back(section);
+        }
 
         bool read(const std::string& ifilename);
         bool write(const std::string& ofilename);
@@ -188,7 +208,7 @@ inline bool Config::read(const std::string& ifilename) {
 
 inline bool Config::write(const std::string& ofilename) {
     std::filesystem::path path(ofilename);
-    //if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
+    // if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
     std::ofstream f(path);
 	if (f.is_open()) {
         write_file(f);
@@ -221,6 +241,7 @@ inline void Config::read_file(std::ifstream &f) {
     int line_nb = 0;
     while (std::getline(f, line)) {
         line_nb++;
+        // strip the line with everything after the # character
         if (auto comment = line.find("#"); comment != std::string::npos) {
             line = line.substr(0, comment);
         }

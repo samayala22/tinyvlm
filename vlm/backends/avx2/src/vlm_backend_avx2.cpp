@@ -1,42 +1,59 @@
 #include "vlm_backend_avx2.hpp"
 
+#include "linalg.h"
 #include "simpletimer.hpp"
+#include "vlm_mesh.hpp"
+#include "vlm_data.hpp"
+#include "vlm_utils.hpp"
 
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
 #include <immintrin.h>
 
+// TODO: evaluate possible replacement of TBB with TaskFlow or OMP
 #include <oneapi/tbb/global_control.h>
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/parallel_for.h>
 
-//#include "mkl.h"
-#include <Eigen/IterativeLinearSolvers>
 #include <Eigen/Dense>
+#include <Eigen/IterativeLinearSolvers>
 
 using namespace vlm;
 
-BackendAVX2::BackendAVX2(Mesh& mesh, Data& data) : Backend(mesh, data) {
+struct BackendAVX2::linear_solver_t {
+    Eigen::PartialPivLU<Eigen::Ref<Eigen::MatrixXf>> lu;
+    linear_solver_t(Eigen::Map<Eigen::MatrixXf>& A) : lu(A) {};
+    ~linear_solver_t() = default;
+};
+
+BackendAVX2::~BackendAVX2() = default; // Destructor definition
+
+BackendAVX2::BackendAVX2(Mesh& mesh) : Backend(mesh) {
     //tbb::global_control global_limit(oneapi::tbb::global_control::max_allowed_parallelism, 1);
     lhs.resize((u64)mesh.nb_panels_wing() * (u64)mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
+    gamma.resize(mesh.nb_panels_wing());
+    delta_gamma.resize(mesh.nb_panels_wing());
 }
 
 void BackendAVX2::reset() {
-    std::fill(data.gamma.begin(), data.gamma.end(), 0.0f);
+    std::fill(gamma.begin(), gamma.end(), 0.0f);
     std::fill(lhs.begin(), lhs.end(), 0.0f);
     std::fill(rhs.begin(), rhs.end(), 0.0f);
 }
 
 void BackendAVX2::compute_delta_gamma() {
-    for (u32 j = 0; j < mesh.ns; j++) {
-        data.delta_gamma[j] = data.gamma[j];
-    }
+    // Copy the values for the leading edge panels
+    // for (u32 j = 0; j < mesh.ns; j++) {
+    //     delta_gamma[j] = gamma[j];
+    // }
+    std::copy(gamma.begin(), gamma.begin()+mesh.ns, delta_gamma.begin());
+
     // note: this is efficient as the memory is contiguous
     for (u32 i = 1; i < mesh.nc; i++) {
         for (u32 j = 0; j < mesh.ns; j++) {
-            data.delta_gamma[i*mesh.ns + j] = data.gamma[i*mesh.ns + j] - data.gamma[(i-1)*mesh.ns + j];
+            delta_gamma[i*mesh.ns + j] = gamma[i*mesh.ns + j] - gamma[(i-1)*mesh.ns + j];
         }
     }
 }
@@ -263,10 +280,10 @@ inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx, 
     }
 }
 
-void BackendAVX2::compute_lhs() {
+void BackendAVX2::compute_lhs(const FlowData& flow) {
     SimpleTimer timer("LHS");
     Mesh& m = mesh;
-    const f32 sigma_p4 = pow<4>(data.sigma_vatistas); // Vatistas coeffcient (^2n with n=2)
+    const f32 sigma_p4 = pow<4>(flow.sigma_vatistas); // Vatistas coeffcient (^2n with n=2)
     tbb::affinity_partitioner ap;
 
     const u32 start_wing = 0;
@@ -290,124 +307,137 @@ void BackendAVX2::compute_lhs() {
     }
 }
 
-void BackendAVX2::compute_rhs() {
+void BackendAVX2::compute_rhs(const FlowData& flow) {
     SimpleTimer timer("RHS");
-    Data& d = data;
-    Mesh& m = mesh;
+    const Mesh& m = mesh;
+
     for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
-        rhs[i] = - (d.u_inf.x * m.normal.x[i] + d.u_inf.y * m.normal.y[i] + d.u_inf.z * m.normal.z[i]);
+        rhs[i] = - (flow.freestream.x * m.normal.x[i] + flow.freestream.y * m.normal.y[i] + flow.freestream.z * m.normal.z[i]);
     }
 }
 
-// void BackendAVX2::solve() {
-//     SimpleTimer timer("Solve");
-//     const MKL_INT n = static_cast<MKL_INT>(mesh.nb_panels_wing());
+void BackendAVX2::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
+    SimpleTimer timer("Rebuild RHS");
+    assert(section_alphas.size() == mesh.ns);
+    const Mesh& m = mesh;
+    for (u32 i = 0; i < mesh.nc; i++) {
+        for (u32 j = 0; j < mesh.ns; j++) {
+            const u32 li = i * mesh.ns + j; // linear index
+            const linalg::alias::float3 freestream = compute_freestream(flow.u_inf, section_alphas[j], flow.beta);
+            rhs[li] = - (freestream.x * m.normal.x[li] + freestream.y * m.normal.y[li] + freestream.z * m.normal.z[li]);
+        }
+    }
+}
 
-//     std::vector<MKL_INT> ipiv(n);
+void BackendAVX2::lu_factor() {
+    SimpleTimer timer("Factor");
+    const u32 n = mesh.nb_panels_wing();
+    Eigen::Map<Eigen::MatrixXf> A(lhs.data(), n, n);
+    solver = std::make_unique<linear_solver_t>(A);
+}
 
-//     // Use LAPACK_COL_MAJOR since the data is stored in column-major format
-//     MKL_INT info = LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
-//     if (info != 0) {
-//         throw std::runtime_error("Failed to compute lhs matrix");
-//     }
-
-//     info = LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), rhs.data(), n);
-//     if (info != 0) {
-//         throw std::runtime_error("Failed to solve linear system");
-//     }
-
-//     // Copy the solution from rhs to data.gamma
-//     std::copy(rhs.begin(), rhs.end(), data.gamma.begin());
-// }
-
-void BackendAVX2::solve() {
+void BackendAVX2::lu_solve() {
     SimpleTimer timer("Solve");
     const u32 n = mesh.nb_panels_wing();
-    Eigen::Map<Eigen::Matrix<f32, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>> A(lhs.data(), n, n);
-    Eigen::Map<Eigen::VectorXf> x(data.gamma.data(), n);
+    Eigen::Map<Eigen::VectorXf> x(gamma.data(), n);
     Eigen::Map<Eigen::VectorXf> b(rhs.data(), n);
     
-    Eigen::PartialPivLU<Eigen::MatrixXf> lu(A);
-    x = lu.solve(b);
+    x = solver->lu.solve(b);
 }
 
-// void BackendAVX2::solve() {
-//     SimpleTimer timer("Solve");
-//     solve(lhs, rhs, x, mesh.nb_panels_wing());
-// }
+f32 BackendAVX2::compute_coefficient_cl(const FlowData& flow, const f32 area,
+    const u32 j, const u32 n) {
+    assert(n > 0);
+    assert(j >= 0 and j+n <= mesh.ns);
+    
+    f32 cl = 0.0f;
 
-void BackendAVX2::compute_forces() {
-    Mesh& m = mesh;
-    SimpleTimer timer("Compute forces");
-    for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
-        // force = U_inf x (panel_dy * rho * delta_gamma)
-        // crossproduct:
-        // (v0y*v1z - v0z*v1y);
-        // (v0z*v1x - v0x*v1z);
-        // (v0x*v1y - v0y*v1x);
-        Vec3<f32> v0 = mesh.get_v0(i);
-        Vec3<f32> v1 = mesh.get_v1(i);
-        const f32 dl_x = (v1.x - v0.x) * data.rho * data.delta_gamma[i];
-        const f32 dl_y = (v1.y - v0.y) * data.rho * data.delta_gamma[i];
-        const f32 dl_z = (v1.z - v0.z) * data.rho * data.delta_gamma[i];
-        // distance to reference calculated from the panel's force acting point (note: maybe precompute this?)
-        const f32 dst_to_ref_x = data.ref_pt.x - 0.5f * (v0.x + v1.x);
-        const f32 dst_to_ref_y = data.ref_pt.y - 0.5f * (v0.y + v1.y);
-        const f32 dst_to_ref_z = data.ref_pt.z - 0.5f * (v0.z + v1.z);
-
-        const f32 force_x = data.u_inf.y * dl_z - data.u_inf.z * dl_y;
-        const f32 force_y = data.u_inf.z * dl_x - data.u_inf.x * dl_z;
-        const f32 force_z = data.u_inf.x * dl_y - data.u_inf.y * dl_x;
-        
-        // cl += force . lift_axis
-        data.cl += force_x * data.lift_axis.x + force_y * data.lift_axis.y + force_z * data.lift_axis.z;
-        // cm += force x distance_to_ref
-        data.cm_x += force_y * dst_to_ref_z - force_z * dst_to_ref_y;
-        data.cm_y += force_z * dst_to_ref_x - force_x * dst_to_ref_z;
-        data.cm_z += force_x * dst_to_ref_y - force_y * dst_to_ref_x;
+    for (u32 u = 0; u < mesh.nc; u++) {
+        for (u32 v = j; v < j + n; v++) {
+            const u32 li = u * mesh.ns + v; // linear index
+            const linalg::alias::float3 v0 = mesh.get_v0(li);
+            const linalg::alias::float3 v1 = mesh.get_v1(li);
+            // Leading edge vector pointing outward from wing root
+            const linalg::alias::float3 dl = v1 - v0;
+            // Distance from the center of leading edge to the reference point
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
+            cl += linalg::dot(force, flow.lift_axis);
+        }
     }
+    cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
 
+    return cl;
+}
+
+linalg::alias::float3 BackendAVX2::compute_coefficient_cm(
+    const FlowData& flow,
+    const f32 area,
+    const f32 chord,
+    const u32 j,
+    const u32 n)
+{
+    assert(n > 0);
+    assert(j >= 0 and j+n <= mesh.ns);
+    linalg::alias::float3 cm(0.f, 0.f, 0.f);
+
+    for (u32 u = 0; u < mesh.nc; u++) {
+        for (u32 v = j; v < j + n; v++) {
+            const u32 li = u * mesh.ns + v; // linear index
+            const linalg::alias::float3 v0 = mesh.get_v0(li);
+            const linalg::alias::float3 v1 = mesh.get_v1(li);
+            // Leading edge vector pointing outward from wing root
+            const linalg::alias::float3 dl = v1 - v0;
+            // Distance from the center of leading edge to the reference point
+            const linalg::alias::float3 dst_to_ref = mesh.ref_pt - 0.5f * (v0 + v1);
+            // Distance from the center of leading edge to the reference point
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
+            cm += linalg::cross(force, dst_to_ref);
+        }
+    }
+    cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * chord;
+    return cm;
+}
+
+f32 BackendAVX2::compute_coefficient_cd(
+    const FlowData& flow,
+    const f32 area,
+    const u32 j,
+    const u32 n) 
+{
+    assert(n > 0);
+    assert(j >= 0 and j+n <= mesh.ns);
+
+    f32 cd = 0.0f;
     // Drag coefficent computed using Trefftz plane
-    for (u32 ia = mesh.nb_panels_wing(); ia < mesh.nb_panels_total(); ia++) {
+    const u32 begin = j + mesh.nb_panels_wing();
+    const u32 end = begin + n;
+    // parallel for
+    for (u32 ia = begin; ia < end; ia++) {
         const f32 colloc_x = mesh.colloc.x[ia];
         const f32 colloc_y = mesh.colloc.y[ia];
         const f32 colloc_z = mesh.colloc.z[ia];
-        Vec3<f32> inf;
-        for (u32 ia2 = mesh.nb_panels_wing(); ia2 < mesh.nb_panels_total(); ia2++) {
-            f32 inf2_x = 0.0f;
-            f32 inf2_y = 0.0f;
-            f32 inf2_z = 0.0f;
-            Vec3<f32> v0 = mesh.get_v0(ia2);
-            Vec3<f32> v1 = mesh.get_v1(ia2);
-            Vec3<f32> v2 = mesh.get_v2(ia2);
-            Vec3<f32> v3 = mesh.get_v3(ia2);
+        linalg::alias::float3 inf(0.f, 0.f, 0.f);
+        for (u32 ia2 = begin; ia2 < end; ia2++) {
+            linalg::alias::float3 inf2(0.f, 0.f, 0.f);
+            linalg::alias::float3 v0 = mesh.get_v0(ia2);
+            linalg::alias::float3 v1 = mesh.get_v1(ia2);
+            linalg::alias::float3 v2 = mesh.get_v2(ia2);
+            linalg::alias::float3 v3 = mesh.get_v3(ia2);
             // Influence from the streamwise vortex lines
-            kernel_influence_scalar(inf2_x, inf2_y, inf2_z, colloc_x, colloc_y, colloc_z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-            kernel_influence_scalar(inf2_x, inf2_y, inf2_z, colloc_x, colloc_y, colloc_z, v3.x, v3.y, v3.z, v0.x, v0.y, v0.z);
-            f32 gamma_w = data.gamma[(m.nc-1)*m.ns + ia2 % m.ns];
+            kernel_influence_scalar(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+            kernel_influence_scalar(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v3.x, v3.y, v3.z, v0.x, v0.y, v0.z);
+            f32 gamma_w = gamma[(mesh.nc-1)*mesh.ns + ia2 % mesh.ns];
             // This is the induced velocity calculated with the vortex (gamma) calculated earlier (according to kutta condition)
-            inf.x += gamma_w * inf2_x;
-            inf.y += gamma_w * inf2_y;
-            inf.z += gamma_w * inf2_z;
+            inf += gamma_w * inf2;
         }
-        const f32 w_ind = inf.x * m.normal.x[ia] + inf.y * m.normal.y[ia] + inf.z * m.normal.z[ia];
-        const u32 col = ia % m.ns;
-        Vec3<f32> v0 = mesh.get_v0(ia);
-        Vec3<f32> v1 = mesh.get_v1(ia);
-        const f32 dl = std::sqrt(pow<2>(v1.x - v0.x) + pow<2>(v1.y - v0.y) + pow<2>(v1.z - v0.z));
-        
-        data.cd -= 0.5f * data.rho * data.gamma[(m.nc-1)*m.ns + col] * w_ind * dl;
+        const linalg::alias::float3 normal{mesh.normal.x[ia], mesh.normal.y[ia], mesh.normal.z[ia]};
+        const f32 w_ind = linalg::dot(inf, normal);
+        const u32 col = ia % mesh.ns;
+        linalg::alias::float3 v0 = mesh.get_v0(ia);
+        linalg::alias::float3 v1 = mesh.get_v1(ia);
+        const f32 dl = linalg::length(v1 - v0);
+        cd -= 0.5f * flow.rho * gamma[(mesh.nc-1)*mesh.ns + col] * w_ind * dl;
     }
-
-    // |U_ref|^2 = 1 
-    const f32 u_ref_mag_p2 = pow<2>(data.u_inf.x) + pow<2>(data.u_inf.y) + pow<2>(data.u_inf.z);
-    const f32 common = 0.5f * data.rho * u_ref_mag_p2 * data.s_ref;
-    data.cl /= common;
-    data.cm_x /= common * data.c_ref;
-    data.cm_y /= common * data.c_ref;
-    data.cm_z /= common * data.c_ref;
-    data.cd /= common;
-
-    // Cd = Cl^2 / (pi * AR * e) with AR = b^2 / S_ref
-    // std::cout << "CD analytic: " << 2.0f * (data.cl * data.cl) / (PI_f * (10.0f*10.0f / data.s_ref)) << std::endl;
+    cd /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
+    return cd;
 }
