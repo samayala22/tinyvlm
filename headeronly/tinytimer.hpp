@@ -14,7 +14,7 @@ public:
 
     ~Timer() {
         const auto m_end = std::chrono::high_resolution_clock::now();
-        const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(m_end - m_start).count();
+        const auto duration = static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(m_end - m_start).count());
         std::printf("%s: ", m_name);
 
         if (duration > us_in_s) {
