@@ -16,16 +16,11 @@
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/parallel_for.h>
 
-#include <Eigen/Dense>
-#include <Eigen/IterativeLinearSolvers>
+#include <lapacke.h>
+#include <cblas.h>
 
 using namespace vlm;
 
-struct BackendAVX2::linear_solver_t {
-    Eigen::PartialPivLU<Eigen::Ref<Eigen::MatrixXf>> lu;
-    linear_solver_t(Eigen::Map<Eigen::MatrixXf>& A) : lu(A) {};
-    ~linear_solver_t() = default;
-};
 
 BackendAVX2::~BackendAVX2() = default; // Destructor definition
 
@@ -33,6 +28,7 @@ BackendAVX2::BackendAVX2(Mesh& mesh) : Backend(mesh) {
     //tbb::global_control global_limit(oneapi::tbb::global_control::max_allowed_parallelism, 1);
     lhs.resize((u64)mesh.nb_panels_wing() * (u64)mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
+    ipiv.resize(mesh.nb_panels_wing());
     gamma.resize(mesh.nb_panels_wing());
     delta_gamma.resize(mesh.nb_panels_wing());
 }
@@ -332,17 +328,15 @@ void BackendAVX2::compute_rhs(const FlowData& flow, const std::vector<f32>& sect
 void BackendAVX2::lu_factor() {
     SimpleTimer timer("Factor");
     const u32 n = mesh.nb_panels_wing();
-    Eigen::Map<Eigen::MatrixXf> A(lhs.data(), n, n);
-    solver = std::make_unique<linear_solver_t>(A);
+    LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
 }
 
 void BackendAVX2::lu_solve() {
     SimpleTimer timer("Solve");
     const u32 n = mesh.nb_panels_wing();
-    Eigen::Map<Eigen::VectorXf> x(gamma.data(), n);
-    Eigen::Map<Eigen::VectorXf> b(rhs.data(), n);
-    
-    x = solver->lu.solve(b);
+    std::copy(rhs.begin(), rhs.end(), gamma.begin());
+
+    LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), gamma.data(), n);
 }
 
 f32 BackendAVX2::compute_coefficient_cl(const FlowData& flow, const f32 area,

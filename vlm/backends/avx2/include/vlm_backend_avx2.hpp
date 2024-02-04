@@ -7,11 +7,9 @@ namespace vlm {
 
 class BackendAVX2 : public Backend {
     public:
-        struct linear_solver_t;
-        std::unique_ptr<linear_solver_t> solver;
-
         std::vector<f32> lhs;
         std::vector<f32> rhs;
+        std::vector<i32> ipiv;
         std::vector<f32> gamma;
         std::vector<f32> delta_gamma;
 
