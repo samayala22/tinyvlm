@@ -21,7 +21,7 @@ target("vlm")
     set_runargs({"-i"}, {"../../../../config/elliptic.vlm"}, {"-m"}, {"../../../../mesh/elliptic_64x64.x"}, {"-o"}, {"../../../../results/elliptic.vtu"})
     add_files("dev/main.cpp")
 
--- xmake run vlm -i ../../../../config/swept.vlm -m ../../../../mesh/rectangular_4x4.x -o ../../../../results/rec.vtu
+-- xmake run vlm -i ../../../../config/elliptic.vlm -m ../../../../mesh/elliptic_128x128.x -o ../../../../results/rec.vtu
 
 -- target("vlm-tests")
 --     set_kind("binary")

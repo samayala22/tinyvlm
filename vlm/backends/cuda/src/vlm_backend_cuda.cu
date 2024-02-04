@@ -124,6 +124,8 @@ BackendCUDA::~BackendCUDA() {
 
     CHECK_CUDA(cudaFree(d_lhs));
     CHECK_CUDA(cudaFree(d_rhs));
+    CHECK_CUDA(cudaFree(d_gamma));
+    CHECK_CUDA(cudaFree(d_delta_gamma));
 }
 
 // For the moment, cuda backend just falls back to AVX2
