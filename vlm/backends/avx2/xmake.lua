@@ -1,4 +1,5 @@
 add_requires("tbb")
+
 add_requires("openblas")
 
 target("backend-avx2")
@@ -7,7 +8,7 @@ target("backend-avx2")
     add_vectorexts("avx2", "fma")
     add_packages("tbb")
     add_defines("HAVE_LAPACK_CONFIG_H")
-    add_packages("openblas")
+    add_packages("openblas", { public = true })
 
     add_includedirs("../../include")
     add_files("src/*.cpp")
