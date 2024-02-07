@@ -16,11 +16,13 @@
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/parallel_for.h>
 
+#include <taskflow/taskflow.hpp>
+#include <taskflow/algorithm/for_each.hpp>
+
 #include <lapacke.h>
 #include <cblas.h>
 
 using namespace vlm;
-
 
 BackendAVX2::~BackendAVX2() = default; // Destructor definition
 
@@ -223,6 +225,7 @@ inline void kernel_influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, _
     inf_z = _mm256_add_ps(inf_z, vz);
 }
 
+// Fill a column of the LHS matrix (influence of a single panel on all the others)
 template<bool Overwrite>
 inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx, f32 sigma_p4) {
     const u32 v0 = lidx + lidx / m.ns;
@@ -281,26 +284,60 @@ void BackendAVX2::compute_lhs(const FlowData& flow) {
     Mesh& m = mesh;
     const f32 sigma_p4 = pow<4>(flow.sigma_vatistas); // Vatistas coeffcient (^2n with n=2)
     tbb::affinity_partitioner ap;
-
+    
     const u32 start_wing = 0;
     const u32 end_wing = (m.nc - 1) * m.ns;
-    tbb::parallel_for(tbb::blocked_range<u32>(start_wing, end_wing),[&](const tbb::blocked_range<u32> &r) {
-    for (u32 i = r.begin(); i < r.end(); i++) {
+    // tbb::parallel_for(tbb::blocked_range<u32>(start_wing, end_wing),[&](const tbb::blocked_range<u32> &r) {
+    // for (u32 i = r.begin(); i < r.end(); i++) {
+    //     macro_kernel_avx2<true>(m, lhs, i, i, sigma_p4);
+    //     macro_kernel_remainder_scalar<true>(m, lhs, i, i);
+    // }
+    // }, ap);
+
+    // for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
+    //     tbb::parallel_for(tbb::blocked_range<u32>(0, m.ns),[&](const tbb::blocked_range<u32> &r) {
+    //     for (u32 j = r.begin(); j < r.end(); j++) {
+    //         const u32 ia = (m.nc - 1) * m.ns + j;
+    //         const u32 lidx = i * m.ns + j;
+    //         macro_kernel_avx2<false>(m, lhs, ia, lidx, sigma_p4);
+    //         macro_kernel_remainder_scalar<false>(m, lhs, i, i);
+    //     }
+    //     }, ap);
+    // }
+
+    tf::Executor executor{};
+    tf::Taskflow taskflow;
+
+    auto init = taskflow.placeholder();
+    auto sync = taskflow.placeholder();
+
+    auto wing_pass = taskflow.for_each_index(start_wing, end_wing, (u32)1, [&] (u32 i) {
         macro_kernel_avx2<true>(m, lhs, i, i, sigma_p4);
         macro_kernel_remainder_scalar<true>(m, lhs, i, i);
-    }
-    }, ap);
+    }, tf::GuidedPartitioner());
 
-    for (u32 i = m.nc - 1; i < m.nc + m.nw; i++) {
-        tbb::parallel_for(tbb::blocked_range<u32>(0, m.ns),[&](const tbb::blocked_range<u32> &r) {
-        for (u32 j = r.begin(); j < r.end(); j++) {
-            const u32 ia = (m.nc - 1) * m.ns + j;
-            const u32 lidx = i * m.ns + j;
-            macro_kernel_avx2<false>(m, lhs, ia, lidx, sigma_p4);
-            macro_kernel_remainder_scalar<false>(m, lhs, i, i);
-        }
-        }, ap);
-    }
+    u32 idx = m.nc - 1;
+    auto cond = taskflow.emplace([&]{
+        return idx < m.nc + m.nw ? 0 : 1; // 0 means continue, 1 means break
+    });
+    auto wake_pass = taskflow.for_each_index(0u, m.ns, (u32)1, [&] (u32 j) {
+        const u32 ia = (m.nc - 1) * m.ns + j;
+        const u32 lidx = idx * m.ns + j;
+        macro_kernel_avx2<false>(m, lhs, ia, lidx, sigma_p4);
+        macro_kernel_remainder_scalar<false>(m, lhs, idx, idx);
+    }, tf::GuidedPartitioner());
+    auto back = taskflow.emplace([&]{
+        idx++;
+        return 0; // 0 means continue
+    });
+
+    init.precede(wing_pass, cond);
+    wing_pass.precede(sync);
+    cond.precede(wake_pass, sync);
+    wake_pass.precede(back);
+    back.precede(cond);
+
+    executor.run(taskflow).wait();
 }
 
 void BackendAVX2::compute_rhs(const FlowData& flow) {
