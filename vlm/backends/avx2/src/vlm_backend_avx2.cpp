@@ -36,10 +36,6 @@ void BackendAVX2::reset() {
 }
 
 void BackendAVX2::compute_delta_gamma() {
-    // Copy the values for the leading edge panels
-    // for (u32 j = 0; j < mesh.ns; j++) {
-    //     delta_gamma[j] = gamma[j];
-    // }
     std::copy(gamma.begin(), gamma.begin()+mesh.ns, delta_gamma.begin());
 
     // note: this is efficient as the memory is contiguous
@@ -314,13 +310,17 @@ void BackendAVX2::compute_lhs(const FlowData& flow) {
     Executor::get().run(taskflow).wait();
 }
 
+void kernel_generic_rhs(u32 n, const float normal_x[], const float normal_y[], const float normal_z[], float freestream_x, float freestream_y, float freestream_z, float rhs[]) {
+    for (u32 i = 0; i < n; i++) {
+        rhs[i] = - (freestream_x * normal_x[i] + freestream_y * normal_y[i] + freestream_z * normal_z[i]);
+    }
+}
+
 void BackendAVX2::compute_rhs(const FlowData& flow) {
     SimpleTimer timer("RHS");
     const Mesh& m = mesh;
-
-    for (u32 i = 0; i < mesh.nb_panels_wing(); i++) {
-        rhs[i] = - (flow.freestream.x * m.normal.x[i] + flow.freestream.y * m.normal.y[i] + flow.freestream.z * m.normal.z[i]);
-    }
+    
+    kernel_generic_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
 }
 
 void BackendAVX2::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
