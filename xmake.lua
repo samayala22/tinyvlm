@@ -17,11 +17,6 @@ set_warnings("all")
 set_languages("c++17", "c99")
 set_runtimes("MD") -- msvc runtime library (MD/MT/MDd/MTd)
 
--- TBB macro for profiling parallel objects
-if is_mode("debug", "releasedbg") then
-    add_defines("TBB_USE_THREADING_TOOLS")
-end
-
 -- Define backends and helper functions
 backends = {"cuda", "avx2"}
 backend_includes = function(name) return "vlm/backends/" .. name .. "/xmake.lua" end
@@ -45,8 +40,7 @@ for _,name in ipairs(backends) do
     end
 end
 
--- add_requires("openmp")
-
+includes("packages/taskflow.lua")
 includes("vlm/xmake.lua") -- library and main driver
 
 -- Create tests
@@ -55,7 +49,6 @@ for _, file in ipairs(os.files("tests/test_*.cpp")) do
     target(name)
         set_kind("binary")
         set_default(false)
-        -- add_packages("openmp") -- needed for gcc linker (for eigen)
         add_deps("libvlm")
         add_files("tests/" .. name .. ".cpp")
         add_tests("default")
