@@ -1,5 +1,6 @@
 #include "vlm.hpp"
 #include "parser.hpp"
+#include "vlm_executor.hpp"
 #include "vlm_types.hpp"
 #include <iostream>
 #include <cstdio>
@@ -53,6 +54,7 @@ int main(int argc, char **argv) {
     });
 
     try {
+        //vlm::Executor::instance(1); // 1 thread
         LinearVLM solver(cfg);
         std::vector<f32> alphas = cfg().section("solver").get_vector<f32>("alphas", {0.0f});
         std::transform(alphas.begin(), alphas.end(), alphas.begin(), 
