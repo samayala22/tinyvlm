@@ -287,7 +287,7 @@ void BackendAVX2::compute_lhs(const FlowData& flow) {
     auto wing_pass = taskflow.for_each_index(start_wing, end_wing, [&] (u32 i) {
         macro_kernel_avx2<true>(m, lhs, i, i, sigma_p4);
         macro_kernel_remainder_scalar<true>(m, lhs, i, i);
-    }, tf::GuidedPartitioner());
+    });
 
     u32 idx = m.nc - 1;
     auto cond = taskflow.emplace([&]{
@@ -298,7 +298,7 @@ void BackendAVX2::compute_lhs(const FlowData& flow) {
         const u32 lidx = idx * m.ns + j;
         macro_kernel_avx2<false>(m, lhs, ia, lidx, sigma_p4);
         macro_kernel_remainder_scalar<false>(m, lhs, idx, idx);
-    }, tf::GuidedPartitioner());
+    });
     auto back = taskflow.emplace([&]{
         idx++;
         return 0; // 0 means continue
