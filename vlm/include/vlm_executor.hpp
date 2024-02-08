@@ -19,7 +19,7 @@ namespace vlm {
             return *_instance;
         }
     private:
-        static std::unique_ptr<tf::Executor> _instance;
+        inline static std::unique_ptr<tf::Executor> _instance;
 
         Executor() = default;
         ~Executor() = default;
