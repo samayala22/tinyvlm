@@ -1,4 +1,4 @@
-package("taskflow_custom", function()
+package("taskflow_custom")
     set_urls("https://github.com/samayala22/taskflow.git")
     add_urls("https://github.com/samayala22/taskflow/archive/$(version).tar.gz")
     add_versions("v3.6.2", "0a1d306f90e8e17cb98b95eaae9e8b9455beeeca0f0a72afee7719b27706c68c")
@@ -27,4 +27,3 @@ package("taskflow_custom", function()
             }
         ]]}, {configs = {languages = "c++17"}}))
     end)
-end)

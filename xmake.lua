@@ -40,7 +40,7 @@ for _,name in ipairs(backends) do
     end
 end
 
-includes("packages/taskflow.lua")
+includes("packages/*.lua")
 includes("vlm/xmake.lua") -- library and main driver
 
 -- Create tests
