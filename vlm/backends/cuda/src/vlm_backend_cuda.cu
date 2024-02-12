@@ -1,4 +1,4 @@
-#include "vlm_backend_avx2.hpp"
+#include "vlm_backend_cpu.hpp"
 #include "vlm_backend_cuda.hpp"
 
 #include "simpletimer.hpp"
@@ -128,7 +128,7 @@ BackendCUDA::~BackendCUDA() {
     CHECK_CUDA(cudaFree(d_delta_gamma));
 }
 
-// For the moment, cuda backend just falls back to AVX2
+// For the moment, cuda backend just falls back to cpu backend
 
 void BackendCUDA::reset() {
     default_backend.reset();
