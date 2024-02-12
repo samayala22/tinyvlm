@@ -5,7 +5,7 @@
 
 namespace vlm {
 
-class BackendAVX2 : public Backend {
+class BackendGeneric : public Backend {
     public:
         std::vector<f32> lhs;
         std::vector<f32> rhs;
@@ -13,8 +13,8 @@ class BackendAVX2 : public Backend {
         std::vector<f32> gamma;
         std::vector<f32> delta_gamma;
 
-        BackendAVX2(Mesh& mesh);
-        ~BackendAVX2();
+        BackendGeneric(Mesh& mesh);
+        ~BackendGeneric();
         void reset() override;
         void compute_lhs(const FlowData& flow) override;
         void compute_rhs(const FlowData& flow) override;

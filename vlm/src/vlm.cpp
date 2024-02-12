@@ -14,7 +14,7 @@
 using namespace vlm;
 
 Solver::Solver(const tiny::Config& cfg) {
-    std::string backend_name = cfg().section("solver").get<std::string>("backend", "avx2");
+    std::string backend_name = cfg().section("solver").get<std::string>("backend", "cpu");
     mesh = std::make_unique<Mesh>(cfg);
     backend = create_backend(backend_name, *mesh);
 }
@@ -55,7 +55,7 @@ AeroCoefficients NonLinearVLM::solve(const FlowData& flow, const Database& db) {
         // parallel reduce
         // loop over the chordwise strips and apply Van Dam algorithm
         {
-            const tiny::Timer timer("Strip correction");
+            const tiny::ScopedTimer timer("Strip correction");
             for (u32 j = 0; j < mesh->ns; j++) {
                 const f32 strip_area = mesh->panels_area(0, j, mesh->nc, 1);
                 const FlowData strip_flow = {strip_alphas[j], flow.beta, flow.u_inf, flow.rho};

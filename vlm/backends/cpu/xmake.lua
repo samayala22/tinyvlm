@@ -1,13 +1,16 @@
 add_requires("openblas_custom")
 add_requires("taskflow_custom")
 
-target("backend-avx2")
+target("backend-cpu")
     set_kind("static")
     set_default(false)
     add_vectorexts("avx2", "fma")
     add_packages("taskflow_custom")
-    add_defines("HAVE_LAPACK_CONFIG_H")
     add_packages("openblas_custom", { public = true })
+
+    add_rules("utils.ispc", {header_extension = "_ispc.h"})
+    set_values("ispc.flags", "--target=host")
+    add_files("src/*.ispc")
 
     add_includedirs("../../include")
     add_files("src/*.cpp")

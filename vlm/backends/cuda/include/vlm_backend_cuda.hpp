@@ -4,13 +4,13 @@
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
 
-#include "vlm_backend_avx2.hpp" // temporary
+#include "vlm_backend_cpu.hpp" // temporary
 
 namespace vlm {
 
 class BackendCUDA : public Backend {
     public:
-        BackendAVX2 default_backend; // temporary
+        BackendGeneric default_backend; // temporary
 
         float* d_lhs = nullptr;
         float* d_rhs = nullptr;

@@ -4,7 +4,7 @@ target("backend-cuda")
     set_kind("static")
     set_default(false)
     add_packages("cuda")
-    add_deps("backend-avx2")
+    add_deps("backend-cpu")
 
     add_includedirs("../../include")
     add_files("src/*.cu")

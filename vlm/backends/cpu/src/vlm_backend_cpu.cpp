@@ -1,4 +1,6 @@
-#include "vlm_backend_avx2.hpp"
+#include "vlm_backend_cpu.hpp"
+#include "vlm_backend_cpu_kernels.hpp"
+#include "vlm_backend_cpu_kernels_ispc.h"
 
 #include "linalg.h"
 #include "simpletimer.hpp"
@@ -12,6 +14,7 @@
 #include <fstream>
 #include <immintrin.h>
 
+#include <limits>
 #include <taskflow/algorithm/for_each.hpp>
 
 #include <lapacke.h>
@@ -19,9 +22,9 @@
 
 using namespace vlm;
 
-BackendAVX2::~BackendAVX2() = default; // Destructor definition
+BackendGeneric::~BackendGeneric() = default; // Destructor definition
 
-BackendAVX2::BackendAVX2(Mesh& mesh) : Backend(mesh) {
+BackendGeneric::BackendGeneric(Mesh& mesh) : Backend(mesh) {
     lhs.resize((u64)mesh.nb_panels_wing() * (u64)mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
@@ -29,13 +32,13 @@ BackendAVX2::BackendAVX2(Mesh& mesh) : Backend(mesh) {
     delta_gamma.resize(mesh.nb_panels_wing());
 }
 
-void BackendAVX2::reset() {
+void BackendGeneric::reset() {
     std::fill(gamma.begin(), gamma.end(), 0.0f);
     std::fill(lhs.begin(), lhs.end(), 0.0f);
     std::fill(rhs.begin(), rhs.end(), 0.0f);
 }
 
-void BackendAVX2::compute_delta_gamma() {
+void BackendGeneric::compute_delta_gamma() {
     std::copy(gamma.begin(), gamma.begin()+mesh.ns, delta_gamma.begin());
 
     // note: this is efficient as the memory is contiguous
@@ -46,14 +49,13 @@ void BackendAVX2::compute_delta_gamma() {
     }
 }
 
-inline void micro_kernel_influence_scalar(f32& vx, f32& vy, f32& vz, f32& x, f32& y, f32& z, f32& x1, f32& y1, f32& z1, f32& x2, f32& y2, f32& z2) {
-    static const f32 rcut = 1.0e-12f;
+inline void kernel_biosavart(f32& vx, f32& vy, f32& vz, f32& x, f32& y, f32& z, f32& x1, f32& y1, f32& z1, f32& x2, f32& y2, f32& z2) {
+    static const f32 rcut = 1.0e-10f;
     vx = 0.0f;
     vy = 0.0f;
     vz = 0.0f;
 
     // Katz Plotkin, Low speed Aero | Eq 10.115
-
     const f32 r1r2x =   (y-y1)*(z-z2) - (z-z1)*(y-y2);
     const f32 r1r2y = -((x-x1)*(z-z2) - (z-z1)*(x-x2));
     const f32 r1r2z =   (x-x1)*(y-y2) - (y-y1)*(x-x2);
@@ -72,14 +74,14 @@ inline void micro_kernel_influence_scalar(f32& vx, f32& vy, f32& vz, f32& x, f32
     vz = coeff * r1r2z;
 }
 
-inline void kernel_influence_scalar(f32& inf_x, f32& inf_y, f32& inf_z, f32 x, f32 y, f32 z, f32 x1, f32 y1, f32 z1, f32 x2, f32 y2, f32 z2) {
+inline void kernel_symmetry(f32& inf_x, f32& inf_y, f32& inf_z, f32 x, f32 y, f32 z, f32 x1, f32 y1, f32 z1, f32 x2, f32 y2, f32 z2) {
     f32 vx, vy, vz;
-    micro_kernel_influence_scalar(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2);
+    kernel_biosavart(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2);
     inf_x += vx;
     inf_y += vy;
     inf_z += vz;
     y = -y; // wing symmetry
-    micro_kernel_influence_scalar(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2);
+    kernel_biosavart(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2);
     inf_x += vx;
     inf_y -= vy;
     inf_z += vz;
@@ -118,10 +120,56 @@ inline void macro_kernel_remainder_scalar(Mesh& m, std::vector<f32>& lhs, u32 ia
         f32 inf_x = 0.0f;
         f32 inf_y = 0.0f;
         f32 inf_z = 0.0f;
-        kernel_influence_scalar(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
-        kernel_influence_scalar(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
-        kernel_influence_scalar(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
-        kernel_influence_scalar(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
+        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
+        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
+        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
+        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
+        f32 nx = m.normal.x[ia2];
+        f32 ny = m.normal.y[ia2];
+        f32 nz = m.normal.z[ia2];
+        f32 ring_inf = inf_x * nx + inf_y * ny + inf_z * nz;
+        // store in col major order
+        if (Overwrite) {
+            lhs[ia * m.nb_panels_wing() + ia2] = ring_inf;
+        } else {
+            lhs[ia * m.nb_panels_wing() + ia2] += ring_inf;
+        }
+    }
+}
+
+template<bool Overwrite>
+inline void macro_kernel_scalar(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx) {
+    const u32 v0 = lidx + lidx / m.ns;
+    const u32 v1 = v0 + 1;
+    const u32 v3 = v0 + m.ns+1;
+    const u32 v2 = v3 + 1;
+    
+    f32 v0x = m.v.x[v0];
+    f32 v0y = m.v.y[v0];
+    f32 v0z = m.v.z[v0];
+    f32 v1x = m.v.x[v1];
+    f32 v1y = m.v.y[v1];
+    f32 v1z = m.v.z[v1];
+    f32 v2x = m.v.x[v2];
+    f32 v2y = m.v.y[v2];
+    f32 v2z = m.v.z[v2];
+    f32 v3x = m.v.x[v3];
+    f32 v3y = m.v.y[v3];
+    f32 v3z = m.v.z[v3];
+
+    for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2++) {
+        const f32 colloc_x = m.colloc.x[ia2];
+        const f32 colloc_y = m.colloc.y[ia2];
+        const f32 colloc_z = m.colloc.z[ia2];
+
+        // 3 regs to store induced velocity 
+        f32 inf_x = 0.0f;
+        f32 inf_y = 0.0f;
+        f32 inf_z = 0.0f;
+        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
+        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
+        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
+        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
         f32 nx = m.normal.x[ia2];
         f32 ny = m.normal.y[ia2];
         f32 nz = m.normal.z[ia2];
@@ -136,7 +184,7 @@ inline void macro_kernel_remainder_scalar(Mesh& m, std::vector<f32>& lhs, u32 ia
 }
 
 inline void micro_kernel_influence_avx2(__m256& vx, __m256& vy, __m256& vz, __m256& x, __m256& y, __m256& z, __m256& x1, __m256& y1, __m256& z1, __m256& x2, __m256& y2, __m256& z2, f32 sigma_p4) {
-    static const __m256 threshold = _mm256_set1_ps(1.0e-10f);
+    static const __m256 threshold = _mm256_set1_ps(1e-10f);
     static const __m256 four_pi = _mm256_set1_ps(4.0f * PI_f);
     static const __m256 zero = _mm256_set1_ps(0.0f);
 
@@ -178,16 +226,16 @@ inline void micro_kernel_influence_avx2(__m256& vx, __m256& vy, __m256& vz, __m2
     __m256 four_pi_r1_mag_r2_mag = _mm256_mul_ps(four_pi, _mm256_mul_ps(r1_mag, r2_mag)); // 4*pi*|r1|*|r2|
     __m256 denominator;
 
-    if (sigma_p4 == 0.0f) {
-        // Singular Bio-Savart
-        denominator = _mm256_mul_ps(four_pi_r1_mag_r2_mag, r1_x_r2_mag_p2);
-    } else {
+    // if (sigma_p4 < 1e-6f) {
+    //     // Singular Bio-Savart
+    //     denominator = _mm256_mul_ps(four_pi_r1_mag_r2_mag, r1_x_r2_mag_p2);
+    // } else {
         // Vatistas smoothing kernel (n=2) (https://doi.org/10.3390/fluids7020081)
         __m256 r1_x_r2_mag_p4 = _mm256_mul_ps(r1_x_r2_mag_p2, r1_x_r2_mag_p2); // ^2n
         __m256 r0_mag_p2 = _mm256_fmadd_ps(r0x, r0x, _mm256_fmadd_ps(r0y, r0y, _mm256_mul_ps(r0z, r0z)));
         __m256 r0_mag_p4 = _mm256_mul_ps(r0_mag_p2, r0_mag_p2); // ^2n
         denominator = _mm256_mul_ps(four_pi_r1_mag_r2_mag, _mm256_sqrt_ps(_mm256_fmadd_ps(_mm256_set1_ps(sigma_p4), r0_mag_p4, r1_x_r2_mag_p4)));
-    }
+    //}
     
     __m256 coeff = _mm256_div_ps(numerator, denominator);
 
@@ -266,14 +314,26 @@ inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx, 
             lhs_ia = _mm256_add_ps(lhs_ia, ring_inf);
             _mm256_storeu_ps(&lhs[ia * m.nb_panels_wing() + ia2], lhs_ia);
         }
+        if (ia == 0 && ia2 == 0) {
+            for (u32 iii = 0; iii < 8; iii++) {
+                std::printf("%f ", lhs[iii]);
+            }
+            std::printf("\n");
+        }
     }
 }
 
-void BackendAVX2::compute_lhs(const FlowData& flow) {
+void BackendGeneric::compute_lhs(const FlowData& flow) {
     SimpleTimer timer("LHS");
     Mesh& m = mesh;
-    const f32 sigma_p4 = pow<4>(flow.sigma_vatistas); // Vatistas coeffcient (^2n with n=2)
-    
+    ispc::MeshProxy mesh_proxy = {
+        m.nc, m.ns, m.nb_panels_wing(),
+        {m.v.x.data(), m.v.y.data(), m.v.z.data()}, 
+        {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
+        {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
+    };
+    // const f32 sigma_p4 = pow<4>(flow.sigma_vatistas); // Vatistas coeffcient (^2n with n=2)
+
     const u32 start_wing = 0;
     const u32 end_wing = (m.nc - 1) * m.ns;
 
@@ -281,8 +341,16 @@ void BackendAVX2::compute_lhs(const FlowData& flow) {
 
     auto init = taskflow.placeholder();
     auto wing_pass = taskflow.for_each_index(start_wing, end_wing, [&] (u32 i) {
-        macro_kernel_avx2<true>(m, lhs, i, i, sigma_p4);
-        macro_kernel_remainder_scalar<true>(m, lhs, i, i);
+        // macro_kernel_avx2<true>(m, lhs, i, i, flow.sigma_vatistas);
+        // macro_kernel_remainder_scalar<true>(m, lhs, i, i);
+        // kernel_influence(m.nc, m.ns,
+        // lhs.data(),
+        // m.v.x.data(), m.v.y.data(), m.v.z.data(),
+        // m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data(),
+        // m.normal.x.data(), m.normal.y.data(), m.normal.z.data(),
+        // i, i, flow.sigma_vatistas);
+        //macro_kernel_scalar<false>(m, lhs, i, i);
+        ispc::kernel_influence(mesh_proxy, lhs.data(), i, i, flow.sigma_vatistas);
     });
 
     u32 idx = m.nc - 1;
@@ -292,8 +360,14 @@ void BackendAVX2::compute_lhs(const FlowData& flow) {
     auto wake_pass = taskflow.for_each_index(0u, m.ns, [&] (u32 j) {
         const u32 ia = (m.nc - 1) * m.ns + j;
         const u32 lidx = idx * m.ns + j;
-        macro_kernel_avx2<false>(m, lhs, ia, lidx, sigma_p4);
-        macro_kernel_remainder_scalar<false>(m, lhs, idx, idx);
+        kernel_influence(m.nc, m.ns,
+        lhs.data(),
+        m.v.x.data(), m.v.y.data(), m.v.z.data(),
+        m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data(),
+        m.normal.x.data(), m.normal.y.data(), m.normal.z.data(),
+        ia, lidx, flow.sigma_vatistas);
+        // macro_kernel_avx2<false>(m, lhs, ia, lidx, flow.sigma_vatistas);
+        // macro_kernel_remainder_scalar<false>(m, lhs, idx, idx);
     });
     auto back = taskflow.emplace([&]{
         idx++;
@@ -310,20 +384,20 @@ void BackendAVX2::compute_lhs(const FlowData& flow) {
     Executor::get().run(taskflow).wait();
 }
 
-void kernel_generic_rhs(u32 n, const float normal_x[], const float normal_y[], const float normal_z[], float freestream_x, float freestream_y, float freestream_z, float rhs[]) {
+void kernel_cpu_rhs(u32 n, const float normal_x[], const float normal_y[], const float normal_z[], float freestream_x, float freestream_y, float freestream_z, float rhs[]) {
     for (u32 i = 0; i < n; i++) {
         rhs[i] = - (freestream_x * normal_x[i] + freestream_y * normal_y[i] + freestream_z * normal_z[i]);
     }
 }
 
-void BackendAVX2::compute_rhs(const FlowData& flow) {
+void BackendGeneric::compute_rhs(const FlowData& flow) {
     SimpleTimer timer("RHS");
     const Mesh& m = mesh;
     
-    kernel_generic_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
+    kernel_cpu_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
 }
 
-void BackendAVX2::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
+void BackendGeneric::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
     SimpleTimer timer("Rebuild RHS");
     assert(section_alphas.size() == mesh.ns);
     const Mesh& m = mesh;
@@ -336,13 +410,13 @@ void BackendAVX2::compute_rhs(const FlowData& flow, const std::vector<f32>& sect
     }
 }
 
-void BackendAVX2::lu_factor() {
+void BackendGeneric::lu_factor() {
     SimpleTimer timer("Factor");
     const u32 n = mesh.nb_panels_wing();
     LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
 }
 
-void BackendAVX2::lu_solve() {
+void BackendGeneric::lu_solve() {
     SimpleTimer timer("Solve");
     const u32 n = mesh.nb_panels_wing();
     std::copy(rhs.begin(), rhs.end(), gamma.begin());
@@ -350,7 +424,7 @@ void BackendAVX2::lu_solve() {
     LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), gamma.data(), n);
 }
 
-f32 BackendAVX2::compute_coefficient_cl(const FlowData& flow, const f32 area,
+f32 BackendGeneric::compute_coefficient_cl(const FlowData& flow, const f32 area,
     const u32 j, const u32 n) {
     assert(n > 0);
     assert(j >= 0 and j+n <= mesh.ns);
@@ -374,7 +448,7 @@ f32 BackendAVX2::compute_coefficient_cl(const FlowData& flow, const f32 area,
     return cl;
 }
 
-linalg::alias::float3 BackendAVX2::compute_coefficient_cm(
+linalg::alias::float3 BackendGeneric::compute_coefficient_cm(
     const FlowData& flow,
     const f32 area,
     const f32 chord,
@@ -403,7 +477,7 @@ linalg::alias::float3 BackendAVX2::compute_coefficient_cm(
     return cm;
 }
 
-f32 BackendAVX2::compute_coefficient_cd(
+f32 BackendGeneric::compute_coefficient_cd(
     const FlowData& flow,
     const f32 area,
     const u32 j,
@@ -429,8 +503,8 @@ f32 BackendAVX2::compute_coefficient_cd(
             linalg::alias::float3 v2 = mesh.get_v2(ia2);
             linalg::alias::float3 v3 = mesh.get_v3(ia2);
             // Influence from the streamwise vortex lines
-            kernel_influence_scalar(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-            kernel_influence_scalar(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v3.x, v3.y, v3.z, v0.x, v0.y, v0.z);
+            kernel_symmetry(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+            kernel_symmetry(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v3.x, v3.y, v3.z, v0.x, v0.y, v0.z);
             f32 gamma_w = gamma[(mesh.nc-1)*mesh.ns + ia2 % mesh.ns];
             // This is the induced velocity calculated with the vortex (gamma) calculated earlier (according to kutta condition)
             inf += gamma_w * inf2;
