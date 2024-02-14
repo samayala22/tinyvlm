@@ -44,7 +44,8 @@ export struct MeshProxy {
 };
 
 // Bio-savart Kernel
-#define RCUT 1e-10f // highly tuned value
+#define RCUT 1e-10f
+#define RCUT2 1e-5f
 
 #define PI_f 3.141593f
 
@@ -58,7 +59,7 @@ inline float3 kernel_biosavart(float3& colloc, const uniform float3& vertex1, co
     float r2_norm = length(r2);
     float square = length2(r1r2cross);
     
-    if ((r1_norm<RCUT) || (r2_norm<RCUT) || (square<RCUT)) {
+    if ((square<RCUT) || (r1_norm<RCUT2) || (r2_norm<RCUT2)) {
         float3 res = {0.0f, 0.0f, 0.0f};
         return res;
     }
@@ -110,9 +111,63 @@ export void kernel_influence(
     }
 }
 
-// export uniform float kernel_trefftz_cd(
-//     uniform const MeshProxy& m,
-//     uniform float* uniform gamma,
-//     uniform unsigned int ia, uniform float sigma
-//     ) {
-// }
+export uniform float kernel_trefftz_cd(
+    uniform const MeshProxy& m,
+    uniform float* uniform gamma,
+    uniform float* uniform trefftz_buffer,
+    uniform unsigned int j, uniform unsigned int n, uniform float sigma
+    ) {
+    uniform unsigned int begin = m.nb_panels + j;
+    uniform unsigned int end = begin + n;
+    float cd = 0.0f;
+    
+    // Compute the induced velocity of the streamwise wake vortex segments
+    for (uniform unsigned int ia = m.nb_panels; ia < m.nb_panels + m.ns; ia++) {
+        const uniform unsigned int v0 = ia + ia / m.ns;
+        const uniform unsigned int v1 = v0 + 1;
+        const uniform unsigned int v3 = v0 + m.ns+1;
+        const uniform unsigned int v2 = v3 + 1;
+
+        // Broadcast vertices
+        const uniform float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
+        const uniform float3 vertex1 = {m.v.x[v1], m.v.y[v1], m.v.z[v1]};
+        const uniform float3 vertex2 = {m.v.x[v2], m.v.y[v2], m.v.z[v2]};
+        const uniform float3 vertex3 = {m.v.x[v3], m.v.y[v3], m.v.z[v3]};
+
+        uniform float gammaw = gamma[ia - m.ns];
+        foreach(ia2 = begin ... end) {
+            const float3 colloc = {m.colloc.x[ia2], m.colloc.y[ia2], m.colloc.z[ia2]};
+            const float3 normal = {m.normal.x[ia2], m.normal.y[ia2], m.normal.z[ia2]};
+            float3 inf = {0.0f, 0.0f, 0.0f};
+
+            kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
+            kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
+            trefftz_buffer[ia2 - begin + j] += gammaw * dot(inf, normal); // store
+        }
+    }
+    // Perform the integration (Katz Plotkin, Low speed Aero | Eq 8.146)
+    foreach(i = j ... j + n) {
+        unsigned int li = (m.nc-1) * m.ns + i;
+        float3 v0 = {m.v.x[i], m.v.y[i], m.v.z[i]};
+        float3 v1 = {m.v.x[i+1], m.v.y[i+1], m.v.z[i+1]};
+        float dl = length(v1 - v0);
+        cd -= gamma[li] * trefftz_buffer[i] * dl; // used to have 0.5f * flow.rho
+    }
+    return reduce_add(cd);
+}
+
+export uniform float kernel_trefftz_cl(
+    uniform const MeshProxy& m,
+    uniform float* uniform gamma,
+    uniform unsigned int j, uniform unsigned int n
+    ) {
+    float cl = 0.0f;
+    foreach(i = j ... j + n) {
+        unsigned int li = (m.nc-1) * m.ns + i;
+        float3 v0 = {m.v.x[i], m.v.y[i], m.v.z[i]};
+        float3 v1 = {m.v.x[i+1], m.v.y[i+1], m.v.z[i+1]};
+        float dl = length(v1 - v0);
+        cl += gamma[li]* dl; // used to have 0.5f * flow.rho
+    }
+    return reduce_add(cl);
+}
