@@ -47,16 +47,16 @@ struct SoA_3D_t {
     std::vector<T> x = {};
     std::vector<T> y = {};
     std::vector<T> z = {};
-    u32 size = 0;
+    u64 size = 0;
     
-    void resize(u32 size_) {
+    void resize(u64 size_) {
         size = size_;
         x.resize(size);
         y.resize(size);
         z.resize(size);
     }
 
-    void reserve(u32 size_) {
+    void reserve(u64 size_) {
         size = size_;
         x.reserve(size);
         y.reserve(size);

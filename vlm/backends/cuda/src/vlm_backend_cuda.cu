@@ -213,16 +213,16 @@ void BackendCUDA::lu_solve() {
 f32 BackendCUDA::compute_coefficient_cl(
     const FlowData& flow,
     const f32 area,
-    const u32 j,
-    const u32 n) {
+    const u64 j,
+    const u64 n) {
     return default_backend.compute_coefficient_cl(flow, area, j, n);
 }
 
 f32 BackendCUDA::compute_coefficient_cd(
     const FlowData& flow,
     const f32 area,
-    const u32 j,
-    const u32 n) {
+    const u64 j,
+    const u64 n) {
     return default_backend.compute_coefficient_cd(flow, area, j, n);
 }
 
@@ -230,8 +230,8 @@ linalg::alias::float3 BackendCUDA::compute_coefficient_cm(
     const FlowData& flow,
     const f32 area,
     const f32 chord,
-    const u32 j,
-    const u32 n) {
+    const u64 j,
+    const u64 n) {
     return default_backend.compute_coefficient_cm(flow, area, chord, j, n);
 }
 

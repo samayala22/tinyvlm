@@ -35,10 +35,10 @@ struct ThinAirfoilPolarLiftCurve : public LiftCurveFunctor{
 };
 
 template<typename T>
-void linspace(T start, T end, u32 n, std::vector<T>& out) {
+void linspace(T start, T end, u64 n, std::vector<T>& out) {
     out.resize(n);
     T step = (end - start) / (n - 1);
-    for (u32 i = 0; i < n; i++) {
+    for (u64 i = 0; i < n; i++) {
         out[i] = start + i * step;
     }
 }
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
             );
             db.profiles_pos.emplace_back(0.0f);
             
-            for (u32 i = 0; i < test_alphas.size(); i++) {
+            for (u64 i = 0; i < test_alphas.size(); i++) {
                 const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
                 auto coeffs = solver.solve(flow, db);
                 test_cl[i] = coeffs.cl;
