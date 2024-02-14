@@ -3,7 +3,7 @@
 #include "vlm_backend_cpu_kernels_ispc.h"
 
 #include "linalg.h"
-#include "simpletimer.hpp"
+#include "tinytimer.hpp"
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
 #include "vlm_utils.hpp"
@@ -22,23 +22,24 @@
 
 using namespace vlm;
 
-BackendGeneric::~BackendGeneric() = default; // Destructor definition
+BackendCPU::~BackendCPU() = default; // Destructor definition
 
-BackendGeneric::BackendGeneric(Mesh& mesh) : Backend(mesh) {
+BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     lhs.resize((u64)mesh.nb_panels_wing() * (u64)mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
     gamma.resize(mesh.nb_panels_wing());
     delta_gamma.resize(mesh.nb_panels_wing());
+    trefftz_buffer.resize(mesh.ns);
 }
 
-void BackendGeneric::reset() {
+void BackendCPU::reset() {
     std::fill(gamma.begin(), gamma.end(), 0.0f);
     std::fill(lhs.begin(), lhs.end(), 0.0f);
     std::fill(rhs.begin(), rhs.end(), 0.0f);
 }
 
-void BackendGeneric::compute_delta_gamma() {
+void BackendCPU::compute_delta_gamma() {
     std::copy(gamma.begin(), gamma.begin()+mesh.ns, delta_gamma.begin());
 
     // note: this is efficient as the memory is contiguous
@@ -47,6 +48,144 @@ void BackendGeneric::compute_delta_gamma() {
             delta_gamma[i*mesh.ns + j] = gamma[i*mesh.ns + j] - gamma[(i-1)*mesh.ns + j];
         }
     }
+}
+
+void BackendCPU::compute_lhs(const FlowData& flow) {
+    tiny::ScopedTimer timer("LHS");
+    Mesh& m = mesh;
+
+    ispc::MeshProxy mesh_proxy = {
+        m.ns, m.nc, m.nb_panels_wing(),
+        {m.v.x.data(), m.v.y.data(), m.v.z.data()}, 
+        {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
+        {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
+    };
+
+    const u32 start_wing = 0;
+    const u32 end_wing = (m.nc - 1) * m.ns;
+
+    tf::Taskflow taskflow;
+
+    auto init = taskflow.placeholder();
+    auto wing_pass = taskflow.for_each_index(start_wing, end_wing, [&] (u32 i) {
+        ispc::kernel_influence(mesh_proxy, lhs.data(), i, i, flow.sigma_vatistas);
+    });
+
+    u32 idx = m.nc - 1;
+    auto cond = taskflow.emplace([&]{
+        return idx < m.nc + m.nw ? 0 : 1; // 0 means continue, 1 means break
+    });
+    auto wake_pass = taskflow.for_each_index(0u, m.ns, [&] (u32 j) {
+        const u32 ia = (m.nc - 1) * m.ns + j;
+        const u32 lidx = idx * m.ns + j;
+        ispc::kernel_influence(mesh_proxy, lhs.data(), ia, lidx, flow.sigma_vatistas);
+    });
+    auto back = taskflow.emplace([&]{
+        idx++;
+        return 0; // 0 means continue
+    });
+    auto sync = taskflow.placeholder();
+
+    init.precede(wing_pass, cond);
+    wing_pass.precede(sync);
+    cond.precede(wake_pass, sync);
+    wake_pass.precede(back);
+    back.precede(cond);
+
+    Executor::get().run(taskflow).wait();
+}
+
+void kernel_cpu_rhs(u32 n, const float normal_x[], const float normal_y[], const float normal_z[], float freestream_x, float freestream_y, float freestream_z, float rhs[]) {
+    for (u32 i = 0; i < n; i++) {
+        rhs[i] = - (freestream_x * normal_x[i] + freestream_y * normal_y[i] + freestream_z * normal_z[i]);
+    }
+}
+
+void BackendCPU::compute_rhs(const FlowData& flow) {
+    tiny::ScopedTimer timer("RHS");
+    const Mesh& m = mesh;
+    
+    kernel_cpu_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
+}
+
+void BackendCPU::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
+    tiny::ScopedTimer timer("Rebuild RHS");
+    assert(section_alphas.size() == mesh.ns);
+    const Mesh& m = mesh;
+    for (u32 i = 0; i < mesh.nc; i++) {
+        for (u32 j = 0; j < mesh.ns; j++) {
+            const u32 li = i * mesh.ns + j; // linear index
+            const linalg::alias::float3 freestream = compute_freestream(flow.u_inf, section_alphas[j], flow.beta);
+            rhs[li] = - (freestream.x * m.normal.x[li] + freestream.y * m.normal.y[li] + freestream.z * m.normal.z[li]);
+        }
+    }
+}
+
+void BackendCPU::lu_factor() {
+    tiny::ScopedTimer timer("Factor");
+    const u32 n = mesh.nb_panels_wing();
+    LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
+}
+
+void BackendCPU::lu_solve() {
+    tiny::ScopedTimer timer("Solve");
+    const u32 n = mesh.nb_panels_wing();
+    std::copy(rhs.begin(), rhs.end(), gamma.begin());
+
+    LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), gamma.data(), n);
+}
+
+f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area,
+    const u32 j, const u32 n) {
+    assert(n > 0);
+    assert(j >= 0 && j+n <= mesh.ns);
+    
+    f32 cl = 0.0f;
+
+    for (u32 u = 0; u < mesh.nc; u++) {
+        for (u32 v = j; v < j + n; v++) {
+            const u32 li = u * mesh.ns + v; // linear index
+            const linalg::alias::float3 v0 = mesh.get_v0(li);
+            const linalg::alias::float3 v1 = mesh.get_v1(li);
+            // Leading edge vector pointing outward from wing root
+            const linalg::alias::float3 dl = v1 - v0;
+            // Distance from the center of leading edge to the reference point
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
+            cl += linalg::dot(force, flow.lift_axis);
+        }
+    }
+    cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
+
+    return cl;
+}
+
+linalg::alias::float3 BackendCPU::compute_coefficient_cm(
+    const FlowData& flow,
+    const f32 area,
+    const f32 chord,
+    const u32 j,
+    const u32 n)
+{
+    assert(n > 0);
+    assert(j >= 0 && j+n <= mesh.ns);
+    linalg::alias::float3 cm(0.f, 0.f, 0.f);
+
+    for (u32 u = 0; u < mesh.nc; u++) {
+        for (u32 v = j; v < j + n; v++) {
+            const u32 li = u * mesh.ns + v; // linear index
+            const linalg::alias::float3 v0 = mesh.get_v0(li);
+            const linalg::alias::float3 v1 = mesh.get_v1(li);
+            // Leading edge vector pointing outward from wing root
+            const linalg::alias::float3 dl = v1 - v0;
+            // Distance from the center of leading edge to the reference point
+            const linalg::alias::float3 dst_to_ref = mesh.ref_pt - 0.5f * (v0 + v1);
+            // Distance from the center of leading edge to the reference point
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
+            cm += linalg::cross(force, dst_to_ref);
+        }
+    }
+    cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * chord;
+    return cm;
 }
 
 inline void kernel_biosavart(f32& vx, f32& vy, f32& vz, f32& x, f32& y, f32& z, f32& x1, f32& y1, f32& z1, f32& x2, f32& y2, f32& z2) {
@@ -87,436 +226,83 @@ inline void kernel_symmetry(f32& inf_x, f32& inf_y, f32& inf_z, f32 x, f32 y, f3
     inf_z += vz;
 }
 
-template<bool Overwrite>
-inline void macro_kernel_remainder_scalar(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx) {
-    // quick return 
-    const u32 remainder =  m.nb_panels_wing() % 8;
-    if (remainder == 0) return;
+using namespace linalg::alias;
 
-    const u32 v0 = lidx + lidx / m.ns;
-    const u32 v1 = v0 + 1;
-    const u32 v3 = v0 + m.ns+1;
-    const u32 v2 = v3 + 1;
+inline float3 kernel_biosavart(const float3& colloc, const float3& vertex1, const float3& vertex2, const f32& sigma) {
+    const f32 rcut = 1e-10f; // highly tuned value
+    const float3 r0 = vertex2 - vertex1;
+    const float3 r1 = colloc - vertex1;
+    const float3 r2 = colloc - vertex2;
+    // Katz Plotkin, Low speed Aero | Eq 10.115
+    const float3 r1r2cross = linalg::cross(r1, r2);
+    const f32 r1_norm = linalg::length(r1);
+    const f32 r2_norm = linalg::length(r2);
+    const f32 square = linalg::length2(r1r2cross);
+    if ((r1_norm<rcut) || (r2_norm<rcut) || (square<rcut)) {
+        return float3{0.0f, 0.0f, 0.0f};
+    }
     
-    f32 v0x = m.v.x[v0];
-    f32 v0y = m.v.y[v0];
-    f32 v0z = m.v.z[v0];
-    f32 v1x = m.v.x[v1];
-    f32 v1y = m.v.y[v1];
-    f32 v1z = m.v.z[v1];
-    f32 v2x = m.v.x[v2];
-    f32 v2y = m.v.y[v2];
-    f32 v2z = m.v.z[v2];
-    f32 v3x = m.v.x[v3];
-    f32 v3y = m.v.y[v3];
-    f32 v3z = m.v.z[v3];
-
-    for (u32 ia2 = m.nb_panels_wing() - remainder; ia2 < m.nb_panels_wing(); ia2++) {
-        const f32 colloc_x = m.colloc.x[ia2];
-        const f32 colloc_y = m.colloc.y[ia2];
-        const f32 colloc_z = m.colloc.z[ia2];
-
-        // 3 regs to store induced velocity 
-        f32 inf_x = 0.0f;
-        f32 inf_y = 0.0f;
-        f32 inf_z = 0.0f;
-        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
-        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
-        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
-        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
-        f32 nx = m.normal.x[ia2];
-        f32 ny = m.normal.y[ia2];
-        f32 nz = m.normal.z[ia2];
-        f32 ring_inf = inf_x * nx + inf_y * ny + inf_z * nz;
-        // store in col major order
-        if (Overwrite) {
-            lhs[ia * m.nb_panels_wing() + ia2] = ring_inf;
-        } else {
-            lhs[ia * m.nb_panels_wing() + ia2] += ring_inf;
-        }
-    }
+    const f32 smoother = sigma*sigma*linalg::length2(r0);
+    const f32 coeff = (linalg::dot(r0,r1)/r1_norm - linalg::dot(r0,r2)/r2_norm) / (4.0f*PI_f*std::sqrt(square*square + smoother*smoother));
+    return r1r2cross * coeff;
 }
 
-template<bool Overwrite>
-inline void macro_kernel_scalar(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx) {
-    const u32 v0 = lidx + lidx / m.ns;
-    const u32 v1 = v0 + 1;
-    const u32 v3 = v0 + m.ns+1;
-    const u32 v2 = v3 + 1;
-    
-    f32 v0x = m.v.x[v0];
-    f32 v0y = m.v.y[v0];
-    f32 v0z = m.v.z[v0];
-    f32 v1x = m.v.x[v1];
-    f32 v1y = m.v.y[v1];
-    f32 v1z = m.v.z[v1];
-    f32 v2x = m.v.x[v2];
-    f32 v2y = m.v.y[v2];
-    f32 v2z = m.v.z[v2];
-    f32 v3x = m.v.x[v3];
-    f32 v3y = m.v.y[v3];
-    f32 v3z = m.v.z[v3];
-
-    for (u32 ia2 = 0; ia2 < m.nb_panels_wing(); ia2++) {
-        const f32 colloc_x = m.colloc.x[ia2];
-        const f32 colloc_y = m.colloc.y[ia2];
-        const f32 colloc_z = m.colloc.z[ia2];
-
-        // 3 regs to store induced velocity 
-        f32 inf_x = 0.0f;
-        f32 inf_y = 0.0f;
-        f32 inf_z = 0.0f;
-        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z);
-        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z);
-        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z);
-        kernel_symmetry(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z);
-        f32 nx = m.normal.x[ia2];
-        f32 ny = m.normal.y[ia2];
-        f32 nz = m.normal.z[ia2];
-        f32 ring_inf = inf_x * nx + inf_y * ny + inf_z * nz;
-        // store in col major order
-        if (Overwrite) {
-            lhs[ia * m.nb_panels_wing() + ia2] = ring_inf;
-        } else {
-            lhs[ia * m.nb_panels_wing() + ia2] += ring_inf;
-        }
-    }
+inline void kernel_symmetry(float3& inf, float3 colloc, const float3& vertex0, const float3& vertex1, const f32 sigma) {
+    float3 induced_speed = kernel_biosavart(colloc, vertex0, vertex1, sigma);
+    inf += induced_speed;
+    colloc.y = -colloc.y; // wing symmetry
+    float3 induced_speed_sym = kernel_biosavart(colloc, vertex0, vertex1, sigma);
+    inf.x += induced_speed_sym.x;
+    inf.y -= induced_speed_sym.y;
+    inf.z += induced_speed_sym.z;
 }
 
-inline void micro_kernel_influence_avx2(__m256& vx, __m256& vy, __m256& vz, __m256& x, __m256& y, __m256& z, __m256& x1, __m256& y1, __m256& z1, __m256& x2, __m256& y2, __m256& z2, f32 sigma_p4) {
-    static const __m256 threshold = _mm256_set1_ps(1e-10f);
-    static const __m256 four_pi = _mm256_set1_ps(4.0f * PI_f);
-    static const __m256 zero = _mm256_set1_ps(0.0f);
-
-    vx = zero;
-    vy = zero;
-    vz = zero;
-    // define vectors
-    __m256 r1x = _mm256_sub_ps(x, x1);
-    __m256 r1y = _mm256_sub_ps(y, y1);
-    __m256 r1z = _mm256_sub_ps(z, z1);
-    __m256 r2x = _mm256_sub_ps(x, x2);
-    __m256 r2y = _mm256_sub_ps(y, y2);
-    __m256 r2z = _mm256_sub_ps(z, z2);
-
-    // crossproduct
-    // (v0y*v1z - v0z*v1y);
-    // (v0z*v1x - v0x*v1z);
-    // (v0x*v1y - v0y*v1x);
-    __m256 r1_x_r2_x = _mm256_fmsub_ps(r1y, r2z, _mm256_mul_ps(r1z, r2y));
-    __m256 r1_x_r2_y = _mm256_fmsub_ps(r1z, r2x, _mm256_mul_ps(r1x, r2z));
-    __m256 r1_x_r2_z = _mm256_fmsub_ps(r1x, r2y, _mm256_mul_ps(r1y, r2x));
-
-    // magnitude & mag squared of crossproduct
-    __m256 r1_x_r2_mag_p2 = _mm256_fmadd_ps(r1_x_r2_x, r1_x_r2_x, _mm256_fmadd_ps(r1_x_r2_y, r1_x_r2_y, _mm256_mul_ps(r1_x_r2_z, r1_x_r2_z)));
-    __m256 r1_mag = _mm256_sqrt_ps(_mm256_fmadd_ps(r1x, r1x, _mm256_fmadd_ps(r1y, r1y, _mm256_mul_ps(r1z, r1z))));
-    __m256 r2_mag = _mm256_sqrt_ps(_mm256_fmadd_ps(r2x, r2x, _mm256_fmadd_ps(r2y, r2y, _mm256_mul_ps(r2z, r2z))));
-
-    // vector from point 1 to point 2 of segment
-    __m256 r0x = _mm256_sub_ps(x2, x1);
-    __m256 r0y = _mm256_sub_ps(y2, y1);
-    __m256 r0z = _mm256_sub_ps(z2, z1);
-
-    // dot product r0.r1 and r0.r2
-    __m256 r0_dot_r1 = _mm256_fmadd_ps(r0x, r1x, _mm256_fmadd_ps(r0y, r1y, _mm256_mul_ps(r0z, r1z)));
-    __m256 r0_dot_r2 = _mm256_fmadd_ps(r0x, r2x, _mm256_fmadd_ps(r0y, r2y, _mm256_mul_ps(r0z, r2z)));
-
-    __m256 numerator = _mm256_fmsub_ps(r0_dot_r1, r2_mag, _mm256_mul_ps(r0_dot_r2, r1_mag));
-
-    __m256 four_pi_r1_mag_r2_mag = _mm256_mul_ps(four_pi, _mm256_mul_ps(r1_mag, r2_mag)); // 4*pi*|r1|*|r2|
-    __m256 denominator;
-
-    // if (sigma_p4 < 1e-6f) {
-    //     // Singular Bio-Savart
-    //     denominator = _mm256_mul_ps(four_pi_r1_mag_r2_mag, r1_x_r2_mag_p2);
-    // } else {
-        // Vatistas smoothing kernel (n=2) (https://doi.org/10.3390/fluids7020081)
-        __m256 r1_x_r2_mag_p4 = _mm256_mul_ps(r1_x_r2_mag_p2, r1_x_r2_mag_p2); // ^2n
-        __m256 r0_mag_p2 = _mm256_fmadd_ps(r0x, r0x, _mm256_fmadd_ps(r0y, r0y, _mm256_mul_ps(r0z, r0z)));
-        __m256 r0_mag_p4 = _mm256_mul_ps(r0_mag_p2, r0_mag_p2); // ^2n
-        denominator = _mm256_mul_ps(four_pi_r1_mag_r2_mag, _mm256_sqrt_ps(_mm256_fmadd_ps(_mm256_set1_ps(sigma_p4), r0_mag_p4, r1_x_r2_mag_p4)));
-    //}
-    
-    __m256 coeff = _mm256_div_ps(numerator, denominator);
-
-    // add the influence and blend with mask
-    // the masks should be done independently for optimal ILP but if compiler smart he can do it
-    __m256 mask = _mm256_cmp_ps(r1_mag, threshold, _CMP_LT_OS);
-    mask = _mm256_or_ps(mask, _mm256_cmp_ps(r2_mag, threshold, _CMP_LT_OS));
-    mask = _mm256_or_ps(mask, _mm256_cmp_ps(r1_x_r2_mag_p2, threshold, _CMP_LT_OS));
-
-    vx = _mm256_blendv_ps(_mm256_mul_ps(r1_x_r2_x, coeff), zero, mask);
-    vy = _mm256_blendv_ps(_mm256_mul_ps(r1_x_r2_y, coeff), zero, mask);
-    vz = _mm256_blendv_ps(_mm256_mul_ps(r1_x_r2_z, coeff), zero, mask);
-}
-
-inline void kernel_influence_avx2(__m256& inf_x, __m256& inf_y, __m256& inf_z, __m256 x, __m256 y, __m256 z, __m256 x1, __m256 y1, __m256 z1, __m256 x2, __m256 y2, __m256 z2, f32 sigma_p4) {
-    __m256 vx, vy, vz;
-    micro_kernel_influence_avx2(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2, sigma_p4);
-    inf_x = _mm256_add_ps(inf_x, vx);
-    inf_y = _mm256_add_ps(inf_y, vy);
-    inf_z = _mm256_add_ps(inf_z, vz);
-    y = _mm256_xor_ps(y, _mm256_set1_ps(-0.0f)); // wing symmetry
-    micro_kernel_influence_avx2(vx, vy, vz, x, y, z, x1, y1, z1, x2, y2, z2, sigma_p4);
-    inf_x = _mm256_add_ps(inf_x, vx);
-    inf_y = _mm256_sub_ps(inf_y, vy); // HERE IS SUB INSTEAD OF ADD !
-    inf_z = _mm256_add_ps(inf_z, vz);
-}
-
-// Fill a column of the LHS matrix (influence of a single panel on all the others)
-template<bool Overwrite>
-inline void macro_kernel_avx2(Mesh& m, std::vector<f32>& lhs, u32 ia, u32 lidx, f32 sigma_p4) {
-    const u32 v0 = lidx + lidx / m.ns;
-    const u32 v1 = v0 + 1;
-    const u32 v3 = v0 + m.ns+1;
-    const u32 v2 = v3 + 1;
-    // in reality only load v1 & v2 and reuse data from previous v1 & v2 to be new v0 & v3 respectively
-    // 12 regs (6 loads + 6 reuse) -> these will get spilled once we get in the influence function
-    __m256 v0x = _mm256_broadcast_ss(&m.v.x[v0]);
-    __m256 v0y = _mm256_broadcast_ss(&m.v.y[v0]);
-    __m256 v0z = _mm256_broadcast_ss(&m.v.z[v0]);
-    __m256 v1x = _mm256_broadcast_ss(&m.v.x[v1]);
-    __m256 v1y = _mm256_broadcast_ss(&m.v.y[v1]);
-    __m256 v1z = _mm256_broadcast_ss(&m.v.z[v1]);
-    __m256 v2x = _mm256_broadcast_ss(&m.v.x[v2]);
-    __m256 v2y = _mm256_broadcast_ss(&m.v.y[v2]);
-    __m256 v2z = _mm256_broadcast_ss(&m.v.z[v2]);
-    __m256 v3x = _mm256_broadcast_ss(&m.v.x[v3]);
-    __m256 v3y = _mm256_broadcast_ss(&m.v.y[v3]);
-    __m256 v3z = _mm256_broadcast_ss(&m.v.z[v3]);
-
-    for (u32 ia2 = 0; ia2 <= m.nb_panels_wing()-8; ia2+=8) {
-        // loads (3 regs)
-        __m256 colloc_x = _mm256_loadu_ps(&m.colloc.x[ia2]);
-        __m256 colloc_y = _mm256_loadu_ps(&m.colloc.y[ia2]);
-        __m256 colloc_z = _mm256_loadu_ps(&m.colloc.z[ia2]);
-        // 3 regs to store induced velocity
-        __m256 inf_x = _mm256_setzero_ps();
-        __m256 inf_y = _mm256_setzero_ps();
-        __m256 inf_z = _mm256_setzero_ps();
-
-        kernel_influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v0x, v0y, v0z, v1x, v1y, v1z, sigma_p4);
-        kernel_influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v1x, v1y, v1z, v2x, v2y, v2z, sigma_p4);
-        kernel_influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v2x, v2y, v2z, v3x, v3y, v3z, sigma_p4);
-        kernel_influence_avx2(inf_x, inf_y, inf_z, colloc_x, colloc_y, colloc_z, v3x, v3y, v3z, v0x, v0y, v0z, sigma_p4);
-
-        // dot product
-        __m256 nx = _mm256_loadu_ps(&m.normal.x[ia2]);
-        __m256 ny = _mm256_loadu_ps(&m.normal.y[ia2]);
-        __m256 nz = _mm256_loadu_ps(&m.normal.z[ia2]);
-        __m256 ring_inf = _mm256_fmadd_ps(inf_x, nx, _mm256_fmadd_ps(inf_y, ny, _mm256_mul_ps(inf_z, nz)));
-
-        // store in col major order
-        if (Overwrite) {
-            _mm256_storeu_ps(&lhs[ia * m.nb_panels_wing() + ia2], ring_inf);
-        } else {                
-            __m256 lhs_ia = _mm256_loadu_ps(&lhs[ia * m.nb_panels_wing() + ia2]);
-            lhs_ia = _mm256_add_ps(lhs_ia, ring_inf);
-            _mm256_storeu_ps(&lhs[ia * m.nb_panels_wing() + ia2], lhs_ia);
-        }
-        if (ia == 0 && ia2 == 0) {
-            for (u32 iii = 0; iii < 8; iii++) {
-                std::printf("%f ", lhs[iii]);
-            }
-            std::printf("\n");
-        }
-    }
-}
-
-void BackendGeneric::compute_lhs(const FlowData& flow) {
-    SimpleTimer timer("LHS");
-    Mesh& m = mesh;
-    ispc::MeshProxy mesh_proxy = {
-        m.nc, m.ns, m.nb_panels_wing(),
-        {m.v.x.data(), m.v.y.data(), m.v.z.data()}, 
-        {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
-        {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
-    };
-    // const f32 sigma_p4 = pow<4>(flow.sigma_vatistas); // Vatistas coeffcient (^2n with n=2)
-
-    const u32 start_wing = 0;
-    const u32 end_wing = (m.nc - 1) * m.ns;
-
-    tf::Taskflow taskflow;
-
-    auto init = taskflow.placeholder();
-    auto wing_pass = taskflow.for_each_index(start_wing, end_wing, [&] (u32 i) {
-        // macro_kernel_avx2<true>(m, lhs, i, i, flow.sigma_vatistas);
-        // macro_kernel_remainder_scalar<true>(m, lhs, i, i);
-        // kernel_influence(m.nc, m.ns,
-        // lhs.data(),
-        // m.v.x.data(), m.v.y.data(), m.v.z.data(),
-        // m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data(),
-        // m.normal.x.data(), m.normal.y.data(), m.normal.z.data(),
-        // i, i, flow.sigma_vatistas);
-        //macro_kernel_scalar<false>(m, lhs, i, i);
-        ispc::kernel_influence(mesh_proxy, lhs.data(), i, i, flow.sigma_vatistas);
-    });
-
-    u32 idx = m.nc - 1;
-    auto cond = taskflow.emplace([&]{
-        return idx < m.nc + m.nw ? 0 : 1; // 0 means continue, 1 means break
-    });
-    auto wake_pass = taskflow.for_each_index(0u, m.ns, [&] (u32 j) {
-        const u32 ia = (m.nc - 1) * m.ns + j;
-        const u32 lidx = idx * m.ns + j;
-        kernel_influence(m.nc, m.ns,
-        lhs.data(),
-        m.v.x.data(), m.v.y.data(), m.v.z.data(),
-        m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data(),
-        m.normal.x.data(), m.normal.y.data(), m.normal.z.data(),
-        ia, lidx, flow.sigma_vatistas);
-        // macro_kernel_avx2<false>(m, lhs, ia, lidx, flow.sigma_vatistas);
-        // macro_kernel_remainder_scalar<false>(m, lhs, idx, idx);
-    });
-    auto back = taskflow.emplace([&]{
-        idx++;
-        return 0; // 0 means continue
-    });
-    auto sync = taskflow.placeholder();
-
-    init.precede(wing_pass, cond);
-    wing_pass.precede(sync);
-    cond.precede(wake_pass, sync);
-    wake_pass.precede(back);
-    back.precede(cond);
-
-    Executor::get().run(taskflow).wait();
-}
-
-void kernel_cpu_rhs(u32 n, const float normal_x[], const float normal_y[], const float normal_z[], float freestream_x, float freestream_y, float freestream_z, float rhs[]) {
-    for (u32 i = 0; i < n; i++) {
-        rhs[i] = - (freestream_x * normal_x[i] + freestream_y * normal_y[i] + freestream_z * normal_z[i]);
-    }
-}
-
-void BackendGeneric::compute_rhs(const FlowData& flow) {
-    SimpleTimer timer("RHS");
-    const Mesh& m = mesh;
-    
-    kernel_cpu_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
-}
-
-void BackendGeneric::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
-    SimpleTimer timer("Rebuild RHS");
-    assert(section_alphas.size() == mesh.ns);
-    const Mesh& m = mesh;
-    for (u32 i = 0; i < mesh.nc; i++) {
-        for (u32 j = 0; j < mesh.ns; j++) {
-            const u32 li = i * mesh.ns + j; // linear index
-            const linalg::alias::float3 freestream = compute_freestream(flow.u_inf, section_alphas[j], flow.beta);
-            rhs[li] = - (freestream.x * m.normal.x[li] + freestream.y * m.normal.y[li] + freestream.z * m.normal.z[li]);
-        }
-    }
-}
-
-void BackendGeneric::lu_factor() {
-    SimpleTimer timer("Factor");
-    const u32 n = mesh.nb_panels_wing();
-    LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
-}
-
-void BackendGeneric::lu_solve() {
-    SimpleTimer timer("Solve");
-    const u32 n = mesh.nb_panels_wing();
-    std::copy(rhs.begin(), rhs.end(), gamma.begin());
-
-    LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), gamma.data(), n);
-}
-
-f32 BackendGeneric::compute_coefficient_cl(const FlowData& flow, const f32 area,
-    const u32 j, const u32 n) {
-    assert(n > 0);
-    assert(j >= 0 and j+n <= mesh.ns);
-    
-    f32 cl = 0.0f;
-
-    for (u32 u = 0; u < mesh.nc; u++) {
-        for (u32 v = j; v < j + n; v++) {
-            const u32 li = u * mesh.ns + v; // linear index
-            const linalg::alias::float3 v0 = mesh.get_v0(li);
-            const linalg::alias::float3 v1 = mesh.get_v1(li);
-            // Leading edge vector pointing outward from wing root
-            const linalg::alias::float3 dl = v1 - v0;
-            // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
-            cl += linalg::dot(force, flow.lift_axis);
-        }
-    }
-    cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
-
-    return cl;
-}
-
-linalg::alias::float3 BackendGeneric::compute_coefficient_cm(
-    const FlowData& flow,
-    const f32 area,
-    const f32 chord,
-    const u32 j,
-    const u32 n)
-{
-    assert(n > 0);
-    assert(j >= 0 and j+n <= mesh.ns);
-    linalg::alias::float3 cm(0.f, 0.f, 0.f);
-
-    for (u32 u = 0; u < mesh.nc; u++) {
-        for (u32 v = j; v < j + n; v++) {
-            const u32 li = u * mesh.ns + v; // linear index
-            const linalg::alias::float3 v0 = mesh.get_v0(li);
-            const linalg::alias::float3 v1 = mesh.get_v1(li);
-            // Leading edge vector pointing outward from wing root
-            const linalg::alias::float3 dl = v1 - v0;
-            // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 dst_to_ref = mesh.ref_pt - 0.5f * (v0 + v1);
-            // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
-            cm += linalg::cross(force, dst_to_ref);
-        }
-    }
-    cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * chord;
-    return cm;
-}
-
-f32 BackendGeneric::compute_coefficient_cd(
+f32 BackendCPU::compute_coefficient_cd(
     const FlowData& flow,
     const f32 area,
     const u32 j,
     const u32 n) 
 {
+    tiny::ScopedTimer timer("Compute CD");
     assert(n > 0);
-    assert(j >= 0 and j+n <= mesh.ns);
-
+    assert(j >= 0 && j+n <= mesh.ns);
+    std::fill(trefftz_buffer.begin(), trefftz_buffer.end(), 0.0f);
+    
     f32 cd = 0.0f;
     // Drag coefficent computed using Trefftz plane
     const u32 begin = j + mesh.nb_panels_wing();
     const u32 end = begin + n;
     // parallel for
     for (u32 ia = begin; ia < end; ia++) {
-        const f32 colloc_x = mesh.colloc.x[ia];
-        const f32 colloc_y = mesh.colloc.y[ia];
-        const f32 colloc_z = mesh.colloc.z[ia];
-        linalg::alias::float3 inf(0.f, 0.f, 0.f);
+        const u32 v0 = ia + ia / mesh.ns;
+        const u32 v1 = v0 + 1;
+        const u32 v3 = v0 + n+1;
+        const u32 v2 = v3 + 1;
+
+        const float3 vertex0{mesh.v.x[v0], mesh.v.y[v0], mesh.v.z[v0]};
+        const float3 vertex1{mesh.v.x[v1], mesh.v.y[v1], mesh.v.z[v1]};
+        const float3 vertex2{mesh.v.x[v2], mesh.v.y[v2], mesh.v.z[v2]};
+        const float3 vertex3{mesh.v.x[v3], mesh.v.y[v3], mesh.v.z[v3]};
+
+        const f32 gammaw = gamma[ia - mesh.ns];
+
         for (u32 ia2 = begin; ia2 < end; ia2++) {
+            const float3 colloc(mesh.colloc.x[ia2], mesh.colloc.y[ia2], mesh.colloc.z[ia2]);
+            const float3 normal(mesh.normal.x[ia2], mesh.normal.y[ia2], mesh.normal.z[ia2]);
             linalg::alias::float3 inf2(0.f, 0.f, 0.f);
-            linalg::alias::float3 v0 = mesh.get_v0(ia2);
-            linalg::alias::float3 v1 = mesh.get_v1(ia2);
-            linalg::alias::float3 v2 = mesh.get_v2(ia2);
-            linalg::alias::float3 v3 = mesh.get_v3(ia2);
             // Influence from the streamwise vortex lines
-            kernel_symmetry(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-            kernel_symmetry(inf2.x, inf2.y, inf2.z, colloc_x, colloc_y, colloc_z, v3.x, v3.y, v3.z, v0.x, v0.y, v0.z);
-            f32 gamma_w = gamma[(mesh.nc-1)*mesh.ns + ia2 % mesh.ns];
+            kernel_symmetry(inf2, colloc, vertex1, vertex2, flow.sigma_vatistas);
+            kernel_symmetry(inf2, colloc, vertex3, vertex0, flow.sigma_vatistas);
             // This is the induced velocity calculated with the vortex (gamma) calculated earlier (according to kutta condition)
-            inf += gamma_w * inf2;
+            trefftz_buffer[ia2 - begin] += gammaw * linalg::dot(inf2, normal);
         }
-        const linalg::alias::float3 normal{mesh.normal.x[ia], mesh.normal.y[ia], mesh.normal.z[ia]};
-        const f32 w_ind = linalg::dot(inf, normal);
-        const u32 col = ia % mesh.ns;
-        linalg::alias::float3 v0 = mesh.get_v0(ia);
-        linalg::alias::float3 v1 = mesh.get_v1(ia);
-        const f32 dl = linalg::length(v1 - v0);
-        cd -= 0.5f * flow.rho * gamma[(mesh.nc-1)*mesh.ns + col] * w_ind * dl;
     }
-    cd /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
+
+    for (u32 i = 0; i < mesh.ns; i++) {
+        const u32 li = (mesh.nc-1) * mesh.ns + i;
+        const f32 dl = mesh.strip_width(i);
+        cd -= gamma[li] * trefftz_buffer[i] * dl; // used to have 0.5f * flow.rho
+    }
+    cd /= linalg::length2(flow.freestream) * area;
     return cd;
 }

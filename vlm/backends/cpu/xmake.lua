@@ -9,7 +9,7 @@ target("backend-cpu")
     add_packages("openblas_custom", { public = true })
 
     add_rules("utils.ispc", {header_extension = "_ispc.h"})
-    set_values("ispc.flags", "--target=host")
+    set_values("ispc.flags", {"--target=host", "-O1"})
     add_files("src/*.ispc")
 
     add_includedirs("../../include")

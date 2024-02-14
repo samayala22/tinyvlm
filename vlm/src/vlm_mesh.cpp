@@ -149,6 +149,13 @@ f32 Mesh::panel_width_y(const u32 i, const u32 j) const {
     return v.y[j + 1 + i * ld] - v.y[j + i * ld];
 }
 
+f32 Mesh::strip_width(const u32 j) const {
+    assert(j < ns);
+    const linalg::alias::float3 v0 = get_v0(j);
+    const linalg::alias::float3 v1 = get_v1(j);
+    return linalg::length(v1 - v0);
+}
+
 /// @brief Computes the chord length of a chordwise segment
 /// @details Since the mesh follows the camber line, the chord length is computed
 /// as the distance between the first and last vertex of a chordwise segment
