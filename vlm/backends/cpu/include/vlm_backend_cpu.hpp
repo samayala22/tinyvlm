@@ -5,16 +5,17 @@
 
 namespace vlm {
 
-class BackendGeneric : public Backend {
+class BackendCPU : public Backend {
     public:
         std::vector<f32> lhs;
         std::vector<f32> rhs;
         std::vector<i32> ipiv;
         std::vector<f32> gamma;
         std::vector<f32> delta_gamma;
+        std::vector<f32> trefftz_buffer;
 
-        BackendGeneric(Mesh& mesh);
-        ~BackendGeneric();
+        BackendCPU(Mesh& mesh);
+        ~BackendCPU();
         void reset() override;
         void compute_lhs(const FlowData& flow) override;
         void compute_rhs(const FlowData& flow) override;

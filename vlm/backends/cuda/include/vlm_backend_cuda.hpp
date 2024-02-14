@@ -10,7 +10,7 @@ namespace vlm {
 
 class BackendCUDA : public Backend {
     public:
-        BackendGeneric default_backend; // temporary
+        BackendCPU default_backend; // temporary
 
         float* d_lhs = nullptr;
         float* d_rhs = nullptr;

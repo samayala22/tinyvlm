@@ -10,3 +10,4 @@ void kernel_influence(
     u32 ia, u32 lidx, f32 sigma_p4
     );
 }
+

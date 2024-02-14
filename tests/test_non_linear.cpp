@@ -64,8 +64,8 @@ int main(int argc, char** argv) {
     const std::vector<std::string> backends = {"cpu"};
     std::vector<std::pair<std::string, std::unique_ptr<LiftCurveFunctor>>> lift_curves;
     lift_curves.emplace_back(std::make_pair("spallart1", std::make_unique<SpallartLiftCurve>(1.2f, 0.28f, 0.02f, 2.f*PI_f, 2.f*PI_f)));
-    lift_curves.emplace_back(std::make_pair("spallart2", std::make_unique<SpallartLiftCurve>(0.72f, 0.28f, 0.04f, 2.f*PI_f, 1.5f*PI_f)));
-    lift_curves.emplace_back(std::make_pair("polar", std::make_unique<ThinAirfoilPolarLiftCurve>()));
+    // lift_curves.emplace_back(std::make_pair("spallart2", std::make_unique<SpallartLiftCurve>(0.72f, 0.28f, 0.04f, 2.f*PI_f, 1.5f*PI_f)));
+    // lift_curves.emplace_back(std::make_pair("polar", std::make_unique<ThinAirfoilPolarLiftCurve>()));
     
     std::vector<f32> test_alphas = {0, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);

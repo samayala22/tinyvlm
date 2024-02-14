@@ -16,7 +16,9 @@ inline float3 kernel_biosavart(const float3& colloc, const float3& vertex1, cons
     const f32 r1_norm = linalg::length(r1);
     const f32 r2_norm = linalg::length(r2);
     const f32 square = linalg::length2(r1r2cross);
-    if ((r1_norm<rcut) || (r2_norm<rcut) || (square<rcut)) return float3{0.0f, 0.0f, 0.0f};
+    if ((r1_norm<rcut) || (r2_norm<rcut) || (square<rcut)) {
+        return float3{0.0f, 0.0f, 0.0f};
+    }
     
     const f32 smoother = sigma*sigma*linalg::length2(r0);
     const f32 coeff = (linalg::dot(r0,r1)/r1_norm - linalg::dot(r0,r2)/r2_norm) / (4.0f*PI_f*std::sqrt(square*square + smoother*smoother));

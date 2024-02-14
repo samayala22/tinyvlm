@@ -28,7 +28,6 @@ inline float length(const float3& v) {return LENGTH(v);}
 inline uniform float length(const uniform float3& v) {return LENGTH(v);}
 
 // Aggregate Structures
-
 export struct SoA3D {
     uniform float* uniform x;
     uniform float* uniform y;
@@ -46,7 +45,8 @@ export struct MeshProxy {
 
 // Bio-savart Kernel
 #define RCUT 1e-10f // highly tuned value
-#define PI_f 3.14159274f
+
+#define PI_f 3.141593f
 
 inline float3 kernel_biosavart(float3& colloc, const uniform float3& vertex1, const uniform float3& vertex2, const uniform float& sigma) {
     uniform float3 r0 = vertex2 - vertex1;
@@ -57,19 +57,23 @@ inline float3 kernel_biosavart(float3& colloc, const uniform float3& vertex1, co
     float r1_norm = length(r1);
     float r2_norm = length(r2);
     float square = length2(r1r2cross);
+    
     if ((r1_norm<RCUT) || (r2_norm<RCUT) || (square<RCUT)) {
         float3 res = {0.0f, 0.0f, 0.0f};
         return res;
     }
-    
+
     uniform float smoother = sigma*sigma*length2(r0);
-    float coeff = (dot(r0,r1)/r1_norm - dot(r0,r2)/r2_norm) / (4.0f*PI_f*sqrt(square*square + smoother*smoother));
+
+    float coeff = (dot(r0,r1)*r2_norm - dot(r0, r2)*r1_norm) / (4.0f*PI_f*sqrt(square*square + smoother*smoother)*r1_norm*r2_norm);
     return r1r2cross * coeff;
 }
 
 inline void kernel_symmetry(float3& inf, float3 colloc, const uniform float3& vertex0, const uniform float3& vertex1, const uniform float& sigma) {
     float3 induced_speed = kernel_biosavart(colloc, vertex0, vertex1, sigma);
-    inf += induced_speed;
+    inf.x += induced_speed.x;
+    inf.y += induced_speed.y;
+    inf.z += induced_speed.z;
     colloc.y = -colloc.y; // wing symmetry
     float3 induced_speed_sym = kernel_biosavart(colloc, vertex0, vertex1, sigma);
     inf.x += induced_speed_sym.x;
@@ -105,3 +109,10 @@ export void kernel_influence(
         lhs[ia * m.nb_panels + ia2] += dot(inf, normal); // store
     }
 }
+
+// export uniform float kernel_trefftz_cd(
+//     uniform const MeshProxy& m,
+//     uniform float* uniform gamma,
+//     uniform unsigned int ia, uniform float sigma
+//     ) {
+// }

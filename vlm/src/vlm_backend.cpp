@@ -31,7 +31,7 @@ std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name, Me
 
     #ifdef VLM_CPU
     if (backend_name == "cpu") {
-        return std::make_unique<BackendGeneric>(mesh);
+        return std::make_unique<BackendCPU>(mesh);
     }
     #endif
     #ifdef VLM_CUDA
