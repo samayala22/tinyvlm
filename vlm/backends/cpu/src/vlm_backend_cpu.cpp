@@ -59,13 +59,13 @@ void BackendCPU::compute_lhs(const FlowData& flow) {
         {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
     };
 
-    const u64 start_wing = 0;
+    const u64 zero = 0;
     const u64 end_wing = (m.nc - 1) * m.ns;
 
     tf::Taskflow taskflow;
 
     auto init = taskflow.placeholder();
-    auto wing_pass = taskflow.for_each_index(start_wing, end_wing, [&] (u64 i) {
+    auto wing_pass = taskflow.for_each_index(zero, end_wing, [&] (u64 i) {
         ispc::kernel_influence(mesh_proxy, lhs.data(), i, i, flow.sigma_vatistas);
     });
 
@@ -73,7 +73,7 @@ void BackendCPU::compute_lhs(const FlowData& flow) {
     auto cond = taskflow.emplace([&]{
         return idx < m.nc + m.nw ? 0 : 1; // 0 means continue, 1 means break
     });
-    auto wake_pass = taskflow.for_each_index(0ull, m.ns, [&] (u64 j) {
+    auto wake_pass = taskflow.for_each_index(zero, m.ns, [&] (u64 j) {
         const u64 ia = (m.nc - 1) * m.ns + j;
         const u64 lidx = idx * m.ns + j;
         ispc::kernel_influence(mesh_proxy, lhs.data(), ia, lidx, flow.sigma_vatistas);
