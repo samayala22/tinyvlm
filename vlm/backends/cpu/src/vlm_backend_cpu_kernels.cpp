@@ -36,25 +36,25 @@ inline void kernel_symmetry(float3& inf, float3 colloc, const float3& vertex0, c
 }
 
 void vlm::kernel_influence(
-    u32 m, u32 n,
+    u64 m, u64 n,
     f32 lhs[],
     f32 vx[], f32 vy[], f32 vz[],
     f32 collocx[], f32 collocy[], f32 collocz[],
     f32 normalx[], f32 normaly[], f32 normalz[],
-    u32 ia, u32 lidx, f32 sigma
+    u64 ia, u64 lidx, f32 sigma
     ) {
-    const u32 nb_panels = m * n;
-    const u32 v0 = lidx + lidx / n;
-    const u32 v1 = v0 + 1;
-    const u32 v3 = v0 + n+1;
-    const u32 v2 = v3 + 1;
+    const u64 nb_panels = m * n;
+    const u64 v0 = lidx + lidx / n;
+    const u64 v1 = v0 + 1;
+    const u64 v3 = v0 + n+1;
+    const u64 v2 = v3 + 1;
 
     float3 vertex0{vx[v0], vy[v0], vz[v0]};
     float3 vertex1{vx[v1], vy[v1], vz[v1]};
     float3 vertex2{vx[v2], vy[v2], vz[v2]};
     float3 vertex3{vx[v3], vy[v3], vz[v3]};
 
-    for (u32 ia2 = 0; ia2 < nb_panels; ia2++) {
+    for (u64 ia2 = 0; ia2 < nb_panels; ia2++) {
         const float3 colloc(collocx[ia2], collocy[ia2], collocz[ia2]);
         float3 inf(0.0f, 0.0f, 0.0f);
         const float3 normal(normalx[ia2], normaly[ia2], normalz[ia2]);

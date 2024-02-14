@@ -35,9 +35,9 @@ export struct SoA3D {
 };
 
 export struct MeshProxy {
-    uniform unsigned int ns;
-    uniform unsigned int nc;
-    uniform unsigned int nb_panels;
+    uniform unsigned int64 ns;
+    uniform unsigned int64 nc;
+    uniform unsigned int64 nb_panels;
     uniform SoA3D v; // vertices
     uniform SoA3D colloc; // collocation points
     uniform SoA3D normal; // normals
@@ -85,12 +85,12 @@ inline void kernel_symmetry(float3& inf, float3 colloc, const uniform float3& ve
 export void kernel_influence(
     uniform const MeshProxy& m,
     uniform float* uniform lhs,
-    uniform unsigned int ia, uniform unsigned int lidx, uniform float sigma
+    uniform unsigned int64 ia, uniform unsigned int64 lidx, uniform float sigma
     ) {
-    const uniform unsigned int v0 = lidx + lidx / m.ns;
-    const uniform unsigned int v1 = v0 + 1;
-    const uniform unsigned int v3 = v0 + m.ns+1;
-    const uniform unsigned int v2 = v3 + 1;
+    const uniform unsigned int64 v0 = lidx + lidx / m.ns;
+    const uniform unsigned int64 v1 = v0 + 1;
+    const uniform unsigned int64 v3 = v0 + m.ns+1;
+    const uniform unsigned int64 v2 = v3 + 1;
 
     // Broadcast vertices
     uniform float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
@@ -115,18 +115,18 @@ export uniform float kernel_trefftz_cd(
     uniform const MeshProxy& m,
     uniform float* uniform gamma,
     uniform float* uniform trefftz_buffer,
-    uniform unsigned int j, uniform unsigned int n, uniform float sigma
+    uniform unsigned int64 j, uniform unsigned int64 n, uniform float sigma
     ) {
-    uniform unsigned int begin = m.nb_panels + j;
-    uniform unsigned int end = begin + n;
+    uniform unsigned int64 begin = m.nb_panels + j;
+    uniform unsigned int64 end = begin + n;
     float cd = 0.0f;
     
     // Compute the induced velocity of the streamwise wake vortex segments
-    for (uniform unsigned int ia = m.nb_panels; ia < m.nb_panels + m.ns; ia++) {
-        const uniform unsigned int v0 = ia + ia / m.ns;
-        const uniform unsigned int v1 = v0 + 1;
-        const uniform unsigned int v3 = v0 + m.ns+1;
-        const uniform unsigned int v2 = v3 + 1;
+    for (uniform unsigned int64 ia = m.nb_panels; ia < m.nb_panels + m.ns; ia++) {
+        const uniform unsigned int64 v0 = ia + ia / m.ns;
+        const uniform unsigned int64 v1 = v0 + 1;
+        const uniform unsigned int64 v3 = v0 + m.ns+1;
+        const uniform unsigned int64 v2 = v3 + 1;
 
         // Broadcast vertices
         const uniform float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
@@ -147,7 +147,7 @@ export uniform float kernel_trefftz_cd(
     }
     // Perform the integration (Katz Plotkin, Low speed Aero | Eq 8.146)
     foreach(i = j ... j + n) {
-        unsigned int li = (m.nc-1) * m.ns + i;
+        unsigned int64 li = (m.nc-1) * m.ns + i;
         float3 v0 = {m.v.x[i], m.v.y[i], m.v.z[i]};
         float3 v1 = {m.v.x[i+1], m.v.y[i+1], m.v.z[i+1]};
         float dl = length(v1 - v0);
@@ -159,11 +159,11 @@ export uniform float kernel_trefftz_cd(
 export uniform float kernel_trefftz_cl(
     uniform const MeshProxy& m,
     uniform float* uniform gamma,
-    uniform unsigned int j, uniform unsigned int n
+    uniform unsigned int64 j, uniform unsigned int64 n
     ) {
     float cl = 0.0f;
     foreach(i = j ... j + n) {
-        unsigned int li = (m.nc-1) * m.ns + i;
+        unsigned int64 li = (m.nc-1) * m.ns + i;
         float3 v0 = {m.v.x[i], m.v.y[i], m.v.z[i]};
         float3 v1 = {m.v.x[i+1], m.v.y[i+1], m.v.z[i+1]};
         float dl = length(v1 - v0);
