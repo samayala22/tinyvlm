@@ -5,8 +5,8 @@
 
 namespace tiny {
 
-constexpr static long long us_in_s = 1'000'000LL;
-constexpr static long long us_in_ms = 1'000LL;
+constexpr static double us_in_s = 1'000'000;
+constexpr static double us_in_ms = 1'000;
 
 class ScopedTimer {
 public:
@@ -14,15 +14,15 @@ public:
 
     ~ScopedTimer() {
         const auto m_end = std::chrono::high_resolution_clock::now();
-        const auto duration = static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(m_end - m_start).count());
+        const auto duration = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(m_end - m_start).count());
         std::printf("%s: ", m_name);
 
         if (duration > us_in_s) {
-            std::printf("%lld s\n", duration / us_in_s);
+            std::printf("%.2f s\n", duration / us_in_s);
         } else if (duration > us_in_ms) {
-            std::printf("%lld ms\n", duration / us_in_ms);
+            std::printf("%.0f ms\n", duration / us_in_ms);
         } else {
-            std::printf("%lld us\n", duration);
+            std::printf("%.0f us\n", duration);
         }
     }
 private:
