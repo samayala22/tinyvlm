@@ -4,8 +4,8 @@
 
 #include <string>
 
-#ifdef VLM_AVX2
-#include "vlm_backend_avx2.hpp"
+#ifdef VLM_CPU
+#include "vlm_backend_cpu.hpp"
 #endif
 #ifdef VLM_CUDA
 #include "vlm_backend_cuda.hpp"
@@ -27,11 +27,11 @@ f32 Backend::compute_coefficient_cd(const FlowData& flow) {
 
 std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name, Mesh& mesh) {
     tiny::CPUID cpuid;
-    cpuid.print_info();
+    //cpuid.print_info();
 
-    #ifdef VLM_AVX2
-    if (backend_name == "avx2" && cpuid.has("AVX2")) {
-        return std::make_unique<BackendAVX2>(mesh);
+    #ifdef VLM_CPU
+    if (backend_name == "cpu") {
+        return std::make_unique<BackendCPU>(mesh);
     }
     #endif
     #ifdef VLM_CUDA

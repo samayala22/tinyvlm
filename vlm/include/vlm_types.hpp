@@ -6,6 +6,7 @@
 #include <array>
 #include <string>
 #include <cmath>
+#include <limits>
 
 #include "linalg.h"
 #include "tinyconfig.hpp"
@@ -27,6 +28,8 @@ using f64 = double;
 
 constexpr f64 PI_d = 3.14159265358979;
 constexpr f32 PI_f = 3.141593f;
+constexpr f64 EPS_d = std::numeric_limits<f64>::epsilon();
+constexpr f32 EPS_f = std::numeric_limits<f32>::epsilon();
 
 // Optimized n power function that uses template folding optimisations
 // to generate a series of mul instructions
@@ -44,16 +47,16 @@ struct SoA_3D_t {
     std::vector<T> x = {};
     std::vector<T> y = {};
     std::vector<T> z = {};
-    u32 size = 0;
+    u64 size = 0;
     
-    void resize(u32 size_) {
+    void resize(u64 size_) {
         size = size_;
         x.resize(size);
         y.resize(size);
         z.resize(size);
     }
 
-    void reserve(u32 size_) {
+    void reserve(u64 size_) {
         size = size_;
         x.reserve(size);
         y.reserve(size);
