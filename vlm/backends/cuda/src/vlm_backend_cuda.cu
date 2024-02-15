@@ -134,6 +134,62 @@ void BackendCUDA::reset() {
     default_backend.reset();
 }
 
+struct SoA3D {
+    float* x;
+    float* y;
+    float* z;
+};
+
+struct MeshProxy {
+    uint64_t ns;
+    uint64_t nc;
+    uint64_t nb_panels;
+    SoA3D v; // vertices
+    SoA3D colloc; // collocation points
+    SoA3D normal; // normals
+};
+
+__global__ void kernel_influence_cuda(const MeshProxy& m, float* d_lhs, uint64_t lidx, float sigma) {
+
+}
+
+// void vlm::kernel_influence(
+//     u64 m, u64 n,
+//     f32 lhs[],
+//     f32 vx[], f32 vy[], f32 vz[],
+//     f32 collocx[], f32 collocy[], f32 collocz[],
+//     f32 normalx[], f32 normaly[], f32 normalz[],
+//     f32 sigma
+//     ) {
+    
+//     // parallel for
+//     for (u64 lidx = 0; lidx < m*n; lidx++) {
+//         const u64 nb_panels = m * n;
+//         const u64 v0 = lidx + lidx / n;
+//         const u64 v1 = v0 + 1;
+//         const u64 v3 = v0 + n+1;
+//         const u64 v2 = v3 + 1;
+
+//         float3 vertex0{vx[v0], vy[v0], vz[v0]};
+//         float3 vertex1{vx[v1], vy[v1], vz[v1]};
+//         float3 vertex2{vx[v2], vy[v2], vz[v2]};
+//         float3 vertex3{vx[v3], vy[v3], vz[v3]};
+
+//         for (u64 ia2 = 0; ia2 < nb_panels; ia2++) {
+//             const float3 colloc(collocx[ia2], collocy[ia2], collocz[ia2]);
+//             float3 inf(0.0f, 0.0f, 0.0f);
+//             const float3 normal(normalx[ia2], normaly[ia2], normalz[ia2]);
+
+//             kernel_symmetry(inf, colloc, vertex0, vertex1, sigma);
+//             kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
+//             kernel_symmetry(inf, colloc, vertex2, vertex3, sigma);
+//             kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
+//             // store in col major order
+//             lhs[lidx * nb_panels + ia2] += linalg::dot(inf, normal);
+//         }
+//     }
+// }
+
 void BackendCUDA::compute_lhs(const FlowData& flow) {
     default_backend.compute_lhs(flow);
 }
