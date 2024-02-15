@@ -25,6 +25,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download ISPC
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/ispc/ispc/releases/download/v1.22.0/ispc-v1.22.0-windows.zip" -OutFile "ispc.zip"
+          7z x ispc.zip
+          "ispc-v1.22.0-windows/bin" >> $env:GITHUB_PATH
+
       # Force xmake to a specific folder (for cache)
       - name: Set xmake env
         run: echo "XMAKE_GLOBALDIR=${{ runner.workspace }}/xmake-global" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

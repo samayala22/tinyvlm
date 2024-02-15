@@ -25,6 +25,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download ISPC
+        run: |
+          curl -L "https://github.com/ispc/ispc/releases/download/v1.22.0/ispc-v1.22.0-linux.tar.gz" -o ispc.tar.gz
+          tar -xzf ispc.tar.gz
+          echo "${PWD}/ispc-v1.22.0-linux/bin" >> $GITHUB_PATH
+
       # Install system dependencies (opengl)
       - name: Install system dependencies
         run: |

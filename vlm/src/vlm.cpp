@@ -14,7 +14,7 @@
 using namespace vlm;
 
 Solver::Solver(const tiny::Config& cfg) {
-    std::string backend_name = cfg().section("solver").get<std::string>("backend", "avx2");
+    std::string backend_name = cfg().section("solver").get<std::string>("backend", "cpu");
     mesh = std::make_unique<Mesh>(cfg);
     backend = create_backend(backend_name, *mesh);
 }
@@ -46,7 +46,7 @@ AeroCoefficients NonLinearVLM::solve(const FlowData& flow, const Database& db) {
     backend->compute_lhs(flow); // Create influence matrix
     backend->lu_factor(); // Factorize the influence matrix into LU form
 
-    for (u32 iter = 0; iter < max_iter && err > tol; iter++) {
+    for (u64 iter = 0; iter < max_iter && err > tol; iter++) {
         err = 0.0; // reset l1 error
         backend->compute_rhs(flow, strip_alphas); // Compute RHS using strip alphas
         backend->lu_solve(); // Solve for the gammas
@@ -55,8 +55,8 @@ AeroCoefficients NonLinearVLM::solve(const FlowData& flow, const Database& db) {
         // parallel reduce
         // loop over the chordwise strips and apply Van Dam algorithm
         {
-            const tiny::Timer timer("Strip correction");
-            for (u32 j = 0; j < mesh->ns; j++) {
+            const tiny::ScopedTimer timer("Strip correction");
+            for (u64 j = 0; j < mesh->ns; j++) {
                 const f32 strip_area = mesh->panels_area(0, j, mesh->nc, 1);
                 const FlowData strip_flow = {strip_alphas[j], flow.beta, flow.u_inf, flow.rho};
                 const f32 strip_cl = backend->compute_coefficient_cl(strip_flow, strip_area, j, 1);

@@ -5,25 +5,26 @@
 
 namespace vlm {
 
-class BackendAVX2 : public Backend {
+class BackendCPU : public Backend {
     public:
         std::vector<f32> lhs;
         std::vector<f32> rhs;
         std::vector<i32> ipiv;
         std::vector<f32> gamma;
         std::vector<f32> delta_gamma;
+        std::vector<f32> trefftz_buffer;
 
-        BackendAVX2(Mesh& mesh);
-        ~BackendAVX2();
+        BackendCPU(Mesh& mesh);
+        ~BackendCPU();
         void reset() override;
         void compute_lhs(const FlowData& flow) override;
         void compute_rhs(const FlowData& flow) override;
         void compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) override; 
         void lu_factor() override;
         void lu_solve() override;
-        f32 compute_coefficient_cl(const FlowData& flow, const f32 area, const u32 j, const u32 n) override;
-        linalg::alias::float3 compute_coefficient_cm(const FlowData& flow, const f32 area, const f32 chord, const u32 j, const u32 n) override;
-        f32 compute_coefficient_cd(const FlowData& flow, const f32 area, const u32 j, const u32 n) override;
+        f32 compute_coefficient_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) override;
+        linalg::alias::float3 compute_coefficient_cm(const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) override;
+        f32 compute_coefficient_cd(const FlowData& flow, const f32 area, const u64 j, const u64 n) override;
         void compute_delta_gamma() override;
 };
 
