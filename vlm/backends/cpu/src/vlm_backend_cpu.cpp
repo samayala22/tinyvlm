@@ -24,6 +24,7 @@ BackendCPU::~BackendCPU() = default; // Destructor definition
 
 BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
+    lhs_dummy.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
     gamma.resize(mesh.nb_panels_wing());

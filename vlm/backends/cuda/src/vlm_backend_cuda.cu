@@ -6,6 +6,8 @@
 #include <cusolverDn.h>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
+#include "helper_math.h"
+
 #include <cstdio>
 #include <vector_types.h>
 
@@ -109,13 +111,41 @@ BackendCUDA::BackendCUDA(Mesh& mesh) : default_backend(mesh), Backend(mesh) {
     auto& ctx = CtxManager::getInstance();
     ctx.create();
 
-    u64 n = (u64)mesh.nb_panels_wing();
+    u64 n = mesh.nb_panels_wing();
+    u64 npt = mesh.nb_panels_total();
+    u64 nvt = mesh.nb_vertices_total();
     
     // Allocate device memory
     CHECK_CUDA(cudaMalloc((void**)&d_lhs, n*n * sizeof(float)));
     CHECK_CUDA(cudaMalloc((void**)&d_rhs, n * sizeof(float)));
     CHECK_CUDA(cudaMalloc((void**)&d_gamma, n * sizeof(float)));
     CHECK_CUDA(cudaMalloc((void**)&d_delta_gamma, n * sizeof(float)));
+
+    h_mesh.nb_panels = n;
+    h_mesh.ns = mesh.ns;
+    h_mesh.nc = mesh.nc;
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.v.x, nvt * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.v.y, nvt * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.v.z, nvt * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.colloc.x, npt * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.colloc.y, npt * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.colloc.z, npt * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.normal.x, npt * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.normal.y, npt * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void**)&h_mesh.normal.z, npt * sizeof(float)));
+    CHECK_CUDA(cudaMemcpy(h_mesh.v.x, mesh.v.x.data(), nvt * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(h_mesh.v.y, mesh.v.y.data(), nvt * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(h_mesh.v.z, mesh.v.z.data(), nvt * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(h_mesh.colloc.x, mesh.colloc.x.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(h_mesh.colloc.y, mesh.colloc.y.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(h_mesh.colloc.z, mesh.colloc.z.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(h_mesh.normal.x, mesh.normal.x.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(h_mesh.normal.y, mesh.normal.y.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(h_mesh.normal.z, mesh.normal.z.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
+    
+    CHECK_CUDA(cudaMalloc((void**)&d_mesh, sizeof(MeshProxy)));      
+    CHECK_CUDA(cudaMemcpy(d_mesh, &h_mesh, sizeof(MeshProxy), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 BackendCUDA::~BackendCUDA() {
@@ -126,72 +156,109 @@ BackendCUDA::~BackendCUDA() {
     CHECK_CUDA(cudaFree(d_rhs));
     CHECK_CUDA(cudaFree(d_gamma));
     CHECK_CUDA(cudaFree(d_delta_gamma));
+    CHECK_CUDA(cudaFree(h_mesh.v.x));
+    CHECK_CUDA(cudaFree(h_mesh.v.y));
+    CHECK_CUDA(cudaFree(h_mesh.v.z));
+    CHECK_CUDA(cudaFree(h_mesh.colloc.x));
+    CHECK_CUDA(cudaFree(h_mesh.colloc.y)); 
+    CHECK_CUDA(cudaFree(h_mesh.colloc.z));
+    CHECK_CUDA(cudaFree(h_mesh.normal.x));
+    CHECK_CUDA(cudaFree(h_mesh.normal.y));
+    CHECK_CUDA(cudaFree(h_mesh.normal.z));
+    CHECK_CUDA(cudaFree(d_mesh));
 }
 
 // For the moment, cuda backend just falls back to cpu backend
 
 void BackendCUDA::reset() {
     default_backend.reset();
+    u64 n = mesh.nb_panels_wing();
+
+    CHECK_CUDA(cudaMemset(d_lhs, 0, n * n * sizeof(float)));
+    CHECK_CUDA(cudaMemset(d_rhs, 0, n * sizeof(float)));
+    CHECK_CUDA(cudaMemset(d_gamma, 0, n * sizeof(float)));
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-struct SoA3D {
-    float* x;
-    float* y;
-    float* z;
-};
+#define RCUT 1e-10f
+#define RCUT2 1e-5f
 
-struct MeshProxy {
-    uint64_t ns;
-    uint64_t nc;
-    uint64_t nb_panels;
-    SoA3D v; // vertices
-    SoA3D colloc; // collocation points
-    SoA3D normal; // normals
-};
+#define PI_f 3.141593f
 
-__global__ void kernel_influence_cuda(const MeshProxy& m, float* d_lhs, uint64_t lidx, float sigma) {
-
-}
-
-// void vlm::kernel_influence(
-//     u64 m, u64 n,
-//     f32 lhs[],
-//     f32 vx[], f32 vy[], f32 vz[],
-//     f32 collocx[], f32 collocy[], f32 collocz[],
-//     f32 normalx[], f32 normaly[], f32 normalz[],
-//     f32 sigma
-//     ) {
+__device__ inline float3 kernel_biosavart(float3& colloc, const float3& vertex1, const float3& vertex2, const float& sigma) {
+    float3 r0 = vertex2 - vertex1;
+    float3 r1 = colloc - vertex1;
+    float3 r2 = colloc - vertex2;
+    // Katz Plotkin, Low speed Aero | Eq 10.115
+    float3 r1r2cross = cross(r1, r2);
+    float r1_norm = length(r1);
+    float r2_norm = length(r2);
+    float square = length2(r1r2cross);
     
-//     // parallel for
-//     for (u64 lidx = 0; lidx < m*n; lidx++) {
-//         const u64 nb_panels = m * n;
-//         const u64 v0 = lidx + lidx / n;
-//         const u64 v1 = v0 + 1;
-//         const u64 v3 = v0 + n+1;
-//         const u64 v2 = v3 + 1;
+    if ((square<RCUT) || (r1_norm<RCUT2) || (r2_norm<RCUT2)) {
+        float3 res = {0.0f, 0.0f, 0.0f};
+        return res;
+    }
 
-//         float3 vertex0{vx[v0], vy[v0], vz[v0]};
-//         float3 vertex1{vx[v1], vy[v1], vz[v1]};
-//         float3 vertex2{vx[v2], vy[v2], vz[v2]};
-//         float3 vertex3{vx[v3], vy[v3], vz[v3]};
+    float smoother = sigma*sigma*length2(r0);
 
-//         for (u64 ia2 = 0; ia2 < nb_panels; ia2++) {
-//             const float3 colloc(collocx[ia2], collocy[ia2], collocz[ia2]);
-//             float3 inf(0.0f, 0.0f, 0.0f);
-//             const float3 normal(normalx[ia2], normaly[ia2], normalz[ia2]);
+    float coeff = (dot(r0,r1)*r2_norm - dot(r0, r2)*r1_norm) / (4.0f*PI_f*sqrt(square*square + smoother*smoother)*r1_norm*r2_norm);
+    return r1r2cross * coeff;
+}
 
-//             kernel_symmetry(inf, colloc, vertex0, vertex1, sigma);
-//             kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
-//             kernel_symmetry(inf, colloc, vertex2, vertex3, sigma);
-//             kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
-//             // store in col major order
-//             lhs[lidx * nb_panels + ia2] += linalg::dot(inf, normal);
-//         }
-//     }
-// }
+__device__ inline void kernel_symmetry(float3& inf, float3 colloc, const float3& vertex0, const float3& vertex1, const float& sigma) {
+    float3 induced_speed = kernel_biosavart(colloc, vertex0, vertex1, sigma);
+    inf.x += induced_speed.x;
+    inf.y += induced_speed.y;
+    inf.z += induced_speed.z;
+    colloc.y = -colloc.y; // wing symmetry
+    float3 induced_speed_sym = kernel_biosavart(colloc, vertex0, vertex1, sigma);
+    inf.x += induced_speed_sym.x;
+    inf.y -= induced_speed_sym.y;
+    inf.z += induced_speed_sym.z;
+}
+
+__global__ void kernel_influence_cuda(const MeshProxy* m, float* d_lhs, const uint64_t lidx, const float sigma) {
+    u64 ia = blockIdx.y * blockDim.y + threadIdx.y;
+    u64 ia2 = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (ia2 >= m->nb_panels * m->nb_panels) return;
+
+    // if (ia > lidx || ia2 > m.nb_panels) {
+    //     return;
+    // }
+
+    // const u64 v0 = ia + ia / m.ns;
+    // const u64 v1 = v0 + 1;
+    // const u64 v3 = v0 + m.ns + 1;
+    // const u64 v2 = v3 + 1;
+    // const float3 vertex0{m.v.x[v0], m.v.y[v0], m.v.z[v0]};
+    // const float3 vertex1{m.v.x[v1], m.v.y[v1], m.v.z[v1]};
+    // const float3 vertex2{m.v.x[v2], m.v.y[v2], m.v.z[v2]};
+    // const float3 vertex3{m.v.x[v3], m.v.y[v3], m.v.z[v3]};
+
+    // const float3 colloc = {m.colloc.x[ia2], m.colloc.y[ia2], m.colloc.z[ia2]};
+    // const float3 normal = {m.normal.x[ia2], m.normal.y[ia2], m.normal.z[ia2]};
+    // float3 inf{0.0f, 0.0f, 0.0f};
+    // kernel_symmetry(inf, colloc, vertex0, vertex1, sigma);
+    // kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
+    // kernel_symmetry(inf, colloc, vertex2, vertex3, sigma);
+    // kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
+    // d_lhs[ia * m.nb_panels + ia2] += dot(inf, normal);
+    d_lhs[ia2] = static_cast<float>(ia2);
+}
 
 void BackendCUDA::compute_lhs(const FlowData& flow) {
     default_backend.compute_lhs(flow);
+    const u64 block_size = 1024;
+    const u64 lidx = (mesh.nc - 1) * mesh.ns;
+    const u64 grid_size = (lidx + block_size - 1) / block_size;
+    kernel_influence_cuda<<<grid_size, block_size>>>(d_mesh, d_lhs, lidx, flow.sigma_vatistas);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaMemcpy(default_backend.lhs_dummy.data(), d_lhs, mesh.nb_panels_wing() * mesh.nb_panels_wing() * sizeof(float), cudaMemcpyDeviceToHost));
+    for (u64 i = 0; i < mesh.nb_panels_wing(); i++) {
+        std::printf("CPU: %e %e GPU\n", default_backend.lhs[i], default_backend.lhs_dummy[i]);
+    }
 }
 
 void BackendCUDA::compute_rhs(const FlowData& flow) {
