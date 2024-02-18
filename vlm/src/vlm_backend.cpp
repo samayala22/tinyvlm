@@ -26,7 +26,7 @@ f32 Backend::compute_coefficient_cd(const FlowData& flow) {
 }
 
 std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name, Mesh& mesh) {
-    tiny::CPUID cpuid;
+    //tiny::CPUID cpuid;
     //cpuid.print_info();
 
     #ifdef VLM_CPU
