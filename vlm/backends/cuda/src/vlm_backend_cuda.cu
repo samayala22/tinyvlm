@@ -261,7 +261,7 @@ __global__ void kernel_influence_cuda2(
 
     if (j >= length || i >= m->nb_panels) return;
 
-    __shared__ float sharedVertexX[BlockSizeY * 4];
+    __shared__ float sharedVertexX[BlockSizeY * 4]; // v0 v1 v2 v3 v0 v1 v2 v3 v0 v1 v2 v3 v0 v1 v2 v3
     __shared__ float sharedVertexY[BlockSizeY * 4];
     __shared__ float sharedVertexZ[BlockSizeY * 4];
     __shared__ float sharedCollocX[BlockSizeX];
@@ -283,6 +283,14 @@ __global__ void kernel_influence_cuda2(
         sharedVertexX[indexBase + 1] = m->v.x[v1];
         sharedVertexX[indexBase + 2] = m->v.x[v2];
         sharedVertexX[indexBase + 3] = m->v.x[v3];
+        sharedVertexY[indexBase + 0] = m->v.y[v0];
+        sharedVertexY[indexBase + 1] = m->v.y[v1];
+        sharedVertexY[indexBase + 2] = m->v.y[v2];
+        sharedVertexY[indexBase + 3] = m->v.y[v3];
+        sharedVertexZ[indexBase + 0] = m->v.z[v0];
+        sharedVertexZ[indexBase + 1] = m->v.z[v1];
+        sharedVertexZ[indexBase + 2] = m->v.z[v2];
+        sharedVertexZ[indexBase + 3] = m->v.z[v3];
     }
 
     // Example for loading colloc/normal data by threads along the y dimension
@@ -303,6 +311,77 @@ __global__ void kernel_influence_cuda2(
     const float3 vertex1{sharedVertexX[threadIdx.y * 4 + 1], sharedVertexY[threadIdx.y * 4 + 1], sharedVertexZ[threadIdx.y * 4 + 1]};
     const float3 vertex2{sharedVertexX[threadIdx.y * 4 + 2], sharedVertexY[threadIdx.y * 4 + 2], sharedVertexZ[threadIdx.y * 4 + 2]};
     const float3 vertex3{sharedVertexX[threadIdx.y * 4 + 3], sharedVertexY[threadIdx.y * 4 + 3], sharedVertexZ[threadIdx.y * 4 + 3]};
+
+    const float3 colloc = {sharedCollocX[threadIdx.x], sharedCollocY[threadIdx.x], sharedCollocZ[threadIdx.x]};
+    const float3 normal = {sharedNormalX[threadIdx.x], sharedNormalY[threadIdx.x], sharedNormalZ[threadIdx.x]};
+    float3 inf{0.0f, 0.0f, 0.0f};
+    kernel_symmetry(&inf, colloc, vertex0, vertex1, sigma);
+    kernel_symmetry(&inf, colloc, vertex1, vertex2, sigma);
+    kernel_symmetry(&inf, colloc, vertex2, vertex3, sigma);
+    kernel_symmetry(&inf, colloc, vertex3, vertex0, sigma);
+    d_lhs[(start + j) * m->nb_panels + i] += dot(inf, normal);
+}
+
+__global__ void kernel_influence_cuda3(
+    const MeshProxy* m,
+    float* d_lhs,
+    const uint64_t start, const uint64_t length, const uint64_t offset, const float sigma) {
+
+    u64 j = blockIdx.y * blockDim.y + threadIdx.y;
+    u64 i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (j >= length || i >= m->nb_panels) return;
+
+    __shared__ float sharedVertexX[BlockSizeY * 4]; // v0 v0 v0 v0 v1 v1 v1 v1 v2 v2 v2 v2 v3 v3 v3 v3
+    __shared__ float sharedVertexY[BlockSizeY * 4];
+    __shared__ float sharedVertexZ[BlockSizeY * 4];
+    __shared__ float sharedCollocX[BlockSizeX];
+    __shared__ float sharedCollocY[BlockSizeX];
+    __shared__ float sharedCollocZ[BlockSizeX];
+    __shared__ float sharedNormalX[BlockSizeX];
+    __shared__ float sharedNormalY[BlockSizeX];
+    __shared__ float sharedNormalZ[BlockSizeX];
+
+    if (threadIdx.x == 0) {
+        const u64 v0 = (start + offset + j) + (start + offset + j) / m->ns;
+        const u64 v1 = v0 + 1;
+        const u64 v3 = v0 + m->ns + 1;
+        const u64 v2 = v3 + 1;
+        // Assuming each thread along the y dimension loads data for one 'vertex' and its reuses across x dimension.
+        // Adjust the calculation of v0, v1, etc., based on the actual indices needed for each thread.
+        int indexBase = threadIdx.y; // Base index for storing data in shared memory, assuming 4 vertices needed per thread in y
+        sharedVertexX[indexBase + 0 * BlockSizeY] = m->v.x[v0];
+        sharedVertexX[indexBase + 1 * BlockSizeY] = m->v.x[v1];
+        sharedVertexX[indexBase + 2 * BlockSizeY] = m->v.x[v2];
+        sharedVertexX[indexBase + 3 * BlockSizeY] = m->v.x[v3];
+        sharedVertexY[indexBase + 0 * BlockSizeY] = m->v.y[v0];
+        sharedVertexY[indexBase + 1 * BlockSizeY] = m->v.y[v1];
+        sharedVertexY[indexBase + 2 * BlockSizeY] = m->v.y[v2];
+        sharedVertexY[indexBase + 3 * BlockSizeY] = m->v.y[v3];
+        sharedVertexZ[indexBase + 0 * BlockSizeY] = m->v.z[v0];
+        sharedVertexZ[indexBase + 1 * BlockSizeY] = m->v.z[v1];
+        sharedVertexZ[indexBase + 2 * BlockSizeY] = m->v.z[v2];
+        sharedVertexZ[indexBase + 3 * BlockSizeY] = m->v.z[v3];
+    }
+
+    // Example for loading colloc/normal data by threads along the y dimension
+    if (threadIdx.y == 0) {
+        // Load colloc and normal data into shared memory
+        // Adjust indices based on your data structure and ensure no out-of-bounds access
+        sharedCollocX[threadIdx.x] = m->colloc.x[i];
+        sharedCollocY[threadIdx.x] = m->colloc.y[i];
+        sharedCollocZ[threadIdx.x] = m->colloc.z[i];
+        sharedNormalX[threadIdx.x] = m->normal.x[i];
+        sharedNormalY[threadIdx.x] = m->normal.y[i];
+        sharedNormalZ[threadIdx.x] = m->normal.z[i];
+    }
+
+    __syncthreads(); // Synchronize to ensure all data is loaded before proceeding
+
+    const float3 vertex0{sharedVertexX[threadIdx.y + 0 * BlockSizeY], sharedVertexY[threadIdx.y + 0 * BlockSizeY], sharedVertexZ[threadIdx.y + 0 * BlockSizeY]};
+    const float3 vertex1{sharedVertexX[threadIdx.y + 1 * BlockSizeY], sharedVertexY[threadIdx.y + 1 * BlockSizeY], sharedVertexZ[threadIdx.y + 1 * BlockSizeY]};
+    const float3 vertex2{sharedVertexX[threadIdx.y + 2 * BlockSizeY], sharedVertexY[threadIdx.y + 2 * BlockSizeY], sharedVertexZ[threadIdx.y + 2 * BlockSizeY]};
+    const float3 vertex3{sharedVertexX[threadIdx.y + 3 * BlockSizeY], sharedVertexY[threadIdx.y + 3 * BlockSizeY], sharedVertexZ[threadIdx.y + 3 * BlockSizeY]};
 
     const float3 colloc = {sharedCollocX[threadIdx.x], sharedCollocY[threadIdx.x], sharedCollocZ[threadIdx.x]};
     const float3 normal = {sharedNormalX[threadIdx.x], sharedNormalY[threadIdx.x], sharedNormalZ[threadIdx.x]};
@@ -355,10 +434,6 @@ void BackendCUDA::compute_lhs(const FlowData& flow) {
         }
         CHECK_CUDA(cudaDeviceSynchronize());
     }
- 
-    //default_backend.compute_lhs(flow);
-    CHECK_CUDA(cudaMemcpy(default_backend.lhs_dummy.data(), d_lhs, mesh.nb_panels_wing() * mesh.nb_panels_wing() * sizeof(float), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 void BackendCUDA::compute_rhs(const FlowData& flow) {
