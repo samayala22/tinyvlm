@@ -1,12 +1,12 @@
 #include "vlm_backend_cpu.hpp"
 #include "vlm_backend_cuda.hpp"
 
-#include "simpletimer.hpp"
+#include "tinytimer.hpp"
 
 #include <cusolverDn.h>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
-#include "helper_math.h"
+#include "helper_math.cuh"
 
 #include <cstdio>
 #include <stdlib.h>
@@ -284,7 +284,7 @@ constexpr u64 get_grid_size(u64 length, u64 block_size) {
 }
 
 void BackendCUDA::compute_lhs(const FlowData& flow) {
-    SimpleTimer timer("LHS");
+    tiny::ScopedTimer timer("LHS");
     // Copy the latest mesh that has been corrected for the aoa
     u64 npt = mesh.nb_panels_total();
     u64 nvt = mesh.nb_vertices_total();
@@ -331,7 +331,7 @@ void BackendCUDA::compute_rhs(const FlowData& flow, const std::vector<f32>& sect
 }
 
 void BackendCUDA::lu_factor() {
-    SimpleTimer timer("Factor");
+    tiny::ScopedTimer timer("Factor");
     int n = (int)mesh.nb_panels_wing();
     int h_info = 0;
 
@@ -341,7 +341,7 @@ void BackendCUDA::lu_factor() {
 };
 
 void BackendCUDA::lu_solve() {
-    SimpleTimer timer("Solve");
+    tiny::ScopedTimer timer("Solve");
     //default_backend.solve();
     int n = (int)mesh.nb_panels_wing();
     int h_info = 0;

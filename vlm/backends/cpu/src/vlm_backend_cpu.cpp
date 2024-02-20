@@ -24,7 +24,6 @@ BackendCPU::~BackendCPU() = default; // Destructor definition
 
 BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
-    lhs_dummy.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
     gamma.resize(mesh.nb_panels_wing());
@@ -39,7 +38,7 @@ void BackendCPU::reset() {
 }
 
 void BackendCPU::compute_delta_gamma() {
-    std::copy(gamma.begin(), gamma.begin()+mesh.ns, delta_gamma.begin());
+    std::copy(gamma.data(), gamma.data()+mesh.ns, delta_gamma.data());
 
     // note: this is efficient as the memory is contiguous
     for (u64 i = 1; i < mesh.nc; i++) {
