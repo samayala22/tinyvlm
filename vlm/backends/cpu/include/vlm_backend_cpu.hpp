@@ -8,7 +8,6 @@ namespace vlm {
 class BackendCPU : public Backend {
     public:
         std::vector<f32> lhs;
-        std::vector<f32> lhs_dummy;
         std::vector<f32> rhs;
         std::vector<i32> ipiv;
         std::vector<f32> gamma;

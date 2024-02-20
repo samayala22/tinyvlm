@@ -82,6 +82,6 @@ class Mesh {
 };
 
 // todo, update this to mirror the constructor
-std::unique_ptr<Mesh> create_mesh(const std::string filename);
+std::unique_ptr<Mesh> create_mesh(const std::string& filename);
 
 } // namespace vlm
