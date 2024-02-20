@@ -34,9 +34,13 @@ class CL:
 
 alphas = np.radians(np.linspace(0, 30))
 cl_factory = CL(1.2, 0.28, 0.02, 2*np.pi, 2*np.pi)
-cls = cl_factory.generate(alphas)
+vec_cl = cl_factory.generate(alphas)
 
-plt.plot(alphas, cls)
-plt.xlabel(r'$\alpha$')
-plt.ylabel(r'$C_L$')
-plt.show()
+# plt.plot(alphas, vec_cl)
+# plt.xlabel(r'$\alpha$')
+# plt.ylabel(r'$C_L$')
+# plt.show()
+
+with open("spallart_db.dat", "w") as f:
+    for alpha, cl in zip(alphas, vec_cl):
+        f.write(f"{np.degrees(alpha):.1f} {cl:.6f} 0.0 0.0\n")

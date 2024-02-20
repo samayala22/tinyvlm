@@ -38,7 +38,7 @@ void BackendCPU::reset() {
 }
 
 void BackendCPU::compute_delta_gamma() {
-    std::copy(gamma.begin(), gamma.begin()+mesh.ns, delta_gamma.begin());
+    std::copy(gamma.data(), gamma.data()+mesh.ns, delta_gamma.data());
 
     // note: this is efficient as the memory is contiguous
     for (u64 i = 1; i < mesh.nc; i++) {
