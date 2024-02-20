@@ -24,25 +24,22 @@
 
 # Backends
 
-- [ ] Generic (already implemented but mixed up with AVX2 backend)
-- [X] AVX2 (going to be replaced by ISPC)
-- [X] CUDA (wip, some kernels are missing)
-- [ ] SYCL ? HIP ? Vulkan ?
+- [X] ISPC
+- [X] CUDA
 
 # Maintainability
 
 - [X] Clangd
-- [ ] Clang-Tidy
+- [X] Clang-Format
+- [X] Clang-Tidy
 - [X] Testing framework (via `xmake test`)
 - [X] Compilation CI
-- [ ] Performance regression CI
 - [ ] Documented code (doxygen style)
 
 ## Build and run
 
 Requirements: 
 - Windows (MSVC compiler) or Linux (GCC or Clang)
-- CPU that supports AVX2
 - [xmake](https://xmake.io/#/) build system
     - For Windows, the [installer](https://github.com/xmake-io/xmake/releases) is recommended
     - For Linux, run `curl -fsSL https://xmake.io/shget.text | bash`

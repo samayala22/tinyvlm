@@ -37,7 +37,7 @@ Mesh::Mesh(
     init();
 }
 
-std::unique_ptr<Mesh> vlm::create_mesh(const std::string filename) {
+std::unique_ptr<Mesh> vlm::create_mesh(const std::string& filename) {
     return std::make_unique<Mesh>(filename);
 }
 

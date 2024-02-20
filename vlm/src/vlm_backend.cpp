@@ -26,7 +26,7 @@ f32 Backend::compute_coefficient_cd(const FlowData& flow) {
 }
 
 std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name, Mesh& mesh) {
-    tiny::CPUID cpuid;
+    //tiny::CPUID cpuid;
     //cpuid.print_info();
 
     #ifdef VLM_CPU
@@ -40,4 +40,15 @@ std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name, Me
     }
     #endif
     throw std::runtime_error("Unsupported backend: " + backend_name);
+}
+
+std::vector<std::string> vlm::get_available_backends() {
+    std::vector<std::string> backends;
+    #ifdef VLM_CPU
+    backends.push_back("cpu");
+    #endif
+    #ifdef VLM_CUDA
+    backends.push_back("cuda");
+    #endif
+    return backends;
 }
