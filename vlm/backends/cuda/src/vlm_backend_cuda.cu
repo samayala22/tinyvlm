@@ -97,12 +97,11 @@ public:
     cudaStream_t stream() {return(m_stream);}
     cublasHandle_t cublas() {return(m_cublas);}
 
-protected:
+private:
     cusolverDnHandle_t m_cusolver = nullptr;
     cudaStream_t m_stream = nullptr;
     cublasHandle_t m_cublas = nullptr;
-
-private:
+    
     CtxManager() = default;
     ~CtxManager() = default;
 };
