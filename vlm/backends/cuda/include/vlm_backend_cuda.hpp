@@ -31,6 +31,10 @@ class BackendCUDA : public Backend {
         float* d_rhs = nullptr;
         float* d_gamma = nullptr;
         float* d_delta_gamma = nullptr;
+
+        int* d_solver_info = nullptr;
+        int* d_solver_ipiv = nullptr;
+        float* d_solver_buffer = nullptr;
         
         MeshProxy h_mesh;
         MeshProxy* d_mesh;

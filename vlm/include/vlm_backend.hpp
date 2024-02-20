@@ -27,5 +27,6 @@ class Backend {
 };
 
 std::unique_ptr<Backend> create_backend(const std::string& backend_name, Mesh& mesh);
+std::vector<std::string> get_available_backends();
 
-}
+} // namespace vlm
