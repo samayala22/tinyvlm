@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
 
     const std::vector<std::string> meshes = {"../../../../mesh/elliptic_64x64.x"};
     const std::vector<std::string> backends = get_available_backends();
-    std::vector<f32> test_alphas = {0, 1, 2, 3, 4, 5, 10, 15};
+    std::vector<f32> test_alphas = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30};
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);
 
     auto solvers = tiny::make_combination(meshes, backends);
@@ -133,7 +133,7 @@ int main(int argc, char **argv) {
             std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", to_degrees(flow.alpha), coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
             std::printf(">>> Analytical CL: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cl, cl_aerr, cl_rerr*100.f);
             std::printf(">>> Analytical CD: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cd, cd_aerr, cd_rerr*100.f);
-            if (cl_rerr > 0.03f || cd_rerr > 0.01f) return 1;
+            if (cl_rerr > 0.02f || cd_rerr > 0.02f) return 1;
         }
     }
 

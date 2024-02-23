@@ -51,6 +51,7 @@ void Mesh::init() {
 void Mesh::alloc() {
     const u64 ncw = nc + nw;
     v.resize((ncw + 1) * (ns + 1));
+    panel_v.resize(2*ncw * (ns + 1));
     offsets.resize(nc * ns + 1);
     connectivity.resize(4 * nc * ns);
 
@@ -170,30 +171,32 @@ f32 Mesh::chord_length(const u64 j) const {
 }
 
 linalg::alias::float3 Mesh::get_v0(u64 i) const {
-    const u64 idx = i + i / ns;
-    return {v.x[idx], v.y[idx], v.z[idx]};
+    const u64 row = i / ns;
+    const u64 col = i % ns;
+    return {panel_v.x[(2*row+0) * (ns+1) + col], panel_v.y[(2*row+0) * (ns+1) + col], panel_v.z[(2*row+0) * (ns+1) + col]};
 }
 
 linalg::alias::float3 Mesh::get_v1(u64 i) const {
-    const u64 idx = i + i / ns + 1;
-    return {v.x[idx], v.y[idx], v.z[idx]};
+    const u64 row = i / ns;
+    const u64 col = i % ns;
+    return {panel_v.x[(2*row+0) * (ns+1) + col + 1], panel_v.y[(2*row+0) * (ns+1) + col + 1], panel_v.z[(2*row+0) * (ns+1) + col + 1]};
 }
 
 linalg::alias::float3 Mesh::get_v2(u64 i) const {
-    const u64 idx = i + i / ns + ns + 2;
-    return {v.x[idx], v.y[idx], v.z[idx]};
+    const u64 row = i / ns;
+    const u64 col = i % ns;
+    return {panel_v.x[(2*row+1) * (ns+1) + col + 1], panel_v.y[(2*row+1) * (ns+1) + col + 1], panel_v.z[(2*row+1) * (ns+1) + col + 1]};
 }
 
 linalg::alias::float3 Mesh::get_v3(u64 i) const {
-    const u64 idx = i + i / ns + ns + 1;
-    return {v.x[idx], v.y[idx], v.z[idx]};
+    const u64 row = i / ns;
+    const u64 col = i % ns;
+    return {panel_v.x[(2*row+1) * (ns+1) + col], panel_v.y[(2*row+1) * (ns+1) + col], panel_v.z[(2*row+1) * (ns+1) + col]};
 }
 
 void Mesh::update_wake(const linalg::alias::float3& freestream) {
-    const f32 chord_root = chord_length(0); 
-    const f32 off_x = freestream.x * 100.0f * chord_root;
-    const f32 off_y = freestream.y * 100.0f * chord_root;
-    const f32 off_z = freestream.z * 100.0f * chord_root;
+    const f32 chord_root = chord_length(0);
+    const linalg::alias::float3 vec_trans = linalg::normalize(freestream) * 100.0f * chord_root;
 
     const u64 v_ns = ns + 1;
     const u64 begin_trailing_edge = nb_vertices_wing()-v_ns;
@@ -201,16 +204,31 @@ void Mesh::update_wake(const linalg::alias::float3& freestream) {
     // Add one layer of wake vertices
     // this can be parallelized (careful to false sharing tho)
     for (u64 i = begin_trailing_edge; i < end_trailing_edge; ++i) {
-        v.x[i + v_ns] = v.x[i] + off_x;
-        v.y[i + v_ns] = v.y[i] + off_y;
-        v.z[i + v_ns] = v.z[i] + off_z;
+        v.x[i + v_ns] = v.x[i] + vec_trans.x;
+        v.y[i + v_ns] = v.y[i] + vec_trans.y;
+        v.z[i + v_ns] = v.z[i] + vec_trans.z;
+    }
+
+    const u64 i = nc; // position on wake row
+    for (u64 j = 0; j < ns+1; j++) {
+        // copy trailing panels v2 and v3
+        panel_v.x[(2*i+0) * (ns+1) + j] = panel_v.x[(2*i-1) * (ns+1) + j];
+        panel_v.y[(2*i+0) * (ns+1) + j] = panel_v.y[(2*i-1) * (ns+1) + j];
+        panel_v.z[(2*i+0) * (ns+1) + j] = panel_v.z[(2*i-1) * (ns+1) + j];
+        // farfield wake vertices
+        panel_v.x[(2*i+1) * (ns+1) + j] = panel_v.x[(2*i+0) * (ns+1) + j] + vec_trans.x;
+        panel_v.y[(2*i+1) * (ns+1) + j] = panel_v.y[(2*i+0) * (ns+1) + j] + vec_trans.y;
+        panel_v.z[(2*i+1) * (ns+1) + j] = panel_v.z[(2*i+0) * (ns+1) + j] + vec_trans.z;
+
+        // std::printf("trailing: %f %f %f\n", panel_v.x[(2*i+0) * (ns+1) + j], panel_v.y[(2*i+0) * (ns+1) + j], panel_v.z[(2*i+0) * (ns+1) + j]);
+        // std::printf("wake: %f %f %f\n", panel_v.x[(2*i+1) * (ns+1) + j], panel_v.y[(2*i+1) * (ns+1) + j], panel_v.z[(2*i+1) * (ns+1) + j]);
     }
     compute_metrics_wake();
 }
 
 // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf (Eq 3.4 p21)
 void Mesh::correction_high_aoa(f32 alpha_rad) {
-    const f32 factor = 0.5f * alpha_rad / (std::sin(alpha_rad) + EPS); // correction factor
+    const f32 factor = (alpha_rad > EPS) ? 0.5f * alpha_rad / std::sin(alpha_rad) : 0.5f; // correction factor
     // Note: this can be vectorized and parallelized
     for (u64 i = 0; i < nb_panels_total(); i++) {
         // "chord vector" from center of leading line (v0-v1) to trailing line (v3-v2)
@@ -348,6 +366,34 @@ void Mesh::io_read_plot3d_structured(std::ifstream& f) {
             throw std::runtime_error("Mesh vertices should be ordered in chordwise direction");
         }
     }
+
+    // shift vertices according to quarter chord rule
+    for (u64 i = 0; i < nc; i++) {
+        for (u64 j = 0; j < ns+1; j++) {
+            linalg::alias::float3 pt0 = {v.x[i * nj + j], v.y[i * nj + j], v.z[i * nj + j]};
+            linalg::alias::float3 pt1 = {v.x[(i+1) * nj + j], v.y[(i+1) * nj + j], v.z[(i+1) * nj + j]};
+            linalg::alias::float3 vec_displacement = 0.25f * (pt1 - pt0);
+            pt0 += vec_displacement;
+            pt1 += vec_displacement;
+            panel_v.x[(2*i+0) * nj + j] = pt0.x;
+            panel_v.y[(2*i+0) * nj + j] = pt0.y;
+            panel_v.z[(2*i+0) * nj + j] = pt0.z;
+            panel_v.x[(2*i+1) * nj + j] = pt1.x;
+            panel_v.y[(2*i+1) * nj + j] = pt1.y;
+            panel_v.z[(2*i+1) * nj + j] = pt1.z;
+        }
+    }
+
+    // for (u64 i = 0; i < nc; i++) {
+    //     for (u64 j = 0; j < ns; j++) {
+    //         std::printf("panel: %llu\n", i*ns + j);
+    //         // in clockwise order starting from top left 
+    //         std::printf("v0: %f %f %f\n", panel_v.x[(2*i+0)*nj + j], panel_v.y[(2*i+0)*nj + j], panel_v.z[(2*i+0)*nj + j]);
+    //         std::printf("v1: %f %f %f\n", panel_v.x[(2*i+0)*nj + j + 1], panel_v.y[(2*i+0)*nj + j + 1], panel_v.z[(2*i+0)*nj + j + 1]);
+    //         std::printf("v2: %f %f %f\n", panel_v.x[(2*i+1)*nj + j + 1], panel_v.y[(2*i+1)*nj + j + 1], panel_v.z[(2*i+1)*nj + j + 1]);
+    //         std::printf("v3: %f %f %f\n", panel_v.x[(2*i+1)*nj + j], panel_v.y[(2*i+1)*nj + j], panel_v.z[(2*i+1)*nj + j]);
+    //     }
+    // }
 }
 
 void Mesh::io_read(const std::string& filename) {

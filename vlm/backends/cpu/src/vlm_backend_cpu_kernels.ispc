@@ -87,7 +87,13 @@ export void kernel_influence(
     uniform float* uniform lhs,
     uniform uint64 ia, uniform uint64 lidx, uniform float sigma
     ) {
-    const uniform uint64 v0 = lidx + lidx / m.ns;
+    // const uniform uint64 v0 = lidx + lidx / m.ns;
+    // const uniform uint64 v1 = v0 + 1;
+    // const uniform uint64 v3 = v0 + m.ns+1;
+    // const uniform uint64 v2 = v3 + 1;
+    const uniform uint64 row = lidx / m.ns;
+    const uniform uint64 col = lidx % m.ns;
+    const uniform uint64 v0 = (2*row) * (m.ns+1) + col;
     const uniform uint64 v1 = v0 + 1;
     const uniform uint64 v3 = v0 + m.ns+1;
     const uniform uint64 v2 = v3 + 1;

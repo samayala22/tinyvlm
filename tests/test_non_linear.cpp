@@ -16,12 +16,15 @@ using namespace vlm;
 
 struct LiftCurveFunctor {
     virtual f32 operator()(f32 alpha) const = 0;
+    LiftCurveFunctor() = default;
+    virtual ~LiftCurveFunctor() = default;
 };
 
 struct SpallartLiftCurve : public LiftCurveFunctor {
     const f32 cl_0, a0, a1, cl_a0, cl_a1;
     SpallartLiftCurve(f32 cl_0_, f32 a0_, f32 a1_, f32 cl_a0_, f32 cl_a1_):
         cl_0(cl_0_), a0(a0_), a1(a1_), cl_a0(cl_a0_), cl_a1(cl_a1_) {}
+    ~SpallartLiftCurve() = default;
     inline f32 operator()(f32 alpha) const override {
         return cl_a0 * alpha + 0.5f * (cl_0 - cl_a1 * alpha) * (1.f + std::erf((alpha - a0) / a1));
     }
@@ -29,6 +32,7 @@ struct SpallartLiftCurve : public LiftCurveFunctor {
 
 struct ThinAirfoilPolarLiftCurve : public LiftCurveFunctor{
     ThinAirfoilPolarLiftCurve() {}
+    ~ThinAirfoilPolarLiftCurve() = default;
     inline f32 operator()(f32 alpha) const override {
         return 2.f * PI_f * alpha;
     }

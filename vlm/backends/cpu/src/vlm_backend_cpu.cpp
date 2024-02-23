@@ -54,7 +54,7 @@ void BackendCPU::compute_lhs(const FlowData& flow) {
 
     ispc::MeshProxy mesh_proxy = {
         m.ns, m.nc, m.nb_panels_wing(),
-        {m.v.x.data(), m.v.y.data(), m.v.z.data()}, 
+        {m.panel_v.x.data(), m.panel_v.y.data(), m.panel_v.z.data()}, 
         {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
         {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
     };

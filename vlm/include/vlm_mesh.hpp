@@ -15,6 +15,7 @@ class Mesh {
     // ---------------------
     // All vertices stored in single SoA for result exporting
     // (stored in span major order)
+    SoA_3D_t<f32> panel_v; // size 2*(ncw)*(ns+1)
     SoA_3D_t<f32> v; // size (ncw+1)*(ns+1)
     // Offsets for indexing in connectivity array for each panel
     std::vector<u64> offsets = {}; // size nc*ns + 1
