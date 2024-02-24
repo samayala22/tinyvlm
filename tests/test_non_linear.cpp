@@ -16,19 +16,23 @@ using namespace vlm;
 
 struct LiftCurveFunctor {
     virtual f32 operator()(f32 alpha) const = 0;
+    LiftCurveFunctor() = default;
+    virtual ~LiftCurveFunctor() = default;
 };
 
 struct SpallartLiftCurve : public LiftCurveFunctor {
     const f32 cl_0, a0, a1, cl_a0, cl_a1;
     SpallartLiftCurve(f32 cl_0_, f32 a0_, f32 a1_, f32 cl_a0_, f32 cl_a1_):
         cl_0(cl_0_), a0(a0_), a1(a1_), cl_a0(cl_a0_), cl_a1(cl_a1_) {}
+    ~SpallartLiftCurve() = default;
     inline f32 operator()(f32 alpha) const override {
         return cl_a0 * alpha + 0.5f * (cl_0 - cl_a1 * alpha) * (1.f + std::erf((alpha - a0) / a1));
     }
 };
 
 struct ThinAirfoilPolarLiftCurve : public LiftCurveFunctor{
-    ThinAirfoilPolarLiftCurve() {}
+    ThinAirfoilPolarLiftCurve() = default;
+    ~ThinAirfoilPolarLiftCurve() = default;
     inline f32 operator()(f32 alpha) const override {
         return 2.f * PI_f * alpha;
     }
@@ -59,7 +63,7 @@ void write_vector_pair(const std::string& filename, const std::vector<T>& vec1, 
     outFile.close();
 }
 
-int main(int argc, char** argv) {
+int main(int  /*argc*/, char** /*argv*/) {
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x200.x"};
     const std::vector<std::string> backends = get_available_backends();
     std::vector<std::pair<std::string, std::unique_ptr<LiftCurveFunctor>>> lift_curves;
