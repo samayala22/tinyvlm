@@ -133,29 +133,34 @@ void BackendCPU::lu_solve() {
     LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), gamma.data(), n);
 }
 
-// f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area,
-//     const u64 j, const u64 n) {
-//     assert(n > 0);
-//     assert(j >= 0 && j+n <= mesh.ns);
+f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area,
+    const u64 j, const u64 n) {
+    assert(n > 0);
+    assert(j >= 0 && j+n <= mesh.ns);
     
-//     f32 cl = 0.0f;
+    f32 cl = 0.0f;
 
-//     for (u64 u = 0; u < mesh.nc; u++) {
-//         for (u64 v = j; v < j + n; v++) {
-//             const u64 li = u * mesh.ns + v; // linear index
-//             const linalg::alias::float3 v0 = mesh.get_v0(li);
-//             const linalg::alias::float3 v1 = mesh.get_v1(li);
-//             // Leading edge vector pointing outward from wing root
-//             const linalg::alias::float3 dl = v1 - v0;
-//             // Distance from the center of leading edge to the reference point
-//             const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
-//             cl += linalg::dot(force, flow.lift_axis);
-//         }
-//     }
-//     cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
+    for (u64 u = 0; u < mesh.nc; u++) {
+        for (u64 v = j; v < j + n; v++) {
+            const u64 li = u * mesh.ns + v; // linear index
+            const linalg::alias::float3 v0 = mesh.get_v0(li);
+            const linalg::alias::float3 v1 = mesh.get_v1(li);
+            const linalg::alias::float3 v3 = mesh.get_v3(li);
+            // Leading edge vector pointing outward from wing root
+            linalg::alias::float3 dl = v1 - v0;
+            const linalg::alias::float3 local_left_chord = linalg::normalize(v3 - v0);
+            const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
+            dl -= projected_vector; // orthogonal leading edge vector
+            std::printf("projected_vector: %f %f %f\n", projected_vector.x, projected_vector.y, projected_vector.z);
+            // Distance from the center of leading edge to the reference point
+            const linalg::alias::float3 force = linalg::cross(flow.stream_axis, dl) * flow.rho * delta_gamma[li];
+            cl += linalg::dot(force, flow.lift_axis);
+        }
+    }
+    cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
 
-//     return cl;
-// }
+    return cl;
+}
 
 linalg::alias::float3 BackendCPU::compute_coefficient_cm(
     const FlowData& flow,
@@ -210,20 +215,20 @@ f32 BackendCPU::compute_coefficient_cd(
 }
 
 // Using Trefftz plane
-f32 BackendCPU::compute_coefficient_cl(
-    const FlowData& flow,
-    const f32 area,
-    const u64 j,
-    const u64 n) 
-{
-    Mesh& m = mesh;
-    ispc::MeshProxy mesh_proxy = {
-        m.ns, m.nc, m.nb_panels_wing(),
-        {m.v.x.data(), m.v.y.data(), m.v.z.data()}, 
-        {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
-        {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
-    };
-    f32 cl = ispc::kernel_trefftz_cl(mesh_proxy, gamma.data(), j, n);
-    cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
-    return cl;
-}
+// f32 BackendCPU::compute_coefficient_cl(
+//     const FlowData& flow,
+//     const f32 area,
+//     const u64 j,
+//     const u64 n) 
+// {
+//     Mesh& m = mesh;
+//     ispc::MeshProxy mesh_proxy = {
+//         m.ns, m.nc, m.nb_panels_wing(),
+//         {m.v.x.data(), m.v.y.data(), m.v.z.data()}, 
+//         {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
+//         {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
+//     };
+//     f32 cl = ispc::kernel_trefftz_cl(mesh_proxy, gamma.data(), j, n);
+//     cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
+//     return cl;
+// }

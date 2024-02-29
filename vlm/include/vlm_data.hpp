@@ -22,6 +22,12 @@ class FlowData {
     FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_);
 };
 
+class PoseData {
+    public:
+    // Poses defined in global stationary frame
+    const linalg::alias::float4x4 body; // plane body pose
+};
+
 class AeroCoefficients {
     public:
     const f32 cl;
