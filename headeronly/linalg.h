@@ -305,7 +305,7 @@ namespace linalg
                                         const V & z_, const V & w_)     : x(x_), y(y_), z(z_), w(w_) {}
         constexpr explicit          mat(const T & s)                    : x(s), y(s), z(s), w(s) {}
         constexpr explicit          mat(const T * p)                    : x(p+M*0), y(p+M*1), z(p+M*2), w(p+M*3) {}
-        template<class U> 
+        template<class U> // typecast matrix ?
         constexpr explicit          mat(const mat<U,M,4> & m)           : mat(V(m.x), V(m.y), V(m.z), V(m.w)) {}
         constexpr vec<T,4>          row(int i) const                    { return {x[i], y[i], z[i], w[i]}; }
         constexpr const V &         operator[] (int j) const            { return j==0?x:j==1?y:j==2?z:w; }
