@@ -18,7 +18,7 @@
 # Correctors
 
 - [X] High angle of attack correction
-- [ ] Dihedral / Anhedral Wings (local coordinate projection in force calculation)
+- [X] Dihedral / Anhedral Wings (local coordinate projection in force calculation)
 - [ ] Swept Wings (coordinate rotation & non linear correction)
 - [ ] Compressibility Effects (Prandtl Glauert corrector)
 
