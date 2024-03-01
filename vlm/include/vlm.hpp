@@ -44,4 +44,12 @@ class LinearVLM final: public Solver {
     AeroCoefficients solve(const FlowData& flow);
 };
 
+class UVLM final: public Solver {
+    public:
+    UVLM(const tiny::Config& cfg): Solver(cfg) {}
+    UVLM() = default;
+    ~UVLM() = default;
+    AeroCoefficients solve(const FlowData& flow);
+};
+
 } // namespace vlm

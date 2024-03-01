@@ -368,3 +368,13 @@ void Mesh::io_read(const std::string& filename) {
         throw std::runtime_error("Failed to open mesh file");
     }
 }
+
+void vlm::mesh_transform(Mesh& mesh, const linalg::alias::float4x4& transform) {
+    // like a functional map but over multidimensional elements
+    for (u64 i = 0; i < mesh.nb_vertices_wing(); i++) {
+        linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{mesh.v.x[i], mesh.v.y[i], mesh.v.z[i], 1.f});
+        mesh.v.x[i] = transformed_pt.x;
+        mesh.v.y[i] = transformed_pt.y;
+        mesh.v.z[i] = transformed_pt.z;
+    }
+}

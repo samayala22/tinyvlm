@@ -1,3 +1,5 @@
+// Forked from: 
+
 // linalg.h - 2.2 - Single-header public domain linear algebra library
 //
 // The intent of this library is to provide the bulk of the functionality
