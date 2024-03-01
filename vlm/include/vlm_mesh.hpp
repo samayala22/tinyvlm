@@ -35,7 +35,7 @@ class Mesh {
     // ---------------------
     u64 nc = 1; // number of panels chordwise
     u64 ns = 1; // number of panels spanwise
-    const u64 nw = 1; // number of panels in chordwise wake
+    u64 nw = 1; // number of panels in chordwise wake
 
     // Analytical quanities when provided
     // ---------------------
@@ -83,5 +83,6 @@ class Mesh {
 
 // todo, update this to mirror the constructor
 std::unique_ptr<Mesh> create_mesh(const std::string& filename);
+void mesh_transform(Mesh& mesh, const linalg::alias::float4x4& transform);
 
 } // namespace vlm
