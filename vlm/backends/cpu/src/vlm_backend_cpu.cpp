@@ -126,7 +126,7 @@ void BackendCPU::lu_factor() {
 }
 
 void BackendCPU::lu_solve() {
-    tiny::ScopedTimer timer("Solve");
+    const tiny::ScopedTimer timer("Solve");
     const int32_t n = static_cast<int32_t>(mesh.nb_panels_wing());
     std::copy(rhs.begin(), rhs.end(), gamma.begin());
 
@@ -151,9 +151,8 @@ f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area,
             const linalg::alias::float3 local_left_chord = linalg::normalize(v3 - v0);
             const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
             dl -= projected_vector; // orthogonal leading edge vector
-            std::printf("projected_vector: %f %f %f\n", projected_vector.x, projected_vector.y, projected_vector.z);
             // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.stream_axis, dl) * flow.rho * delta_gamma[li];
+            const linalg::alias::float3 force = linalg::cross(flow.stream_axis, dl) * flow.rho * delta_gamma[li]; // * local flow magnitude
             cl += linalg::dot(force, flow.lift_axis);
         }
     }

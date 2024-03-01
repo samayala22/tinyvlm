@@ -26,19 +26,21 @@ Mesh::Mesh(const tiny::Config& cfg)
 
 Mesh::Mesh(
     const std::string& filename,
+    const u64 nw_,
     const f32 s_ref_ = 0.0f,
     const f32 c_ref_ = 0.0f,
     const linalg::alias::float3& ref_pt_ = {0.25f, 0.0f, 0.0f}
     ) {
+    nw = nw_;
     s_ref = s_ref_;
     c_ref = c_ref_;
-    ref_pt = ref_pt_;    
+    ref_pt = ref_pt_;
     io_read(filename);
     init();
 }
 
-std::unique_ptr<Mesh> vlm::create_mesh(const std::string& filename) {
-    return std::make_unique<Mesh>(filename);
+std::unique_ptr<Mesh> vlm::create_mesh(const std::string& filename, const u64 nw) {
+    return std::make_unique<Mesh>(filename, nw);
 }
 
 void Mesh::init() {
@@ -342,7 +344,7 @@ void Mesh::io_read_plot3d_structured(std::ifstream& f) {
     // if (std::abs(m.v.x[0]) != eps || std::abs(m.v.y[0]) != eps) {
     //     throw std::runtime_error("First vertex of plot3d mesh must be at origin");
     // }
-    f32 first_y = v.y[0];
+    const f32 first_y = v.y[0];
     for (u64 i = 1; i < ni; i++) {
         if (v.y[i * nj] != first_y) {
             throw std::runtime_error("Mesh vertices should be ordered in chordwise direction");
@@ -351,7 +353,7 @@ void Mesh::io_read_plot3d_structured(std::ifstream& f) {
 }
 
 void Mesh::io_read(const std::string& filename) {
-    std::filesystem::path path(filename);
+    const std::filesystem::path path(filename);
     if (!std::filesystem::exists(path)) {
         throw std::runtime_error("Mesh file not found");
     }
@@ -368,13 +370,25 @@ void Mesh::io_read(const std::string& filename) {
         throw std::runtime_error("Failed to open mesh file");
     }
 }
-
-void vlm::mesh_transform(Mesh& mesh, const linalg::alias::float4x4& transform) {
+  
+void Mesh::transform(const linalg::alias::float4x4& transform) {
     // like a functional map but over multidimensional elements
-    for (u64 i = 0; i < mesh.nb_vertices_wing(); i++) {
-        linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{mesh.v.x[i], mesh.v.y[i], mesh.v.z[i], 1.f});
-        mesh.v.x[i] = transformed_pt.x;
-        mesh.v.y[i] = transformed_pt.y;
-        mesh.v.z[i] = transformed_pt.z;
+    for (u64 i = 0; i < nb_vertices_wing(); i++) {
+        const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{v.x[i], v.y[i], v.z[i], 1.f});
+        v.x[i] = transformed_pt.x;
+        v.y[i] = transformed_pt.y;
+        v.z[i] = transformed_pt.z;
     }
 }
+
+// Dupplicate the trailing edge vertices and release them in the buffer
+void Mesh::shed_wake() {
+    const u64 src_begin = nb_vertices_wing() - ns - 1;
+    const u64 src_end = nb_vertices_wing();
+    const u64 dst_begin = (nc + 1 + current_nw) * (ns + 1);
+    std::copy(v.x.data() + src_begin, v.x.data() + src_end, v.x.data() + dst_begin);
+    std::copy(v.y.data() + src_begin, v.y.data() + src_end, v.y.data() + dst_begin);
+    std::copy(v.z.data() + src_begin, v.z.data() + src_end, v.z.data() + dst_begin);
+    // current_nw++;
+}
+
