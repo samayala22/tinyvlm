@@ -35,7 +35,8 @@ class Mesh {
     // ---------------------
     u64 nc = 1; // number of panels chordwise
     u64 ns = 1; // number of panels spanwise
-    u64 nw = 1; // number of panels in chordwise wake
+    u64 nw = 1; // number of wake panels chordwise (max capacity)
+    u64 current_nw = 1; // current number of built wake panels
 
     // Analytical quanities when provided
     // ---------------------
@@ -49,6 +50,8 @@ class Mesh {
     void compute_metrics_wing(); // fill colloc, normal, area
     void compute_metrics_wake();
     void compute_metrics_i(u64 i);
+    void transform(const linalg::alias::float4x4& transform);
+    void shed_wake();
     u64 nb_panels_wing() const;
     u64 nb_panels_total() const;
     u64 nb_vertices_wing() const;
@@ -70,9 +73,10 @@ class Mesh {
     Mesh(const tiny::Config& cfg);
     Mesh(
         const std::string& filename,
+        const u64 nw,
         const f32 s_ref_,
         const f32 c_ref_,
-        const linalg::alias::float3& ref_pt_
+        const linalg::alias::float3& ref_pt_ // todo: deprecate
     );
     
     private:
@@ -82,7 +86,6 @@ class Mesh {
 };
 
 // todo, update this to mirror the constructor
-std::unique_ptr<Mesh> create_mesh(const std::string& filename);
-void mesh_transform(Mesh& mesh, const linalg::alias::float4x4& transform);
+std::unique_ptr<Mesh> create_mesh(const std::string& filename, const u64 nw=1);
 
 } // namespace vlm
