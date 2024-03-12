@@ -16,7 +16,7 @@ using namespace vlm;
 
 Solver::Solver(const tiny::Config& cfg) {
     std::string backend_name = cfg().section("solver").get<std::string>("backend", "cpu");
-    mesh = std::make_unique<Mesh>(cfg)
+    mesh = std::make_unique<Mesh>(cfg);
     backend = create_backend(backend_name, *mesh);
 }
 
