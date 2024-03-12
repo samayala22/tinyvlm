@@ -60,8 +60,8 @@ jobs:
           echo "CACHE_KEY=Windows-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ steps.dep_hash.outputs.hash }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # Cache xmake dependencies
-      - name: Retrieve cached xmake dependencies
-        uses: actions/cache@v4
+      - name: Restore cached xmake dependencies
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.CACHE_PATH }}
           key: ${{ env.CACHE_KEY }}
@@ -72,7 +72,6 @@ jobs:
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4
-        if: always()
         with:
           path: ${{ env.CACHE_PATH }}
           key: ${{ env.CACHE_KEY }}
