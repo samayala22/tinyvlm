@@ -13,12 +13,15 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    env: 
+      CACHE_PATH:
+      CACHE_KEY:
 
     strategy:
       matrix:
         os: [ubuntu-latest]
         arch: [x86_64]
-        mode: [release]
+        mode: [release, debug]
         compiler: [clang, gcc]
 
     steps:
@@ -56,18 +59,29 @@ jobs:
         id: dep_hash
         run: echo "hash=$(xmake l utils.ci.packageskey)" >> $GITHUB_OUTPUT
 
+      - name: Set cache env vars
+        run: |
+          echo "CACHE_PATH=${{ env.XMAKE_GLOBALDIR }}/.xmake/packages" >> $GITHUB_ENV
+          echo "CACHE_KEY=Linux-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ steps.dep_hash.outputs.hash }}" >> $GITHUB_ENV
+
       # Cache xmake dependencies
-      - name: Retrieve cached xmake dependencies
-        uses: actions/cache@v4
+      - name: Restore cached xmake dependencies
+        uses: actions/cache/restore@v4
         with:
-          path: ${{ env.XMAKE_GLOBALDIR }}/.xmake/packages
-          key: Linux-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ steps.dep_hash.outputs.hash }}
+          path: ${{ env.CACHE_PATH }}
+          key: ${{ env.CACHE_KEY }}
 
       # Config xmake
       - name: Config
         run: |
           xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }}
 
+      - name: Cache xmake dependencies
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CACHE_PATH }}
+          key: ${{ env.CACHE_KEY }}
+          
       # Build
       - name: Build
         run: |
