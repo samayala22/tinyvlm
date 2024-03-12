@@ -4,6 +4,7 @@
 #include "vlm_data.hpp"
 #include "vlm_types.hpp"
 #include "vlm_backend.hpp"
+#include "tinyfwd.hpp"
 
 namespace vlm {
 
