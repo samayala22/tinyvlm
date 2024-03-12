@@ -35,8 +35,8 @@ class Mesh {
     // ---------------------
     u64 nc = 1; // number of panels chordwise
     u64 ns = 1; // number of panels spanwise
-    u64 nw = 1; // number of wake panels chordwise (max capacity)
-    u64 current_nw = 1; // current number of built wake panels
+    u64 nw; // number of wake panels chordwise (max capacity)
+    u64 current_nw = 0; // current number of built wake panels
 
     // Analytical quanities when provided
     // ---------------------
