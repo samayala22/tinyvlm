@@ -54,7 +54,7 @@ jobs:
         id: dep_hash
         run: echo "hash=$(xmake l utils.ci.packageskey)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Set Cache env vars
+      - name: Set cache env vars
         run: |
           echo "CACHE_PATH=${{ env.XMAKE_GLOBALDIR }}\.xmake\packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "CACHE_KEY=Windows-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ steps.dep_hash.outputs.hash }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -65,18 +65,17 @@ jobs:
         with:
           path: ${{ env.CACHE_PATH }}
           key: ${{ env.CACHE_KEY }}
-          save-always: true
 
       - name: Config
         run: |
           xmake f -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }}
 
-      # - name: Cache xmake dependencies
-      #   uses: actions/cache/save@v4
-      #   if: always()
-      #   with:
-      #     path: ${{ env.CACHE_PATH }}
-      #     key: ${{ env.CACHE_KEY }}
+      - name: Cache xmake dependencies
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ${{ env.CACHE_PATH }}
+          key: ${{ env.CACHE_KEY }}
       
       - name: Build
         run: |
