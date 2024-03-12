@@ -27,14 +27,17 @@ SOFTWARE.
 
 #pragma once
 
-#include <unordered_map>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <fstream>
-#include <filesystem>
-#include <stdexcept>
-#include <initializer_list>
+#include <type_traits> // std::is_same, std::is_integral, std::is_floating_point, std::disjunction
+#include <unordered_map> // std::unordered_map
+#include <vector> // std::vector
+#include <array> // std::array
+#include <string> // std::string
+#include <sstream> // std::istringstream
+#include <fstream> // std::ifstream, std::ofstream
+#include <filesystem> // std::filesystem
+#include <stdexcept> // std::runtime_error
+#include <initializer_list> // std::initializer_list
+#include <iostream> // dbg
 
 namespace tiny {
 
@@ -44,6 +47,29 @@ constexpr auto err_missing_config = [](const std::string &s) {throw std::runtime
 constexpr auto err_missing_closing = [](const std::string &s) {throw std::runtime_error("Closing character is missing on line: " + s);};
 constexpr auto err_failed_read = [](const std::string &s) {throw std::runtime_error("Failed to read :" + s);};
 constexpr auto err_failed_write = [](const std::string &s) {throw std::runtime_error("Failed to write :" + s);};
+
+// Type traits
+template<typename T>
+struct is_base_type : std::disjunction<
+    std::is_integral<T>, 
+    std::is_floating_point<T>,
+    std::is_same<T, bool>,
+    std::is_same<std::decay_t<T>, std::string>
+> {};
+
+// Trait for std::vector of base types
+template<typename T>
+struct is_vector_of_base : std::false_type {};
+
+template<typename T>
+struct is_vector_of_base<std::vector<T>> : std::true_type {};
+
+// Trait for std::array of base types
+template<typename T>
+struct is_array_of_base : std::false_type {};
+
+template<typename T, std::size_t N>
+struct is_array_of_base<std::array<T, N>> : std::true_type {};
 
 template <typename T> inline std::string data_type_string() {
     std::string typestr;
@@ -58,56 +84,130 @@ template <typename T> inline std::string data_type_string() {
 }
 
 template<typename T>
-inline T convert_value(std::string s) {
-    //static_assert(std::is_arithmetic_v<T>, "Invalid type for convert_value. Must be an arithmetic type.");
+inline T convert_value(const std::string& s) {
+    // static_assert(std::is_arithmetic_v<T>, "Invalid type for convert_value. Must be an arithmetic type.");
     T value;
     std::istringstream stream(s);
     stream >> value;
-    if (stream.fail()) throw std::runtime_error("Failed to convert value: " + s + " to type: " + data_type_string<T>());
+    if (stream.fail()) throw 
+    std::runtime_error(
+        "Failed to convert value: " + s + " to type: " + data_type_string<T>()
+    );
     return value;
 }
 
 template<>
-inline std::string convert_value(std::string s) {
+inline std::string convert_value(const std::string& s) {
     return s;
 }
 
 template<>
-inline bool convert_value(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-    static const std::unordered_map<std::string, bool> s2b{
-        {"1", true},  {"true", true},   {"yes", true}, {"on", true},
-        {"0", false}, {"false", false}, {"no", false}, {"off", false},
-    };
-    auto const val = s2b.find(s);
-    if (val == s2b.end()) {
-        throw std::runtime_error("'" + s + "' is not a valid boolean value.");
-    }
-    return val->second;
+inline bool convert_value(const std::string& s) {
+    if      (s == "1" || s == "true"  || s == "yes" || s == "on" ) return true;
+    else if (s == "0" || s == "false" || s == "no"  || s == "off") return false;
+    else throw std::runtime_error("'" + s + "' is not a valid boolean value.");
 }
 
-template<typename T>
-inline std::vector<T> convert_vector(std::string s) {
-    if (s.front() == '[' && s.back() == ']') {
-        if (s.size() > 2) {
-            std::vector<T> result;
-            s = s.substr(1, s.size() - 2);
-            std::istringstream stream(s);
-            std::string token;
-            while (std::getline(stream, token, ',')) {
-                result.push_back(convert_value<T>(token));
+inline static std::string clean_str(const std::string& str) {
+    static const std::string whitespaces(" \t\f\v\n\r");
+    std::size_t start = str.find_first_not_of(whitespaces);
+    std::size_t end = str.find_last_not_of(whitespaces);
+
+    if (start == std::string::npos) {
+        return "";
+    }
+    return str.substr(start, end - start + 1);
+}
+
+inline bool extract_depth0_token(std::string_view& stream, std::string_view& token, const char delimiter, const char marker_open, const char marker_close) {
+    int depth = 0;
+    // Loop through each character in the stream
+    for(auto it = stream.begin(); it != stream.end(); ++it) {
+        if (*it == marker_open) {
+            depth++;
+        } else if (*it == marker_close) {
+            if (depth > 0) {
+                depth--;
+                if (depth == 0) {
+                    // Extract last possible token
+                    token = stream.substr(0, it - stream.begin() + 1);
+                    stream.remove_prefix(it - stream.begin() + 1);
+                    return true;
+                }
+            } else {
+                // Mismatched delimiters
+                return false;
             }
-            return result;
-        } else {
-            return {};
+        } else if (*it == delimiter && depth == 0) {
+            // Extract the token from the stream
+            token = stream.substr(0, it - stream.begin());
+            stream.remove_prefix(it - stream.begin() + 1);
+            return true;
         }
-    } else {
-        throw std::runtime_error("Vector must be enclosed in square brackets. String: " + s);
     }
+    return false; // no match
 }
 
+// Base template for Converter
+template<typename T, typename Enable = void>
+struct Converter;
+
+// Specialization for base types
 template<typename T>
-class BaseEntries {
+struct Converter<T, std::enable_if_t<is_base_type<T>::value>> {
+    // enable only for float or integer types
+    static T convert(const std::string& s) {
+        return convert_value<T>(s);
+    }
+};
+
+// Specialization for std::vector of base types
+template<typename T>
+struct Converter<std::vector<T>, std::enable_if_t<is_vector_of_base<std::vector<T>>::value>> {
+    static std::vector<T> convert(const std::string& s) {
+        if (s.front() == '[' && s.back() == ']') {
+            if (s.size() > 2) {
+                std::vector<T> result;
+                std::istringstream stream(s.substr(1, s.size() - 2));
+                std::string token;
+                while (std::getline(stream, token, ',')) result.push_back(Converter<T>::convert(clean_str(token)));
+                return result;
+            } else {
+                return {};
+            }
+        } else {
+            throw std::runtime_error("Vector must be enclosed in square brackets. String: " + s);
+        }
+    }
+};
+
+template<typename T, std::size_t N>
+struct Converter<std::array<T, N>, std::enable_if_t<is_array_of_base<std::array<T, N>>::value>> {
+    static std::array<T, N> convert(const std::string& s) {
+        if (s.front() == '[' && s.back() == ']') {
+            if (s.size() > 2) {
+                std::array<T, N> result;
+                std::istringstream stream(s.substr(1, s.size() - 2));
+                std::string token;
+                for (std::size_t i = 0; i < N; i++) {
+                    if (std::getline(stream, token, ',')) {
+                        std::cout << s << " " << token << std::endl;
+                        result[i] = Converter<T>::convert(clean_str(token));
+                    }
+                    else throw std::runtime_error("Array size mismatch. Expected: " + std::to_string(N) + " elements. String: " + s);
+                }
+                return result;
+            } else {
+                return {};
+            }
+        } else {
+            throw std::runtime_error("Array must be enclosed in square brackets. String: " + s);
+        }
+    }
+};
+
+template<typename T>
+class SectionEntries {
     public:
     std::unordered_map<std::string, T> map_;
 
@@ -139,7 +239,7 @@ struct KeyEntries {
     T get(const std::string &key) const {
         auto elem = map_.find(key);
         if (elem == map_.end()) err_missing_setting(key);
-        return convert_value<T>(elem->second);
+        return Converter<T>::convert(elem->second);
     }
 
     template<typename T>
@@ -151,25 +251,12 @@ struct KeyEntries {
     void insert(const std::initializer_list<std::pair<std::string, std::string>>& pairs) {
         for (const auto& pair : pairs) map_.insert(pair);
     }
-
-    template<typename T>
-    std::vector<T> get_vector(const std::string &key) const {
-        auto elem = map_.find(key);
-        if (elem == map_.end()) err_missing_setting(key);
-        return convert_vector<T>(elem->second);
-    }
-
-    template<typename T>
-    std::vector<T> get_vector(const std::string& key, const std::vector<T> default_val) const {
-        if (has(key)) return get_vector<T>(key);
-        else return default_val;
-    }
 };
 
 class Config {
     public:
-        BaseEntries<KeyEntries> config;
-        BaseEntries<std::vector<KeyEntries>> config_vec;
+        SectionEntries<KeyEntries> config;
+        SectionEntries<std::vector<KeyEntries>> config_vec;
         std::vector<std::string> sections;
 
         auto& operator()() {return config;}
@@ -217,16 +304,7 @@ inline bool Config::write(const std::string& ofilename) {
     return !f.bad();
 }
 
-inline static std::string clean_str(const std::string& str) {
-    static const std::string whitespaces(" \t\f\v\n\r");
-    std::size_t start = str.find_first_not_of(whitespaces);
-    std::size_t end = str.find_last_not_of(whitespaces);
 
-    if (start == std::string::npos) {
-        return "";
-    }
-    return str.substr(start, end - start + 1);
-}
 
 inline static void extract(KeyEntries &map, const std::string& line, const size_t sep, const size_t end, const int line_nb) {
     if (sep == std::string::npos) return;
@@ -234,7 +312,7 @@ inline static void extract(KeyEntries &map, const std::string& line, const size_
     map.map_[clean_str(line.substr(0, sep))] = clean_str(line.substr(sep + 1, end - sep - 1));
 }
 
-inline void Config::read_file(std::ifstream &f) {
+inline void Config::read_file(std::ifstream& f) {
     std::string line;
     std::string section;
     const std::string whitespaces (" \t\f\v\n\r");
@@ -242,39 +320,39 @@ inline void Config::read_file(std::ifstream &f) {
     while (std::getline(f, line)) {
         line_nb++;
         // strip the line with everything after the # character
-        if (auto comment = line.find("#"); comment != std::string::npos) {
+        if (auto comment = line.find('#'); comment != std::string::npos) {
             line = line.substr(0, comment);
         }
-        if (auto first_bracket = line.find("<"); first_bracket != std::string::npos) {
-            auto second_bracket = line.find(">");
+        if (auto first_bracket = line.find('<'); first_bracket != std::string::npos) {
+            auto second_bracket = line.find('>');
             if (second_bracket == std::string::npos) err_missing_closing(std::to_string(line_nb));
             section = clean_str(line.substr(first_bracket + 1, second_bracket - first_bracket - 1));
             config.map_[section];
             sections.push_back(section);
-        } else if (auto first_abracket = line.find("{"); first_abracket != std::string::npos) {
+        } else if (auto first_abracket = line.find('{'); first_abracket != std::string::npos) {
             KeyEntries entry;
             if (first_abracket == line.find_last_not_of(whitespaces)) {
-                while (std::getline(f, line) && line.find("}") == std::string::npos) {
+                while (std::getline(f, line) && line.find('}') == std::string::npos) {
                     line_nb++;
-                    extract(entry, line, line.find("="), line.find(","), line_nb);
+                    extract(entry, line, line.find('='), line.find(','), line_nb);
                 }
-            } else if (line.find("}") != std::string::npos) {
+            } else if (line.find('}') != std::string::npos) {
                 line = line.substr(first_abracket + 1);
-                auto comma = line.find(",");
+                auto comma = line.find(',');
                 while (comma != std::string::npos) {
-                    extract(entry, line, line.find("="), comma, line_nb);
+                    extract(entry, line, line.find('='), comma, line_nb);
                     line = line.substr(comma + 1, std::string::npos);
-                    comma = line.find(",");
+                    comma = line.find(',');
                 }
-                extract(entry, line, line.find("="), line.find("}"), line_nb);
+                extract(entry, line, line.find('='), line.find('}'), line_nb);
             }
             config_vec.map_[section].push_back(std::move(entry));
         } else {
-            extract(config.map_[section], line, line.find("="), line.length(), line_nb);
+            extract(config.map_[section], line, line.find('='), line.length(), line_nb);
         }
     }
 }
-
+ 
 inline void Config::write_file(std::ofstream &f) {
     for (const auto &section : sections) {
         f << "<" << section << "> \n";

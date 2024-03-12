@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
     try {
         // vlm::Executor::instance(1); // 1 thread
         LinearVLM solver(cfg);
-        std::vector<f32> alphas = cfg().section("solver").get_vector<f32>("alphas", {0.0f});
+        std::vector<f32> alphas = cfg().section("solver").get<std::vector<f32>>("alphas");
         std::transform(alphas.begin(), alphas.end(), alphas.begin(), 
         [](f32 deg) {
             return deg * PI_f / 180.0;
