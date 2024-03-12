@@ -14,8 +14,8 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     env: 
-      CACHE_PATH
-      CACHE_KEY
+      CACHE_PATH:
+      CACHE_KEY:
 
     strategy:
       matrix:
