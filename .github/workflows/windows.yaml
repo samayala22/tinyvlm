@@ -65,17 +65,18 @@ jobs:
         with:
           path: ${{ env.CACHE_PATH }}
           key: ${{ env.CACHE_KEY }}
+          save-always: true
 
       - name: Config
         run: |
           xmake f -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }}
 
-      - name: Cache xmake dependencies
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: ${{ env.CACHE_PATH }}
-          key: ${{ env.CACHE_KEY }}
+      # - name: Cache xmake dependencies
+      #   uses: actions/cache/save@v4
+      #   if: always()
+      #   with:
+      #     path: ${{ env.CACHE_PATH }}
+      #     key: ${{ env.CACHE_KEY }}
       
       - name: Build
         run: |
