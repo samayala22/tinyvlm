@@ -27,6 +27,7 @@ SOFTWARE.
 
 #pragma once
 
+#include <string_view>
 #include <type_traits> // std::is_same, std::is_integral, std::is_floating_point, std::disjunction
 #include <unordered_map> // std::unordered_map
 #include <vector> // std::vector
@@ -37,7 +38,7 @@ SOFTWARE.
 #include <filesystem> // std::filesystem
 #include <stdexcept> // std::runtime_error
 #include <initializer_list> // std::initializer_list
-#include <iostream> // dbg
+// #include <iostream> // dbg
 
 namespace tiny {
 
@@ -119,34 +120,51 @@ inline static std::string clean_str(const std::string& str) {
     return str.substr(start, end - start + 1);
 }
 
-inline bool extract_depth0_token(std::string_view& stream, std::string_view& token, const char delimiter, const char marker_open, const char marker_close) {
-    int depth = 0;
-    // Loop through each character in the stream
-    for(auto it = stream.begin(); it != stream.end(); ++it) {
-        if (*it == marker_open) {
-            depth++;
-        } else if (*it == marker_close) {
-            if (depth > 0) {
-                depth--;
-                if (depth == 0) {
-                    // Extract last possible token
-                    token = stream.substr(0, it - stream.begin() + 1);
-                    stream.remove_prefix(it - stream.begin() + 1);
-                    return true;
-                }
-            } else {
-                // Mismatched delimiters
-                return false;
-            }
-        } else if (*it == delimiter && depth == 0) {
-            // Extract the token from the stream
-            token = stream.substr(0, it - stream.begin());
-            stream.remove_prefix(it - stream.begin() + 1);
-            return true;
-        }
-    }
-    return false; // no match
+inline static std::string_view trim_space(std::string_view str) {
+    while (!str.empty() && std::isspace(str.front())) str.remove_prefix(1);
+    while (!str.empty() && std::isspace(str.back())) str.remove_suffix(1);
+    return str;
 }
+
+class Extractor {
+    public:
+    bool extract(std::string_view& token) {
+        // Loop through each character in the stream
+        token = stream;
+        for(auto it = stream.begin(); it != stream.end(); ++it) {
+            if (*it == '[' || *it == '{') {
+                depth++;
+                if (depth == 1) {
+                    token.remove_prefix(it - stream.begin() + 1);
+                }
+            } else if (*it == ']' || *it == '}') {
+                if (depth > 0) {
+                    depth--;
+                    if (depth == 0) {
+                        // Extract last possible token
+                        token = token.substr(0, it - token.begin());
+                        stream.remove_prefix(it - stream.begin() + 1);
+                        return true;
+                    }
+                } else {
+                    // Mismatched delimiters
+                    throw std::runtime_error("Mismatched delimiters");
+                }
+            } else if (*it == ',' && depth == 1) {
+                // Extract the token from the stream
+                token = token.substr(0, it - token.begin());
+                stream.remove_prefix(it - stream.begin() + 1);
+                return true;
+            }
+        }
+        return false; // no match
+    }
+    Extractor(const std::string& s) : stream{s} {}
+
+    public:
+    std::string_view stream;
+    int depth = 0;
+};
 
 // Base template for Converter
 template<typename T, typename Enable = void>
@@ -168,9 +186,9 @@ struct Converter<std::vector<T>, std::enable_if_t<is_vector_of_base<std::vector<
         if (s.front() == '[' && s.back() == ']') {
             if (s.size() > 2) {
                 std::vector<T> result;
-                std::istringstream stream(s.substr(1, s.size() - 2));
-                std::string token;
-                while (std::getline(stream, token, ',')) result.push_back(Converter<T>::convert(clean_str(token)));
+                std::string_view token;
+                Extractor ex{s};
+                while (ex.extract(token)) result.push_back(Converter<T>::convert(std::string{trim_space(token)}));
                 return result;
             } else {
                 return {};
@@ -187,12 +205,11 @@ struct Converter<std::array<T, N>, std::enable_if_t<is_array_of_base<std::array<
         if (s.front() == '[' && s.back() == ']') {
             if (s.size() > 2) {
                 std::array<T, N> result;
-                std::istringstream stream(s.substr(1, s.size() - 2));
-                std::string token;
+                std::string_view token;
+                Extractor ex{s};
                 for (std::size_t i = 0; i < N; i++) {
-                    if (std::getline(stream, token, ',')) {
-                        std::cout << s << " " << token << std::endl;
-                        result[i] = Converter<T>::convert(clean_str(token));
+                    if (ex.extract(token)) {
+                        result[i] = Converter<T>::convert(std::string{trim_space(token)});
                     }
                     else throw std::runtime_error("Array size mismatch. Expected: " + std::to_string(N) + " elements. String: " + s);
                 }

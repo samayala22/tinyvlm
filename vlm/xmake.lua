@@ -2,6 +2,7 @@ add_requires("taskflow_custom")
 
 target("libvlm")
     set_kind("static")
+    set_policy("build.merge_archive", true)
     add_packages("taskflow_custom", {public = true})
     
     for _,name in ipairs(backends) do

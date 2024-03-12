@@ -7,9 +7,9 @@
 #include <string>
 #include <cmath>
 #include <limits>
+#include <memory>
 
 #include "linalg.h"
-#include "tinyconfig.hpp"
 
 namespace vlm {
 

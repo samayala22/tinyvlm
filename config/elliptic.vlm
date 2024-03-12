@@ -11,5 +11,4 @@ backend = cpu
 s_ref = 3.92699 # half wing area
 c_ref = 0.85
 ref_pt = [0.25, 0.0, 0.0]
-test = [ [ 123, 5, 12], [ 98, 234, 53, 12, 531]]
 wake_included = false

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vlm_types.hpp"
+#include "tinyfwd.hpp"
 
 namespace vlm {
 

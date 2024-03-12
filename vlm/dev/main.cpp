@@ -4,6 +4,8 @@
 #include "vlm_types.hpp"
 #include "vlm_utils.hpp"
 
+#include "tinyconfig.hpp"
+
 #include <iostream>
 #include <cstdio>
 #include <algorithm>
