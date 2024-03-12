@@ -11,17 +11,21 @@ using namespace vlm;
 
 constexpr f32 EPS = std::numeric_limits<f32>::epsilon();
 
-Mesh::Mesh(const tiny::Config& cfg)
-{
-    s_ref = cfg().section("solver").get<f32>("s_ref", 0.0f);
-    c_ref = cfg().section("solver").get<f32>("c_ref", 0.0f);
-    const std::vector<f32> ref_pt_vec = cfg().section("solver").get_vector<f32>("ref_pt", {0.25f, 0.0f, 0.0f});
-    // TODO: maybe need an assert here in case vector size != 3
-    ref_pt.x = ref_pt_vec[0];
-    ref_pt.y = ref_pt_vec[1];
-    ref_pt.z = ref_pt_vec[2];
-    io_read(cfg().section("files").get<std::string>("mesh"));
-    init();
+Mesh::Mesh(const tiny::Config& cfg) :
+    Mesh(
+        cfg().section("files").get<std::string>("mesh"),
+        cfg().section("mesh").get<u64>("nw", 1),
+        cfg().section("mesh").get<f32>("s_ref", 0.0f),
+        cfg().section("mesh").get<f32>("c_ref", 0.0f),
+        linalg::alias::float3{cfg().section("mesh").get<std::array<f32, 3>>("ref_pt").data()}
+    ) {
+    // auto res = cfg().section("mesh").get<std::array<std::vector<u32>, 2>>("test");
+    // for (auto& v : res) {
+    //     for (auto& e : v) {
+    //         std::cout << e << " ";
+    //     }
+    //     std::cout << "\n";
+    // }
 }
 
 Mesh::Mesh(
@@ -44,8 +48,8 @@ std::unique_ptr<Mesh> vlm::create_mesh(const std::string& filename, const u64 nw
 }
 
 void Mesh::init() {
-    if (c_ref == 0.0f) c_ref = chord_mean(0, ns+1);
-    if (s_ref == 0.0f) s_ref = panels_area_xy(0,0, nc, ns);
+    if (c_ref == 0.0f) c_ref = chord_mean(0, ns+1); // use MAC as default
+    if (s_ref == 0.0f) s_ref = panels_area_xy(0,0, nc, ns); // use projected area as default
     compute_connectivity();
     compute_metrics_wing();
 }
@@ -381,7 +385,7 @@ void Mesh::transform(const linalg::alias::float4x4& transform) {
     }
 }
 
-// Dupplicate the trailing edge vertices and release them in the buffer
+// Duplicate the trailing edge vertices and release them in the buffer
 void Mesh::shed_wake() {
     const u64 src_begin = nb_vertices_wing() - ns - 1;
     const u64 src_end = nb_vertices_wing();
@@ -389,6 +393,6 @@ void Mesh::shed_wake() {
     std::copy(v.x.data() + src_begin, v.x.data() + src_end, v.x.data() + dst_begin);
     std::copy(v.y.data() + src_begin, v.y.data() + src_end, v.y.data() + dst_begin);
     std::copy(v.z.data() + src_begin, v.z.data() + src_end, v.z.data() + dst_begin);
-    // current_nw++;
+    current_nw++;
 }
 
