@@ -2,6 +2,7 @@
 
 #include "vlm_backend.hpp"
 #include "tinytimer.hpp"
+#include "tinyconfig.hpp"
 
 #include "vlm_data.hpp"
 #include <utility>

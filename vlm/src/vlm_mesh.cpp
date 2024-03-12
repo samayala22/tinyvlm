@@ -1,6 +1,7 @@
 #include "vlm_mesh.hpp"
 #include "linalg.h"
 #include "vlm_types.hpp"
+#include "tinyconfig.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -19,13 +20,6 @@ Mesh::Mesh(const tiny::Config& cfg) :
         cfg().section("mesh").get<f32>("c_ref", 0.0f),
         linalg::alias::float3{cfg().section("mesh").get<std::array<f32, 3>>("ref_pt").data()}
     ) {
-    // auto res = cfg().section("mesh").get<std::array<std::vector<u32>, 2>>("test");
-    // for (auto& v : res) {
-    //     for (auto& e : v) {
-    //         std::cout << e << " ";
-    //     }
-    //     std::cout << "\n";
-    // }
 }
 
 Mesh::Mesh(
