@@ -47,6 +47,7 @@ class LinearVLM final: public Solver {
 
 class UVLM final: public Solver {
     public:
+
     UVLM(const tiny::Config& cfg): Solver(cfg) {}
     UVLM() = default;
     ~UVLM() = default;

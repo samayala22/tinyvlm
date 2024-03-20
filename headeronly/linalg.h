@@ -322,7 +322,7 @@ namespace linalg
     template<class T> struct converter<mat<T,1,1>, identity_t> { constexpr mat<T,1,1> operator() (identity_t) const { return {vec<T,1>{1}}; } };
     template<class T> struct converter<mat<T,2,2>, identity_t> { constexpr mat<T,2,2> operator() (identity_t) const { return {{1,0},{0,1}}; } };
     template<class T> struct converter<mat<T,3,3>, identity_t> { constexpr mat<T,3,3> operator() (identity_t) const { return {{1,0,0},{0,1,0},{0,0,1}}; } };
-    template<class T> struct converter<mat<T,4,4>, identity_t> { constexpr mat<T,4,4> operator() (identity_t) const { return {{1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1}}; } };
+    template<class T> struct converter<mat<T,4,4>, identity_t> { constexpr mat<T,4,4> operator() (identity_t) const { return {{1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1}}; } };    
     constexpr identity_t identity {1};
 
     // Produce a scalar by applying f(A,B) -> A to adjacent pairs of elements from a vec/mat in left-to-right/column-major order (matching the associativity of arithmetic and logical operators)
@@ -465,6 +465,7 @@ namespace linalg
     template<class T, int M> constexpr T dot      (const vec<T,M> & a, const vec<T,M> & b)      { return sum(a*b); }
     template<class T, int M> constexpr T length2  (const vec<T,M> & a)                          { return dot(a,a); }
     template<class T, int M> T           length   (const vec<T,M> & a)                          { return std::sqrt(length2(a)); }
+    template<class T, int M> T           norm     (const vec<T,M> & a)                          { return length(a); }
     template<class T, int M> vec<T,M>    normalize(const vec<T,M> & a)                          { return a / length(a); }
     template<class T, int M> constexpr T distance2(const vec<T,M> & a, const vec<T,M> & b)      { return length2(b-a); }
     template<class T, int M> T           distance (const vec<T,M> & a, const vec<T,M> & b)      { return length(b-a); }
@@ -549,6 +550,7 @@ namespace linalg
     template<class T> vec<T,4>   rotation_quat     (const mat<T,3,3> & m);
     template<class T> mat<T,4,4> translation_matrix(const vec<T,3> & translation)           { return {{1,0,0,0},{0,1,0,0},{0,0,1,0},{translation,1}}; }
     template<class T> mat<T,4,4> rotation_matrix   (const vec<T,4> & rotation)              { return {{qxdir(rotation),0}, {qydir(rotation),0}, {qzdir(rotation),0}, {0,0,0,1}}; }
+    template<class T> mat<T,4,4> rotation_matrix   (const vec<T,3> & axis, const vec<T,3> & p, T angle) {}
     template<class T> mat<T,4,4> scaling_matrix    (const vec<T,3> & scaling)               { return {{scaling.x,0,0,0}, {0,scaling.y,0,0}, {0,0,scaling.z,0}, {0,0,0,1}}; }
     template<class T> mat<T,4,4> pose_matrix       (const vec<T,4> & q, const vec<T,3> & p) { return {{qxdir(q),0}, {qydir(q),0}, {qzdir(q),0}, {p,1}}; }
     template<class T> mat<T,4,4> lookat_matrix     (const vec<T,3> & eye, const vec<T,3> & center, const vec<T,3> & view_y_dir, fwd_axis fwd = neg_z);
