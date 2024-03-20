@@ -4,6 +4,40 @@
 #include "tinyfwd.hpp"
 
 namespace vlm {
+/*
+class StructuredSurfaceMesh {
+    public:
+    
+    SoA_3D_t<f32> v;
+    SoA_3D_t<f32> normal;
+    std::vector<f32> area = {}; // size ncw*ns
+
+    StructuredSurfaceMesh(const u64 ni, const u64 nj);
+    ~StructuredSurfaceMesh() = default;
+
+    private:
+    const u64 ni;
+    const u64 nj;
+};
+
+class VLMSurface : public StructuredSurfaceMesh {
+    public:
+    SoA_3D_t<f32> colloc; // collocation points
+
+    const f32 s_ref; // reference area
+    const f32 c_ref; // reference chord
+
+    VLMSurface(const u64 ni, const u64 nj);
+    ~VLMSurface() = default;
+};
+
+class LiftingBody {
+    public:
+    VLMSurface body;
+    VLMSurface wake;
+};
+*/
+
 
 // === STRUCTURED MESH ===
 // nc : number of panels chordwise
@@ -53,6 +87,7 @@ class Mesh {
     void compute_metrics_i(u64 i);
     void transform(const linalg::alias::float4x4& transform);
     void shed_wake();
+    void move(const linalg::alias::float4x4& transform);
     u64 nb_panels_wing() const;
     u64 nb_panels_total() const;
     u64 nb_vertices_wing() const;
@@ -61,7 +96,7 @@ class Mesh {
     f32 panels_area_xy(const u64 i, const u64 j, const u64 m, const u64 n) const;
     f32 panel_width_y(const u64 i, const u64 j) const;
     f32 strip_width(const u64 j) const;
-    f32 chord_length(const u64 j) const;
+    f32 chord_length(const u64 j) const; // vertex idx
     f32 chord_mean(const u64 j, const u64 n) const;
 
     // i panel vertices coordinates
