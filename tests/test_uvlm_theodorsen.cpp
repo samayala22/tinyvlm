@@ -30,7 +30,7 @@ int main() {
         });
     };
 
-    // For the moment take AoA=0 and U_inf=1 
+    // For the moment take AoA=0 and U_inf=1
     auto displacement_freestream = [&](f32 t) -> linalg::alias::float4x4 {
         return linalg::translation_matrix(linalg::alias::float3{
             -1.0f*t,
@@ -43,6 +43,11 @@ int main() {
         return linalg::mul(displacement_freestream(t), displacement_wing(t));
     };
 
+    auto relative_displacement = [&](f32 t0, f32 t1) -> linalg::alias::float4x4 {
+        return linalg::mul(displacement(t1), linalg::inverse(displacement(t0)));
+    };
+
+    // Magnitude of the velocity of a vertex at time t calculated by finite difference
     auto absolute_velocity = [&](f32 t, const linalg::alias::float4& vertex) -> f32 {
         return linalg::length((linalg::mul(displacement(t+EPS_sqrt_f), vertex)-linalg::mul(displacement(t), vertex))/EPS_sqrt_f);
     };
@@ -52,24 +57,18 @@ int main() {
         solver.mesh = create_mesh(mesh_name);
         solver.backend = create_backend(backend_name, *solver.mesh);
 
-        // Copy initial relative pose to the body frame
-        // SoA_3D_t<f32> initial_pose;
-        // initial_pose.resize(solver.mesh->nb_vertices_wing());
-        // initial_pose.x = solver.mesh->v.x;
-        // initial_pose.y = solver.mesh->v.y;
-        // initial_pose.z = solver.mesh->v.z;
-
-        std::vector<f32> vec_dt; // pre-calculated timesteps
+        std::vector<f32> vec_t; // pre-calculated timesteps
 
         // Pre-calculate timesteps to determine wake size
+        vec_t.push_back(0.0f);
         for (f32 t = 0.0f; t < t_final;) {
             const f32 dt = (0.5f * (solver.mesh->chord_length(0) + solver.mesh->chord_length(1))) / absolute_velocity(t, {0.f, 0.f, 0.f, 1.f});
-            vec_dt.push_back(dt);
             t += dt;
+            vec_t.push_back(t);
         }
 
         // TODO: think about splitting mesh body and wake mesh
-        // solver.mesh->alloc(vec_dt.size()+1); // +1 for the initial pose
+        solver.mesh->resize_wake(vec_t.size()-1); // +1 for the initial pose
 
         // f32 t = 0.0f;
         // for (u64 i = 0; i < vec_dt.size(); i++) {

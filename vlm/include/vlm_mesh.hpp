@@ -71,13 +71,15 @@ class Mesh {
     u64 nc = 1; // number of panels chordwise
     u64 ns = 1; // number of panels spanwise
     u64 nw; // number of wake panels chordwise (max capacity)
-    u64 current_nw = 0; // current number of built wake panels
+    u64 current_nw = 0; // current number of built wake panels (temporary)
 
     // Analytical quanities when provided
     // ---------------------
     f32 s_ref = 0.0f; // reference area (of wing)
     f32 c_ref = 0.0f; // reference chord (of wing)
-    linalg::alias::float3 ref_pt = {0.25f, 0.0f, 0.0f};
+
+    linalg::alias::float4x4 frame = linalg::identity; // transformation matrix
+    linalg::alias::float3 ref_pt = {0.25f, 0.0f, 0.0f}; // TODO: deprecate
 
     void update_wake(const linalg::alias::float3& u_inf); // update wake vertices
     void correction_high_aoa(f32 alpha_rad); // correct collocation points for high aoa
@@ -85,9 +87,10 @@ class Mesh {
     void compute_metrics_wing(); // fill colloc, normal, area
     void compute_metrics_wake();
     void compute_metrics_i(u64 i);
-    void transform(const linalg::alias::float4x4& transform);
     void shed_wake();
     void move(const linalg::alias::float4x4& transform);
+    void resize_wake(const u64 nw);
+ 
     u64 nb_panels_wing() const;
     u64 nb_panels_total() const;
     u64 nb_vertices_wing() const;
