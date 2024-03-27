@@ -368,10 +368,12 @@ void Mesh::io_read(const std::string& filename) {
         throw std::runtime_error("Failed to open mesh file");
     }
 }
-  
-void Mesh::transform(const linalg::alias::float4x4& transform) {
-    // like a functional map but over multidimensional elements
+
+void Mesh::move(const linalg::alias::float4x4& transform) {
     for (u64 i = 0; i < nb_vertices_wing(); i++) {
+        linalg::alias::float4 global_vertex{v.x[i], v.y[i], v.z[i], 1.f};
+        linalg::alias::float4 local_vertex = frame.col(3);
+
         const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{v.x[i], v.y[i], v.z[i], 1.f});
         v.x[i] = transformed_pt.x;
         v.y[i] = transformed_pt.y;
@@ -379,14 +381,19 @@ void Mesh::transform(const linalg::alias::float4x4& transform) {
     }
 }
 
+void Mesh::resize_wake(const u64 nw_) {
+    nw = nw_;
+    alloc();
+}
+
 // Duplicate the trailing edge vertices and release them in the buffer
 void Mesh::shed_wake() {
-    const u64 src_begin = nb_vertices_wing() - ns - 1;
+    assert(current_nw < nw); // check if we have capacity
+    const u64 src_begin = nb_vertices_wing() - (ns + 1);
     const u64 src_end = nb_vertices_wing();
-    const u64 dst_begin = (nc + 1 + current_nw) * (ns + 1);
+    const u64 dst_begin = (nc + nw - current_nw) * (ns + 1);
     std::copy(v.x.data() + src_begin, v.x.data() + src_end, v.x.data() + dst_begin);
     std::copy(v.y.data() + src_begin, v.y.data() + src_end, v.y.data() + dst_begin);
     std::copy(v.z.data() + src_begin, v.z.data() + src_end, v.z.data() + dst_begin);
-    current_nw++;
 }
 
