@@ -246,23 +246,6 @@ namespace linalg
     };
 
     // Small, fixed-size matrix type, consisting of exactly M rows and N columns of type T, stored in column-major order.
-    template<class T, int M> struct mat<T,M,1>
-    {
-        typedef vec<T,M>            V;
-        V                           x;
-        constexpr                   mat()                               : x() {}
-        constexpr                   mat(const V & x_)                   : x(x_) {}
-        constexpr explicit          mat(const T & s)                    : x(s) {}
-        constexpr explicit          mat(const T * p)                    : x(p+M*0) {}
-        template<class U> 
-        constexpr explicit          mat(const mat<U,M,1> & m)           : mat(V(m.x)) {}
-        constexpr vec<T,1>          row(int i) const                    { return {x[i]}; }
-        constexpr const V &         operator[] (int j) const            { return x; }
-        constexpr V &      operator[] (int j)                  { return x; }
-
-        template<class U, class=detail::conv_t<mat,U>> constexpr mat(const U & u) : mat(converter<mat,U>{}(u)) {}
-        template<class U, class=detail::conv_t<U,mat>> constexpr operator U () const { return converter<U,mat>{}(*this); }
-    };
     template<class T, int M> struct mat<T,M,2>
     {
         typedef vec<T,M>            V;
@@ -281,7 +264,7 @@ namespace linalg
         template<class U, class=detail::conv_t<U,mat>> constexpr operator U () const { return converter<U,mat>{}(*this); }
     };
     template<class T, int M> struct mat<T,M,3>
-    {
+    { 
         typedef vec<T,M>            V;
         V                           x,y,z;
         constexpr                   mat()                               : x(), y(), z() {}
@@ -292,8 +275,8 @@ namespace linalg
         template<class U> 
         constexpr explicit          mat(const mat<U,M,3> & m)           : mat(V(m.x), V(m.y), V(m.z)) {}
         constexpr vec<T,3>          row(int i) const                    { return {x[i], y[i], z[i]}; }
-        constexpr const V &         operator[] (int j) const            { return j==0?x:j==1?y:z; }
-        constexpr V &      operator[] (int j)                  { return j==0?x:j==1?y:z; }
+        constexpr const V &         col (int j) const            { return j==0?x:j==1?y:z; }
+        constexpr V &               col (int j)                  { return j==0?x:j==1?y:z; }
 
         template<class U, class=detail::conv_t<mat,U>> constexpr mat(const U & u) : mat(converter<mat,U>{}(u)) {}
         template<class U, class=detail::conv_t<U,mat>> constexpr operator U () const { return converter<U,mat>{}(*this); }
@@ -310,8 +293,8 @@ namespace linalg
         template<class U> // typecast matrix ?
         constexpr explicit          mat(const mat<U,M,4> & m)           : mat(V(m.x), V(m.y), V(m.z), V(m.w)) {}
         constexpr vec<T,4>          row(int i) const                    { return {x[i], y[i], z[i], w[i]}; }
-        constexpr const V &         operator[] (int j) const            { return j==0?x:j==1?y:j==2?z:w; }
-        constexpr V &      operator[] (int j)                  { return j==0?x:j==1?y:j==2?z:w; }
+        constexpr const V &         col (int j) const            { return j==0?x:j==1?y:j==2?z:w; }
+        constexpr V &               col (int j)                  { return j==0?x:j==1?y:j==2?z:w; }
 
         template<class U, class=detail::conv_t<mat,U>> constexpr mat(const U & u) : mat(converter<mat,U>{}(u)) {}
         template<class U, class=detail::conv_t<U,mat>> constexpr operator U () const { return converter<U,mat>{}(*this); }
