@@ -370,10 +370,28 @@ void Mesh::io_read(const std::string& filename) {
 }
 
 void Mesh::move(const linalg::alias::float4x4& transform) {
+    assert(current_nw < nw); // check if we have capacity
+    
+    // Shed wake before moving    
+    const u64 src_begin = nb_vertices_wing() - (ns + 1);
+    const u64 src_end = nb_vertices_wing();
+    const u64 dst_begin = (nc + nw - current_nw) * (ns + 1);
+    std::copy(v.x.data() + src_begin, v.x.data() + src_end, v.x.data() + dst_begin);
+    std::copy(v.y.data() + src_begin, v.y.data() + src_end, v.y.data() + dst_begin);
+    std::copy(v.z.data() + src_begin, v.z.data() + src_end, v.z.data() + dst_begin);
+    
+    // Perform the movement
     for (u64 i = 0; i < nb_vertices_wing(); i++) {
-        linalg::alias::float4 global_vertex{v.x[i], v.y[i], v.z[i], 1.f};
-        linalg::alias::float4 local_vertex = frame.col(3);
-
+        const linalg::alias::float4 global_vertex{v.x[i], v.y[i], v.z[i], 1.f};
+        const linalg::alias::float4 local_frame_center = frame.col(3); // in global coordinates
+        const linalg::alias::float4 center_to_vertex = global_vertex - local_frame_center;
+        const linalg::alias::float4 local_vertex = {
+            linalg::dot(frame.col(0), center_to_vertex),
+            linalg::dot(frame.col(1), center_to_vertex),
+            linalg::dot(frame.col(2), center_to_vertex),
+            1.f
+        }; // vertex in local coordinates
+        
         const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{v.x[i], v.y[i], v.z[i], 1.f});
         v.x[i] = transformed_pt.x;
         v.y[i] = transformed_pt.y;
@@ -383,17 +401,5 @@ void Mesh::move(const linalg::alias::float4x4& transform) {
 
 void Mesh::resize_wake(const u64 nw_) {
     nw = nw_;
-    alloc();
+    alloc(); // resizes the buffers
 }
-
-// Duplicate the trailing edge vertices and release them in the buffer
-void Mesh::shed_wake() {
-    assert(current_nw < nw); // check if we have capacity
-    const u64 src_begin = nb_vertices_wing() - (ns + 1);
-    const u64 src_end = nb_vertices_wing();
-    const u64 dst_begin = (nc + nw - current_nw) * (ns + 1);
-    std::copy(v.x.data() + src_begin, v.x.data() + src_end, v.x.data() + dst_begin);
-    std::copy(v.y.data() + src_begin, v.y.data() + src_end, v.y.data() + dst_begin);
-    std::copy(v.z.data() + src_begin, v.z.data() + src_end, v.z.data() + dst_begin);
-}
-
