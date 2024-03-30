@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib import cm
 
 class Kinematics:
     joints = [] # list of transformation lambdas
@@ -16,6 +17,14 @@ class Kinematics:
 
     def relative_displacement(self, t0, t1):
         return self.displacement(t1) @ np.linalg.inv(self.displacement(t0))
+    
+    # f32 absolute_velocity(f32 t, const linalg::alias::float4& vertex) {
+    #     return linalg::length((linalg::mul(displacement(t+EPS_sqrt_f), vertex)-linalg::mul(displacement(t), vertex))/EPS_sqrt_f);
+    # }
+
+    def absolute_velocity(self, t, vertex):
+        EPS_sqrt_f = np.sqrt(1.19209e-07)
+        return np.linalg.norm((self.relative_displacement(t, t+EPS_sqrt_f) @ vertex - vertex) / EPS_sqrt_f)
 
 def skew_matrix(v):
     return np.array([
@@ -58,16 +67,16 @@ def displacement_freestream(t): return translation_matrix([-2 * t, 0, 0])
 #     return rotation_matrix(frame @ [0, 0, 0, 1], frame @ [0, 0, 1, 0], 1 * t)
 def displacement_rotor(t): 
     return rotation_matrix([0, 0, 0], [0, 0, 1], 7 * t)
-# def displacement_rotor(t, frame):
-#     return rotation_matrix2([0, 0, 1], 1 * t)
+def pitching(t): 
+    return rotation_matrix([0, 0, 0], [0, 1, 0], 0.5 * np.pi * np.sin(2.0 * t))
 
 kinematics = Kinematics()
 kinematics.add_joint(displacement_freestream, np.identity(4))
-kinematics.add_joint(displacement_wing, np.identity(4))
-kinematics.add_joint(displacement_rotor, np.identity(4))
+# kinematics.add_joint(displacement_wing, np.identity(4))
+kinematics.add_joint(pitching, np.identity(4))
 
-dt = 0.01
-t_final = 20
+dt = 0.1
+t_final = 15
 
 # vertices of a single panel (clockwise) (initial position) (global coordinates)
 vertices = np.array([
@@ -77,11 +86,6 @@ vertices = np.array([
     [1.0, 1.0, 1.0, 1.0]  # homogeneous coordinates
 ])
 vertices = np.column_stack((vertices, vertices[:,0]))
-
-body_frame = np.identity(4)
-
-
-wing_frame = np.identity(4)
 
 # Setup animation
 fig = plt.figure()
@@ -94,22 +98,39 @@ ax.set_ylabel('Y axis')
 ax.set_zlabel('Z axis')
 ax.set_xlim(-30, 0)
 ax.set_ylim(-15, 15)
-ax.set_zlim(-5, 5)
+ax.set_zlim(-15, 15)
 ax.invert_xaxis()  # Invert x axis
 ax.invert_yaxis()  # Invert y axis
 
 # Initial plot - create a line object
-line, = ax.plot3D(vertices[0, :], vertices[1, :], vertices[2, :], 'o-') 
+line, = ax.plot3D(vertices[0, :], vertices[1, :], vertices[2, :], '-') 
+scatter = ax.scatter(vertices[0, :], vertices[1, :], vertices[2, :], c='r', marker='o')
 
+current_frame = 0
 def update(frame):
-    global vertices, kinematics
+    global vertices, kinematics, current_frame
     t = frame * dt
-    print(f"t = {t:.2f}/{t_final}", end='\r')
-    vertices = move_vertices(vertices, kinematics.relative_displacement(t, t+dt))
+    
+    vertices_velocity = np.array([kinematics.absolute_velocity(t, vertex) for vertex in vertices.T])
+    if frame == current_frame: # otherwise invalid velocity value
+        print(f"frame: {frame} | vel: {vertices_velocity[:-1]}")
+
+    norm = plt.Normalize(vertices_velocity.min(), vertices_velocity.max())
+    colors = cm.viridis(norm(vertices_velocity))
+
     # Update the line object for 3D
     line.set_data(vertices[0, :], vertices[1, :])  # y and z for 2D part of set_data
     line.set_3d_properties(vertices[2, :])  # x for the 3rd dimension
-    return line,
+
+    scatter._offsets3d = (vertices[0, :], vertices[1, :], vertices[2, :])
+    scatter.set_facecolor(colors)
+
+    if (frame == current_frame): # fix double frame 0 issue
+        print(f"t = {t:.2f}/{t_final}", end='\r')
+        vertices = move_vertices(vertices, kinematics.relative_displacement(t, t+dt))
+        current_frame += 1
+
+    return line, scatter
 
 ani = animation.FuncAnimation(fig, update, frames=np.arange(0, t_final/dt), blit=False, repeat=False)
 # ani.save('animation.mp4', fps=30, extra_args=['-vcodec', 'libx264'])
