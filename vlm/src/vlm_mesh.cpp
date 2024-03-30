@@ -382,21 +382,16 @@ void Mesh::move(const linalg::alias::float4x4& transform) {
     
     // Perform the movement
     for (u64 i = 0; i < nb_vertices_wing(); i++) {
-        const linalg::alias::float4 global_vertex{v.x[i], v.y[i], v.z[i], 1.f};
-        const linalg::alias::float4 local_frame_center = frame.col(3); // in global coordinates
-        const linalg::alias::float4 center_to_vertex = global_vertex - local_frame_center;
-        const linalg::alias::float4 local_vertex = {
-            linalg::dot(frame.col(0), center_to_vertex),
-            linalg::dot(frame.col(1), center_to_vertex),
-            linalg::dot(frame.col(2), center_to_vertex),
-            1.f
-        }; // vertex in local coordinates
-        
         const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{v.x[i], v.y[i], v.z[i], 1.f});
         v.x[i] = transformed_pt.x;
         v.y[i] = transformed_pt.y;
         v.z[i] = transformed_pt.z;
     }
+
+    // Copy new trailing edge vertices on the wake buffer
+    std::copy(v.x.data() + src_begin, v.x.data() + src_end, v.x.data() + dst_begin - (ns + 1));
+    std::copy(v.y.data() + src_begin, v.y.data() + src_end, v.y.data() + dst_begin - (ns + 1));
+    std::copy(v.z.data() + src_begin, v.z.data() + src_end, v.z.data() + dst_begin - (ns + 1));
 }
 
 void Mesh::resize_wake(const u64 nw_) {

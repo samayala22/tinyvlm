@@ -11,7 +11,7 @@
 
 - [X] VLM
 - [X] NL-VLM
-- [ ] UVLM
+- [X] UVLM
 - [ ] NL-UVLM
 - [ ] NLHB-UVLM
 
@@ -19,7 +19,7 @@
 
 - [X] High angle of attack correction
 - [X] Dihedral / Anhedral Wings (local coordinate projection in force calculation)
-- [ ] Swept Wings (coordinate rotation & non linear correction)
+- [X] Swept Wings (coordinate rotation)
 - [ ] Compressibility Effects (Prandtl Glauert corrector)
 
 # Backends
