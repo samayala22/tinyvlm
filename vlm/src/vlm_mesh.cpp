@@ -138,14 +138,25 @@ f32 Mesh::panels_area_xy(const u64 i, const u64 j, const u64 m, const u64 n) con
     return total_area;
 }
 
+f32 Mesh::panel_length(const u64 i, const u64 j) const {
+    // Since chordwise segments are always parallel, we can simply measure the width of the first panel
+    assert(i < nc);
+    assert(j < ns);
+    const linalg::alias::float3 v0 = get_v0(j + i * ns);
+    const linalg::alias::float3 v1 = get_v1(j + i * ns);
+    const linalg::alias::float3 v2 = get_v2(j + i * ns);
+    const linalg::alias::float3 v3 = get_v3(j + i * ns);
+    return 0.5f * (linalg::length(v3-v0) + linalg::length(v2-v1));
+}
+
 /// @brief Computes the width of a single panel in pure y direction
 /// @param i panel index chordwise
 /// @param j panel index spanwise
 f32 Mesh::panel_width_y(const u64 i, const u64 j) const {
-    // Since chordwise segments are always parallel, we can simply measure the width of the first panel
     assert(i < nc);
     assert(j < ns);
     const u64 ld = ns + 1;
+
     return v.y[j + 1 + i * ld] - v.y[j + i * ld];
 }
 
