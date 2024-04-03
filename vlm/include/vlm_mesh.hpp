@@ -97,6 +97,7 @@ class Mesh {
     f32 panels_area(const u64 i, const u64 j, const u64 m, const u64 n) const;
     f32 panels_area_xy(const u64 i, const u64 j, const u64 m, const u64 n) const;
     f32 panel_width_y(const u64 i, const u64 j) const;
+    f32 panel_length(const u64 i, const u64 j) const;
     f32 strip_width(const u64 j) const;
     f32 chord_length(const u64 j) const; // vertex idx
     f32 chord_mean(const u64 j, const u64 n) const;

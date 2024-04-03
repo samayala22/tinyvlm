@@ -12,6 +12,7 @@ class BackendCPU : public Backend {
         std::vector<f32> rhs;
         std::vector<i32> ipiv;
         std::vector<f32> gamma; // ncw * ns
+        std::vector<f32> gamma_prev; // nc * ns (previous timestep gamma)
         std::vector<f32> delta_gamma;
         std::vector<f32> trefftz_buffer;
 
@@ -26,6 +27,7 @@ class BackendCPU : public Backend {
         void lu_factor() override;
         void lu_solve() override;
         f32 compute_coefficient_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) override;
+        f32 compute_coefficient_unsteady_cl(const FlowData& flow, f32 dt, const f32 area, const u64 j, const u64 n) override;
         linalg::alias::float3 compute_coefficient_cm(const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) override;
         f32 compute_coefficient_cd(const FlowData& flow, const f32 area, const u64 j, const u64 n) override;
         void compute_delta_gamma() override;
