@@ -206,6 +206,7 @@ void Mesh::update_wake(const linalg::alias::float3& freestream) {
         v.z[i + v_ns] = v.z[i] + off_z;
     }
     compute_metrics_wake();
+    current_nw = 1;
 }
 
 // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf (Eq 3.4 p21)
@@ -392,6 +393,8 @@ void Mesh::move(const linalg::alias::float4x4& transform) {
     std::copy(v.x.data() + src_begin, v.x.data() + src_end, v.x.data() + dst_begin - (ns + 1));
     std::copy(v.y.data() + src_begin, v.y.data() + src_end, v.y.data() + dst_begin - (ns + 1));
     std::copy(v.z.data() + src_begin, v.z.data() + src_end, v.z.data() + dst_begin - (ns + 1));
+
+    current_nw++;
 }
 
 void Mesh::resize_wake(const u64 nw_) {

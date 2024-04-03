@@ -9,6 +9,7 @@ namespace vlm {
 // Flow characteristics
 class FlowData {
     public:
+    // TODO: maybe move these to methods
     const f32 alpha; // global angle of attack
     const f32 beta; // global sideslip angle
     const f32 u_inf; // freestream velocity magnitude
@@ -20,12 +21,13 @@ class FlowData {
     const linalg::alias::float3 stream_axis;
 
     FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_);
+    FlowData(const linalg::alias::float3& freestream_, const f32 rho_);
 };
 
-class PoseData {
+class SolverData {
     public:
     // Poses defined in global stationary frame
-    const linalg::alias::float4x4 body; // plane body pose
+    const f32 sigma_vatistas = 0.0f; // vatistas coefficient
 };
 
 class AeroCoefficients {
