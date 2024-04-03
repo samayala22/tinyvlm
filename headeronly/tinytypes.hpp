@@ -1,5 +1,7 @@
 #include <cstdint>
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 namespace tiny {
 
