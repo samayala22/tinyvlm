@@ -14,6 +14,8 @@ class Backend {
         virtual void compute_lhs(const FlowData& flow) = 0;
         virtual void compute_rhs(const FlowData& flow) = 0;
         virtual void compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) = 0; 
+        virtual void add_wake_influence(const FlowData& flow) = 0;
+        virtual void shed_gamma() = 0;
         virtual void lu_factor() = 0;
         virtual void lu_solve() = 0;
         virtual f32 compute_coefficient_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) = 0;

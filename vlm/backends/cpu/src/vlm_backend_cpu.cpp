@@ -22,16 +22,19 @@ using namespace vlm;
 
 BackendCPU::~BackendCPU() = default; // Destructor definition
 
+// TODO: replace any kind of size arithmetic with methods
 BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
+    wake_buffer.resize(mesh.nb_panels_wing() * mesh.ns);
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
-    gamma.resize(mesh.nb_panels_wing());
+    gamma.resize((mesh.nc + mesh.nw) * mesh.ns); // store wake gamma as well
     delta_gamma.resize(mesh.nb_panels_wing());
     trefftz_buffer.resize(mesh.ns);
 }
 
 void BackendCPU::reset() {
+    // TODO: verify that these are needed
     std::fill(gamma.begin(), gamma.end(), 0.0f);
     std::fill(lhs.begin(), lhs.end(), 0.0f);
     std::fill(rhs.begin(), rhs.end(), 0.0f);
@@ -71,7 +74,7 @@ void BackendCPU::compute_lhs(const FlowData& flow) {
 
     u64 idx = m.nc - 1;
     auto cond = taskflow.emplace([&]{
-        return idx < m.nc + m.nw ? 0 : 1; // 0 means continue, 1 means break
+        return idx < m.nc + m.current_nw ? 0 : 1; // 0 means continue, 1 means break
     });
     auto wake_pass = taskflow.for_each_index(zero, m.ns, [&] (u64 j) {
         const u64 ia = (m.nc - 1) * m.ns + j;
@@ -104,6 +107,42 @@ void BackendCPU::compute_rhs(const FlowData& flow) {
     const Mesh& m = mesh;
     
     kernel_cpu_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
+}
+
+// TODO: consider changing FlowData to SolverData
+void BackendCPU::add_wake_influence(const FlowData& flow) {
+    tiny::ScopedTimer timer("Wake Influence");
+
+    tf::Taskflow taskflow;
+
+    Mesh& m = mesh;
+    ispc::MeshProxy mesh_proxy = {
+        m.ns, m.nc, m.nb_panels_wing(),
+        {m.v.x.data(), m.v.y.data(), m.v.z.data()}, 
+        {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
+        {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
+    };
+
+    // loop over wake rows
+    for (u64 i = 0; i < mesh.current_nw; i++) {
+        const u64 wake_row_start = (m.nc + m.nw - i - 1) * m.ns;
+        std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
+        // Actually fill the wake buffer
+        // parallel for
+        for (u64 j = 0; j < mesh.ns; j++) { // loop over columns
+            const u64 lidx = wake_row_start + j; // TODO: replace this ASAP
+            ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, flow.sigma_vatistas);
+        }
+
+        cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
+    }
+}
+
+void BackendCPU::shed_gamma() {
+    Mesh& m = mesh;
+    const u64 wake_row_start = (m.nc + m.nw - m.current_nw - 1) * m.ns;
+
+    std::copy(gamma.data() + m.ns * (m.nc-1), gamma.data() + m.nb_panels_wing(), gamma.data() + wake_row_start);
 }
 
 void BackendCPU::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
