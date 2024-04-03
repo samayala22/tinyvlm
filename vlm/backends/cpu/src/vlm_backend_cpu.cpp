@@ -29,6 +29,7 @@ BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
     gamma.resize((mesh.nc + mesh.nw) * mesh.ns); // store wake gamma as well
+    gamma_prev.resize(mesh.nb_panels_wing());
     delta_gamma.resize(mesh.nb_panels_wing());
     trefftz_buffer.resize(mesh.ns);
 }
@@ -142,6 +143,7 @@ void BackendCPU::shed_gamma() {
     Mesh& m = mesh;
     const u64 wake_row_start = (m.nc + m.nw - m.current_nw - 1) * m.ns;
 
+    std::copy(gamma.data(), gamma.data() + m.nb_panels_wing(), gamma_prev.data()); // store current timestep for delta_gamma
     std::copy(gamma.data() + m.ns * (m.nc-1), gamma.data() + m.nb_panels_wing(), gamma.data() + wake_row_start);
 }
 
@@ -159,7 +161,7 @@ void BackendCPU::compute_rhs(const FlowData& flow, const std::vector<f32>& secti
 }
 
 void BackendCPU::lu_factor() {
-    tiny::ScopedTimer timer("Factor");
+    const tiny::ScopedTimer timer("Factor");
     const int32_t n = static_cast<int32_t>(mesh.nb_panels_wing());
     LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.data(), n, ipiv.data());
 }
@@ -172,8 +174,9 @@ void BackendCPU::lu_solve() {
     LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.data(), n, ipiv.data(), gamma.data(), n);
 }
 
-f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area,
-    const u64 j, const u64 n) {
+f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) {
+    const tiny::ScopedTimer timer("Compute CL");
+
     assert(n > 0);
     assert(j >= 0 && j+n <= mesh.ns);
     
@@ -184,15 +187,45 @@ f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area,
             const u64 li = u * mesh.ns + v; // linear index
             const linalg::alias::float3 v0 = mesh.get_v0(li);
             const linalg::alias::float3 v1 = mesh.get_v1(li);
-            const linalg::alias::float3 v3 = mesh.get_v3(li);
+            // const linalg::alias::float3 v3 = mesh.get_v3(li);
             // Leading edge vector pointing outward from wing root
             linalg::alias::float3 dl = v1 - v0;
-            const linalg::alias::float3 local_left_chord = linalg::normalize(v3 - v0);
-            const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
-            dl -= projected_vector; // orthogonal leading edge vector
+            // const linalg::alias::float3 local_left_chord = linalg::normalize(v3 - v0);
+            // const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
+            // dl -= projected_vector; // orthogonal leading edge vector
             // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.stream_axis, dl) * flow.rho * delta_gamma[li]; // * local flow magnitude
-            cl += linalg::dot(force, flow.lift_axis);
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * delta_gamma[li];
+            cl += linalg::dot(force, flow.lift_axis); // projection on the body lift axis
+        }
+    }
+    cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
+
+    return cl;
+}
+
+f32 BackendCPU::compute_coefficient_unsteady_cl(const FlowData& flow, f32 dt, const f32 area, const u64 j, const u64 n) {
+    assert(n > 0);
+    assert(j >= 0 && j+n <= mesh.ns);
+    
+    f32 cl = 0.0f;
+
+    for (u64 u = 0; u < mesh.nc; u++) {
+        for (u64 v = j; v < j + n; v++) {
+            const u64 li = u * mesh.ns + v; // linear index
+            
+            // Steady part:
+            const linalg::alias::float3 v0 = mesh.get_v0(li);
+            const linalg::alias::float3 v1 = mesh.get_v1(li);
+            // Leading edge vector pointing outward from wing root
+            const linalg::alias::float3 dl = v1 - v0;
+            const linalg::alias::float3 force_steady = flow.rho * delta_gamma[li] * linalg::cross(flow.freestream, dl);
+            cl += linalg::dot(force_steady, flow.lift_axis);
+
+            // Unsteady part (Simpson method)
+            const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
+            const linalg::alias::float3 normal{mesh.normal.x[li], mesh.normal.y[li], mesh.normal.z[li]};
+            const linalg::alias::float3 force_unsteady = flow.rho * gamma_dt * mesh.area[li] * normal;
+            cl += linalg::dot(force_unsteady, flow.lift_axis);
         }
     }
     cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
