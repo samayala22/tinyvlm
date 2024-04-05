@@ -11,7 +11,10 @@ def derivative2(f, x):
     EPS_sqrt_f = np.sqrt(1.19209e-07)
     return (f(x + EPS_sqrt_f) - 2 * f(x) + f(x - EPS_sqrt_f)) / (EPS_sqrt_f ** 2)
 
-# Jone approximation of Wagner function
+def solve_ivp(x0: float, s0: float, sf: float, f: callable):
+    return spi.solve_ivp(f, [s0, sf], [x0]).y[-1] # return only the result at t=sf
+
+# Jone's approximation of Wagner function
 b0 = 1
 b1 = -0.165
 b2 = -0.335
@@ -19,12 +22,12 @@ beta_1 = 0.0455
 beta_2 = 0.3
 
 # UVLM parameters
-rho = 1
+rho = 1 # fluid density
 u_inf = 1 # freestream
 b = 0.5 # half chord
 a = 10 # full span
 
-amplitudes = [0.1, 0.1, 0.1]
+amplitudes = [0.1, 0.1, 0.1] 
 reduced_frequencies = [0.5, 0.75, 1.5]
 
 t_final = 30
@@ -44,14 +47,10 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     def pitch(t): return 0
     def heave(t): return amplitude * np.sin(omega * t)
 
-    # Define the function w(s)
     def w(s: float): return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - a) * derivative(pitch, s)
 
     def dx1ds(s: float, x1: float): return b1 * beta_1 * w(s) - beta_1 * x1
     def dx2ds(s: float, x2: float): return b2 * beta_2 * w(s) - beta_2 * x2
-
-    def solve_ivp(x0: float, s0: float, sf: float, f: callable):
-        return spi.solve_ivp(f, [s0, sf], [x0]).y[-1]
 
     def cl_theodorsen(t: float):
         L_m = rho * b * b * np.pi * (u_inf * derivative(pitch, t) + derivative2(heave, t) - b * a * derivative2(pitch, t))
