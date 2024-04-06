@@ -59,29 +59,38 @@ void dump_buffer(std::ofstream& stream, T* start, T* end) {
 
 int main() {
     // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x8.x"};
-    const std::vector<std::string> meshes = {"../../../../mesh/rectangular_4x4.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x200.x"};
 
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
 
+
+    // Geometry
+    const f32 b = 0.5f; // half chord
+
     // Define simulation length
     const f32 t_final = 30.0f;
+    const f32 u_inf = 1.0f; // freestream velocity
+    const f32 amplitude = 0.1f; // amplitude of the wing motion
+    const f32 k = 0.5f; // reduced frequency
+
+    const f32 omega = k * u_inf / (2*b);
 
     Kinematics kinematics{};
 
     // Define wing motion
-    kinematics.add([](f32 t) {
+    kinematics.add([=](f32 t) {
         return linalg::translation_matrix(linalg::alias::float3{
             0.0f,
             0.0f,
-            2.f * std::sin(0.2f * t)
+            amplitude * std::sin(omega* t)
         });
     });
 
-    kinematics.add([](f32 t) {
+    kinematics.add([=](f32 t) {
         return linalg::translation_matrix(linalg::alias::float3{
-            -1.0f*t,
+            -u_inf*t,
             0.0f,
             0.0f
         });
@@ -103,6 +112,7 @@ int main() {
         #ifdef DEBUG_DISPLACEMENT_DATA
         std::ofstream wing_data("wing_data.txt");
         std::ofstream wake_data("wake_data.txt");
+        std::ofstream cl_data("cl_data.txt");
         
         wing_data << mesh->nc << " " << mesh->ns << "\n";
         wing_data << vec_t.size() - 1 << "\n\n";
@@ -153,6 +163,9 @@ int main() {
                 // TODO: this should take a vector of local velocities magnitude because it can be different for each point on the mesh
                 const f32 cl_unsteady = backend->compute_coefficient_unsteady_cl(flow, dt, mesh->s_ref, 0, mesh->ns);
                 std::printf("t: %f, CL: %f\n", t, cl_unsteady);
+                #ifdef DEBUG_DISPLACEMENT_DATA
+                cl_data << t << " " << cl_unsteady << "\n";
+                #endif
             }
             mesh->move(kinematics.relative_displacement(t, t+dt));
             backend->shed_gamma();
