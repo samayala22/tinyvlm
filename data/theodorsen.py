@@ -63,6 +63,17 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     axs["time"].plot(t, cl, label=f"k={k}")
     axs["heave"].plot(coord_z[len(cl)//2:], cl[len(cl)//2:], label=f"k={k}")
 
+
+uvlm_cl = []
+uvlm_t = []
+with open("build/windows/x64/release/cl_data.txt", "r") as f:
+    for line in f:
+        t, cl = line.split()
+        uvlm_t.append(float(t))
+        uvlm_cl.append(float(cl))
+
+axs["time"].plot(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", linestyle="--")
+
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')
 axs["time"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
@@ -73,4 +84,5 @@ axs["heave"].set_ylabel('CL')
 axs["heave"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
 axs["heave"].legend()
 
+plt.suptitle("Verification of UVLM with Theodorsen harmonic heave motion")
 plt.show()
