@@ -15,7 +15,7 @@ set_policy("run.autobuild", true)
 
 set_warnings("all")
 set_languages("c++17", "c99")
-set_runtimes("MD") -- msvc runtime library (MD/MT/MDd/MTd)
+set_runtimes("MT") -- msvc runtime library (MD/MT/MDd/MTd)
 
 -- Define backends and helper functions
 backends = {"cuda", "cpu"}
