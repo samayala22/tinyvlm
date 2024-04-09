@@ -104,7 +104,7 @@ void kernel_cpu_rhs(u64 n, const float normal_x[], const float normal_y[], const
 }
 
 void BackendCPU::compute_rhs(const FlowData& flow) {
-    tiny::ScopedTimer timer("RHS");
+    const tiny::ScopedTimer timer("RHS");
     const Mesh& m = mesh;
     
     kernel_cpu_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
@@ -112,7 +112,7 @@ void BackendCPU::compute_rhs(const FlowData& flow) {
 
 // TODO: consider changing FlowData to SolverData
 void BackendCPU::add_wake_influence(const FlowData& flow) {
-    tiny::ScopedTimer timer("Wake Influence");
+    const tiny::ScopedTimer timer("Wake Influence");
 
     tf::Taskflow taskflow;
 
@@ -189,7 +189,7 @@ f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area, con
             const linalg::alias::float3 v1 = mesh.get_v1(li);
             // const linalg::alias::float3 v3 = mesh.get_v3(li);
             // Leading edge vector pointing outward from wing root
-            linalg::alias::float3 dl = v1 - v0;
+            const linalg::alias::float3 dl = v1 - v0;
             // const linalg::alias::float3 local_left_chord = linalg::normalize(v3 - v0);
             // const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
             // dl -= projected_vector; // orthogonal leading edge vector
