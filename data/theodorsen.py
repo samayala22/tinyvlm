@@ -14,6 +14,7 @@ def derivative2(f, x):
 def solve_ivp(x0: float, s0: float, sf: float, f: callable):
     return spi.solve_ivp(f, [s0, sf], [x0]).y[-1] # return only the result at t=sf
 
+# Some info in Katz Plotkin p414 (eq 13.73a)
 # Jone's approximation of Wagner function
 b0 = 1
 b1 = -0.165
@@ -36,7 +37,7 @@ t = np.linspace(0, t_final, 500)
 fig, axs = plt.subplot_mosaic(
     [["time"],["heave"]],  # Disposition des graphiques
     constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-    figsize=(16, 9),  # Ajuster la taille de la figure (x,y)
+    figsize=(11, 6),  # Ajuster la taille de la figure (x,y)
 )
 
 for amp, k in zip(amplitudes, reduced_frequencies):
@@ -66,13 +67,17 @@ for amp, k in zip(amplitudes, reduced_frequencies):
 
 uvlm_cl = []
 uvlm_t = []
+uvlm_z = []
 with open("build/windows/x64/release/cl_data.txt", "r") as f:
     for line in f:
-        t, cl = line.split()
+        t, z, cl = line.split()
         uvlm_t.append(float(t))
+        uvlm_z.append(float(z))
         uvlm_cl.append(float(cl))
 
 axs["time"].plot(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", linestyle="--")
+
+axs["time"].plot(uvlm_t, uvlm_z, label="UVLM z (k=0.5)", linestyle="--")
 
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')

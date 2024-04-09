@@ -9,6 +9,7 @@
 
 #include "vlm.hpp"
 #include "vlm_data.hpp"
+#include "vlm_types.hpp"
 #include "vlm_utils.hpp"
 
 #define DEBUG_DISPLACEMENT_DATA
@@ -16,7 +17,7 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
-using tmatrix = linalg::alias::float4x4; // transformation matrix
+using tmatrix = linalg::alias::float4x4; // transformation matri
 
 class Kinematics {
     public:
@@ -37,11 +38,15 @@ class Kinematics {
     }
 
     tmatrix relative_displacement(f32 t0, f32 t1) {
+        //std::printf("t0: %.10f, t1: %.10f ", t0, t1);
         return linalg::mul(displacement(t1), linalg::inverse(displacement(t0)));
     }
 
     linalg::alias::float4 velocity(f32 t, const linalg::alias::float4& vertex) {
-        return (linalg::mul(relative_displacement(t, t+EPS_sqrt_f), vertex)-vertex)/EPS_sqrt_f;
+        //const f32 EPS = std::max(10.f * t *EPS_f, EPS_f); // adaptive epsilon
+        const f32 EPS = std::max(std::sqrt(t) * EPS_sqrt_f, EPS_f);
+        return (linalg::mul(relative_displacement(t, t+EPS), vertex)-vertex)/EPS;
+        //return (linalg::mul(relative_displacement(t, t+EPS), vertex) - linalg::mul(relative_displacement(t, t-EPS), vertex))/ (2*EPS); // central diff
     }
 
     f32 velocity_magnitude(f32 t, const linalg::alias::float4& vertex) {
@@ -142,7 +147,7 @@ int main() {
 
             const u64 wake_start = (mesh->nc + mesh->nw - i) * (mesh->ns + 1);
             const u64 wake_end = mesh->nb_vertices_total();
-            std::cout << "Buffer size: " << mesh->v.x.size() << " | " << wake_start << " | " << wake_end << std::endl;
+            // std::cout << "Buffer size: " << mesh->v.x.size() << " | " << wake_start << " | " << wake_end << std::endl;
 
             dump_buffer(wake_data, mesh->v.x.data() + wake_start, mesh->v.x.data() + wake_end);
             dump_buffer(wake_data, mesh->v.y.data() + wake_start, mesh->v.y.data() + wake_end);
@@ -152,9 +157,14 @@ int main() {
 
             const f32 t = vec_t[i];
             const f32 dt = vec_t[i+1] - t;
+            std::cout << "\n----------------\n" << "T = " << t << "\n";
+
             auto base_vertex = mesh->get_v0(0);
-            auto base_velocity = kinematics.velocity(vec_t[i], {base_vertex[0], base_vertex[1], base_vertex[2], 1.0f});
-            const FlowData flow{linalg::alias::float3{base_velocity[0], base_velocity[1], base_velocity[2]}, 1.0f};
+            auto base_velocity = kinematics.velocity(t, {base_vertex[0], base_vertex[1], base_vertex[2], 1.0f});
+            std::cout << "velocity: " << base_velocity << "\n";
+            std::cout << "position: " << base_vertex << "\n";
+
+            const FlowData flow{linalg::alias::float3{-base_velocity[0], -base_velocity[1], -base_velocity[2]}, 1.0f};
             backend->compute_rhs(flow);
             backend->add_wake_influence(flow);
             backend->lu_solve();
@@ -162,9 +172,10 @@ int main() {
             if (i > 0) {
                 // TODO: this should take a vector of local velocities magnitude because it can be different for each point on the mesh
                 const f32 cl_unsteady = backend->compute_coefficient_unsteady_cl(flow, dt, mesh->s_ref, 0, mesh->ns);
+                // const f32 cl_unsteady = backend->compute_coefficient_cl(flow);
                 std::printf("t: %f, CL: %f\n", t, cl_unsteady);
                 #ifdef DEBUG_DISPLACEMENT_DATA
-                cl_data << t << " " << cl_unsteady << "\n";
+                cl_data << t << " " << mesh->v.z[0] << " " << cl_unsteady << "\n";
                 #endif
             }
             mesh->move(kinematics.relative_displacement(t, t+dt));
