@@ -25,8 +25,9 @@ beta_2 = 0.3
 # UVLM parameters
 rho = 1 # fluid density
 u_inf = 1 # freestream
+ar = 4 # aspect ratio
 b = 0.5 # half chord
-a = 10 # full span
+a = ar / (2*b) # full span
 
 amplitudes = [0.1, 0.1, 0.1] 
 reduced_frequencies = [0.5, 0.75, 1.5]
@@ -76,8 +77,9 @@ with open("build/windows/x64/release/cl_data.txt", "r") as f:
         uvlm_cl.append(float(cl))
 
 axs["time"].plot(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", linestyle="--")
-
 axs["time"].plot(uvlm_t, uvlm_z, label="UVLM z (k=0.5)", linestyle="--")
+
+axs["heave"].plot(uvlm_z[len(uvlm_cl)//2:], uvlm_cl[len(uvlm_cl)//2:], label="UVLM (k=0.5)", linestyle="--")
 
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')

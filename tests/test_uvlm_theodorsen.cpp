@@ -64,12 +64,11 @@ void dump_buffer(std::ofstream& stream, T* start, T* end) {
 
 int main() {
     // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x8.x"};
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x200.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/rectangular_5x10.x"};
 
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
-
 
     // Geometry
     const f32 b = 0.5f; // half chord
@@ -78,7 +77,7 @@ int main() {
     const f32 t_final = 30.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.5f; // reduced frequency
+    const f32 k = 1.5f; // reduced frequency
 
     const f32 omega = k * u_inf / (2*b);
 
@@ -165,6 +164,8 @@ int main() {
             std::cout << "position: " << base_vertex << "\n";
 
             const FlowData flow{linalg::alias::float3{-base_velocity[0], -base_velocity[1], -base_velocity[2]}, 1.0f};
+            std::cout << "lift axis: " << flow.lift_axis << "\n";
+
             backend->compute_rhs(flow);
             backend->add_wake_influence(flow);
             backend->lu_solve();
