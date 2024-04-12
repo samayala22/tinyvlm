@@ -39,7 +39,7 @@ def atime(t: float): return 2. * u_inf * t / c
 amplitudes = [0.1, 0.1, 0.1] 
 reduced_frequencies = [0.5, 0.75, 1.5]
 
-t_final = 30
+t_final = 40
 t = np.linspace(0, t_final, 500)
 
 fig, axs = plt.subplot_mosaic(
@@ -54,12 +54,12 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     omega = k * u_inf / (2*b) # pitch frequency
 
     # sudden acceleration
-    def pitch(t): return np.radians(5)
-    def heave(t): return 0
+    # def pitch(t): return np.radians(5)
+    # def heave(t): return 0
 
     # pure heaving
-    # def pitch(t): return 0
-    # def heave(t): return amplitude * np.sin(omega * t)
+    def pitch(t): return 0
+    def heave(t): return amplitude * np.sin(omega * t)
     
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -75,7 +75,7 @@ for amp, k in zip(amplitudes, reduced_frequencies):
 
     def cl_theodorsen(t: float): # using Wagner functions and Kholodar formulation
         L_m = rho * b * b * np.pi * (u_inf * derivative(pitch, t) + derivative2(heave, t) - b * pitch_axis * derivative2(pitch, t))
-        L_c = -2 * np.pi * rho * u_inf * b * ((b0 + b1 + b2) * w(t) + x1(t) + x2(t))
+        L_c = -2 * np.pi * rho * u_inf * b * (-(b0 + b1 + b2) * w(t) + x1(t) + x2(t))
         return (L_m + L_c) / (0.5 * rho * u_inf * u_inf * c)
 
     # def cl_theodorsen(t: float): # using Pade approximation
@@ -101,7 +101,6 @@ with open("build/windows/x64/release/cl_data.txt", "r") as f:
 
 axs["time"].plot(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", linestyle="--")
 axs["time"].plot(uvlm_t, uvlm_z, label="UVLM z (k=0.5)", linestyle="--")
-
 axs["heave"].plot(uvlm_z[len(uvlm_cl)//2:], uvlm_cl[len(uvlm_cl)//2:], label="UVLM (k=0.5)", linestyle="--")
 
 axs["time"].set_xlabel('t')
