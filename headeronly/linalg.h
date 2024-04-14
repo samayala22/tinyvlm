@@ -531,9 +531,21 @@ namespace linalg
     enum z_range { neg_one_to_one, zero_to_one };   // Should projection matrices map z into the range of [-1,1] or [0,1]?
     template<class T> vec<T,4>   rotation_quat     (const vec<T,3> & axis, T angle)         { return {axis*std::sin(angle/2), std::cos(angle/2)}; }
     template<class T> vec<T,4>   rotation_quat     (const mat<T,3,3> & m);
+    template<class T> mat<T,3,3> skew_matrix       (const vec<T,3> & a)                      { return {{0, a.z, -a.y}, {-a.z, 0, a.x}, {a.y, -a.x, 0}}; }
     template<class T> mat<T,4,4> translation_matrix(const vec<T,3> & translation)           { return {{1,0,0,0},{0,1,0,0},{0,0,1,0},{translation,1}}; }
     template<class T> mat<T,4,4> rotation_matrix   (const vec<T,4> & rotation)              { return {{qxdir(rotation),0}, {qydir(rotation),0}, {qzdir(rotation),0}, {0,0,0,1}}; }
-    template<class T> mat<T,4,4> rotation_matrix   (const vec<T,3> & axis, const vec<T,3> & p, T angle) {}
+    template<class T> mat<T,4,4> rotation_matrix   (const vec<T,3> & point, const vec<T,3> & axis, T angle) {
+        //mat<T,4,4> matrix = identity;
+        const mat<T,3,3> skew_mat = skew_matrix(axis);
+        const mat<T,3,3> rodrigues = identity + std::sin(angle)*skew_mat + (1-std::cos(angle))*mul(skew_mat, skew_mat);
+        const vec<T,3> trans_part = mul((identity - rodrigues), point);
+        return {
+            {rodrigues.x.x, rodrigues.x.y, rodrigues.x.z, 0}, // 1st col
+            {rodrigues.y.x, rodrigues.y.y, rodrigues.y.z, 0},
+            {rodrigues.z.x, rodrigues.z.y, rodrigues.z.z, 0},
+            {trans_part.x, trans_part.y, trans_part.z, 1}
+        };
+    }
     template<class T> mat<T,4,4> scaling_matrix    (const vec<T,3> & scaling)               { return {{scaling.x,0,0,0}, {0,scaling.y,0,0}, {0,0,scaling.z,0}, {0,0,0,1}}; }
     template<class T> mat<T,4,4> pose_matrix       (const vec<T,4> & q, const vec<T,3> & p) { return {{qxdir(q),0}, {qydir(q),0}, {qzdir(q),0}, {p,1}}; }
     template<class T> mat<T,4,4> lookat_matrix     (const vec<T,3> & eye, const vec<T,3> & center, const vec<T,3> & view_y_dir, fwd_axis fwd = neg_z);

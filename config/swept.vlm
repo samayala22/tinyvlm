@@ -5,9 +5,10 @@
 # Y = 10
 
 <solver>
-ref_point = [0.25, 0.0, 0.0]
 alphas = [5]
 backend = cpu
+sigma_vatistas = 0.0
 
 <mesh>
+ref_pt = [0.25, 0.0, 0.0]
 wake_included = false

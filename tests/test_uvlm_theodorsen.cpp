@@ -83,27 +83,30 @@ int main() {
 
     Kinematics kinematics{};
 
-    // Define wing motion
+    // Periodic heaving
     kinematics.add([=](f32 t) {
         return linalg::translation_matrix(linalg::alias::float3{
+            -u_inf*t, // freestream
             0.0f,
-            0.0f,
-            amplitude * std::sin(omega* t)
+            amplitude * std::sin(omega* t) // heaving
         });
     });
 
-    kinematics.add([=](f32 t) {
-        return linalg::translation_matrix(linalg::alias::float3{
-            -u_inf*t,
-            0.0f,
-            0.0f
-        });
-    });
+    // Sudden acceleration
+    // const f32 alpha = to_radians(5.0f);
+    // kinematics.add([=](f32 t) {
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         -u_inf*cos(alpha)*t,
+    //         0.0f,
+    //         -u_inf*sin(alpha)*t
+    //     });
+    // });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
         const std::unique_ptr<Mesh> mesh = create_mesh(mesh_name);
 
         // Pre-calculate timesteps to determine wake size
+        // Note: calculation should be made on the four corners of the wing
         std::vector<f32> vec_t; // timesteps
         vec_t.push_back(0.0f);
         for (f32 t = 0.0f; t < t_final;) {
@@ -136,8 +139,6 @@ int main() {
         // Unsteady loop
         std::cout << "Timesteps: " << vec_t.size() << "\n";
         for (u64 i = 0; i < vec_t.size()-1; i++) {
-            assert(mesh->current_nw == i); // dumb assert
-
             #ifdef DEBUG_DISPLACEMENT_DATA
             dump_buffer(wing_data, mesh->v.x.data(), mesh->v.x.data() + mesh->nb_vertices_wing());
             dump_buffer(wing_data, mesh->v.y.data(), mesh->v.y.data() + mesh->nb_vertices_wing());
@@ -179,10 +180,10 @@ int main() {
                 cl_data << t << " " << mesh->v.z[0] << " " << cl_unsteady << "\n";
                 #endif
             }
+            backend->shed_gamma(); // shed before moving & incrementing currentnw
             mesh->move(kinematics.relative_displacement(t, t+dt));
-            backend->shed_gamma();
         }
     }
- 
+  
     return 0;
 }

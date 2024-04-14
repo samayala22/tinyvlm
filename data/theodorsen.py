@@ -39,8 +39,9 @@ def atime(t: float): return 2. * u_inf * t / c
 amplitudes = [0.1, 0.1, 0.1] 
 reduced_frequencies = [0.5, 0.75, 1.5]
 
-t_final = 40
-t = np.linspace(0, t_final, 500)
+t_final = 30
+nb_pts = 500
+t = np.linspace(0, t_final, nb_pts)
 
 fig, axs = plt.subplot_mosaic(
     [["time"],["heave"]],  # Disposition des graphiques
@@ -87,21 +88,23 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     coord_z = np.array([heave(ti) / (2*b) for ti in t])
 
     axs["time"].plot(t, cl, label=f"k={k}")
-    axs["heave"].plot(coord_z[len(cl)//2:], cl[len(cl)//2:], label=f"k={k}")
+    axs["heave"].plot(coord_z[int(nb_pts//2):], cl[int(nb_pts//2):], label=f"k={k}")
 
 uvlm_cl = []
 uvlm_t = []
 uvlm_z = []
-with open("build/windows/x64/release/cl_data.txt", "r") as f:
+with open("build/windows/x64/debug/cl_data.txt", "r") as f:
     for line in f:
-        t, z, cl = line.split()
-        uvlm_t.append(float(t))
+        time_step, z, cl = line.split()
+        uvlm_t.append(float(time_step))
         uvlm_z.append(float(z))
         uvlm_cl.append(float(cl))
 
 axs["time"].plot(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", linestyle="--")
-axs["time"].plot(uvlm_t, uvlm_z, label="UVLM z (k=0.5)", linestyle="--")
-axs["heave"].plot(uvlm_z[len(uvlm_cl)//2:], uvlm_cl[len(uvlm_cl)//2:], label="UVLM (k=0.5)", linestyle="--")
+axs["time"].plot(uvlm_t, uvlm_z, label="Heave (k=0.5)", linestyle="--")
+axs["heave"].plot(uvlm_z[len(uvlm_cl)//4:], uvlm_cl[len(uvlm_cl)//4:], label="UVLM (k=0.5)", linestyle="--")
+
+# axs["time"].plot(t, [0.548311] * len(t), label="VLM (alpha=5)")
 
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')

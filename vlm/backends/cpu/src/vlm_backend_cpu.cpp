@@ -19,6 +19,7 @@
 #include <cblas.h>
 
 using namespace vlm;
+using namespace linalg::ostream_overloads;
 
 BackendCPU::~BackendCPU() = default; // Destructor definition
 
@@ -125,49 +126,49 @@ void BackendCPU::add_wake_influence(const FlowData& flow) {
     };
 
     // loop over wake rows
-    // for (u64 i = 0; i < mesh.current_nw; i++) {
-    //     const u64 wake_row_start = (m.nc + m.nw - i - 1) * m.ns;
-    //     std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
-    //     // Actually fill the wake buffer
-    //     // parallel for
-    //     for (u64 j = 0; j < mesh.ns; j++) { // loop over columns
-    //         const u64 lidx = wake_row_start + j; // TODO: replace this ASAP
-    //         ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, flow.sigma_vatistas);
-    //     }
-
-    //     cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
-    // }
-
-    u64 idx = 0;
-    u64 wake_row_start = (m.nc + m.nw - 1) * m.ns;
-
-    auto init = taskflow.placeholder();
-    auto cond = taskflow.emplace([&]{
-        return idx < mesh.current_nw ? 0 : 1; // 0 means continue, 1 means break
-    });
-    auto zero_buffer = taskflow.emplace([&]{
+    for (u64 i = 0; i < mesh.current_nw; i++) {
+        const u64 wake_row_start = (m.nc + m.nw - i - 1) * m.ns;
         std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
-    });
-    auto wake_influence = taskflow.for_each_index((u64)0, m.ns, [&] (u64 j) {
-        const u64 lidx = wake_row_start + j;
-        ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, flow.sigma_vatistas);
-    });
-    auto back = taskflow.emplace([&]{
+        // Actually fill the wake buffer
+        // parallel for
+        for (u64 j = 0; j < mesh.ns; j++) { // loop over columns
+            const u64 lidx = wake_row_start + j; // TODO: replace this ASAP
+            ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, flow.sigma_vatistas);
+        }
+
         cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
+    }
 
-        idx++;
-        wake_row_start -= m.ns;
-        return 0; // 0 means continue
-    });
-    auto sync = taskflow.placeholder();
+    // u64 idx = 0;
+    // u64 wake_row_start = (m.nc + m.nw - 1) * m.ns;
 
-    init.precede(cond);
-    cond.precede(zero_buffer, sync);
-    zero_buffer.precede(wake_influence);
-    wake_influence.precede(back);
-    back.precede(cond);
+    // auto init = taskflow.placeholder();
+    // auto cond = taskflow.emplace([&]{
+    //     return idx < mesh.current_nw ? 0 : 1; // 0 means continue, 1 means break
+    // });
+    // auto zero_buffer = taskflow.emplace([&]{
+    //     std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
+    // });
+    // auto wake_influence = taskflow.for_each_index((u64)0, m.ns, [&] (u64 j) {
+    //     const u64 lidx = wake_row_start + j;
+    //     ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, flow.sigma_vatistas);
+    // });
+    // auto back = taskflow.emplace([&]{
+    //     cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
 
-    Executor::get().run(taskflow).wait();
+    //     idx++;
+    //     wake_row_start -= m.ns;
+    //     return 0; // 0 means continue
+    // });
+    // auto sync = taskflow.placeholder();
+
+    // init.precede(cond);
+    // cond.precede(zero_buffer, sync);
+    // zero_buffer.precede(wake_influence);
+    // wake_influence.precede(back);
+    // back.precede(cond);
+
+    // Executor::get().run(taskflow).wait();
 }
 
 void BackendCPU::shed_gamma() {
@@ -250,20 +251,20 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const FlowData& flow, f32 dt, co
             const linalg::alias::float3 v2 = mesh.get_v2(li);
             const linalg::alias::float3 v3 = mesh.get_v3(li);
 
-            linalg::alias::float3 force_steady = {0.0f, 0.0f, 0.0f};
-            force_steady += flow.rho * delta_gamma[li] * linalg::cross(flow.freestream, v1 - v0);
-            force_steady += flow.rho * delta_gamma[li] * linalg::cross(flow.freestream, v2 - v1);
-            force_steady += flow.rho * delta_gamma[li] * linalg::cross(flow.freestream, v3 - v2);
-            force_steady += flow.rho * delta_gamma[li] * linalg::cross(flow.freestream, v0 - v3);
+            linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
+            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v1 - v0));
+            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v2 - v1));
+            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v3 - v2));
+            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v0 - v3));
 
             // Leading edge vector pointing outward from wing root
-            cl += linalg::dot(force_steady, flow.lift_axis);
+            //cl += linalg::dot(force_steady, flow.lift_axis);
 
             // Unsteady part (Simpson method)
             const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
             const linalg::alias::float3 normal{mesh.normal.x[li], mesh.normal.y[li], mesh.normal.z[li]};
-            const linalg::alias::float3 force_unsteady = flow.rho * gamma_dt * mesh.area[li] * normal;
-            cl += linalg::dot(force_unsteady, flow.lift_axis);
+            force += flow.rho * gamma_dt * mesh.area[li] * normal;
+            cl += linalg::dot(force, flow.lift_axis);
         }
     }
     cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
