@@ -60,7 +60,7 @@ for amp, k in zip(amplitudes, reduced_frequencies):
 
     # pure heaving
     def pitch(t): return 0
-    def heave(t): return amplitude * np.sin(omega * t)
+    def heave(t): return - amplitude * np.sin(omega * t)
     
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)

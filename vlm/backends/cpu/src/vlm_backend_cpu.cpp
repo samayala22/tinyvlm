@@ -245,18 +245,21 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const FlowData& flow, f32 dt, co
         for (u64 v = j; v < j + n; v++) {
             const u64 li = u * mesh.ns + v; // linear index
             
-            // Steady part:
             const linalg::alias::float3 v0 = mesh.get_v0(li);
             const linalg::alias::float3 v1 = mesh.get_v1(li);
             const linalg::alias::float3 v2 = mesh.get_v2(li);
             const linalg::alias::float3 v3 = mesh.get_v3(li);
 
             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
-            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v1 - v0));
-            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v2 - v1));
-            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v3 - v2));
-            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v0 - v3));
+            
+            // Steady part:
+            // auto f1 = flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v1 - v0));
+            // auto f2 = flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v2 - v1));
+            // auto f3 = flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v3 - v2));
+            // auto f4 = flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v0 - v3));
 
+            //force += f1 + f2 + f3 + f4;
+            force += flow.rho * gamma[li] * linalg::cross(flow.freestream, v1 - v0);
             // Leading edge vector pointing outward from wing root
             //cl += linalg::dot(force_steady, flow.lift_axis);
 
