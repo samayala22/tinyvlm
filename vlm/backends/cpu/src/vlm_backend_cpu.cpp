@@ -249,24 +249,23 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const FlowData& flow, f32 dt, co
             const linalg::alias::float3 v1 = mesh.get_v1(li);
             const linalg::alias::float3 v2 = mesh.get_v2(li);
             const linalg::alias::float3 v3 = mesh.get_v3(li);
+            const linalg::alias::float3 normal{mesh.normal.x[li], mesh.normal.y[li], mesh.normal.z[li]};
 
             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
             
-            // Steady part:
-            // auto f1 = flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v1 - v0));
-            // auto f2 = flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v2 - v1));
-            // auto f3 = flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v3 - v2));
-            // auto f4 = flow.rho * gamma[li] * linalg::cross(flow.freestream, linalg::normalize(v0 - v3));
-
-            //force += f1 + f2 + f3 + f4;
-            force += flow.rho * delta_gamma[li] * linalg::cross(flow.freestream, v1 - v0);
-            // Leading edge vector pointing outward from wing root
-            //cl += linalg::dot(force_steady, flow.lift_axis);
-
-            // Unsteady part (Simpson method)
-            const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
-            const linalg::alias::float3 normal{mesh.normal.x[li], mesh.normal.y[li], mesh.normal.z[li]};
-            force += flow.rho * gamma_dt * mesh.area[li] * normal;
+            // Joukowski method
+            // force += flow.rho * delta_gamma[li] * linalg::cross(flow.freestream, v1 - v0);
+            // const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
+            // force += flow.rho * gamma_dt * mesh.area[li] * normal;
+            
+            // Katz Plotkin method
+            linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
+            const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
+            const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
+            delta_p += flow.rho * linalg::dot(flow.freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
+            delta_p += flow.rho * linalg::dot(flow.freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
+            delta_p += (gamma[li] - gamma_prev[li]) / dt;
+            force = (delta_p * mesh.area[li]) * normal;
             cl += linalg::dot(force, flow.lift_axis);
         }
     }
