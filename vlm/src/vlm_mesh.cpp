@@ -400,6 +400,8 @@ void Mesh::move(const linalg::alias::float4x4& transform) {
         v.z[i] = transformed_pt.z;
     }
 
+    compute_metrics_wing(); // compute the new wing panel metrics
+
     // Copy new trailing edge vertices on the wake buffer
     std::copy(v.x.data() + src_begin, v.x.data() + src_end, v.x.data() + dst_begin - (ns + 1));
     std::copy(v.y.data() + src_begin, v.y.data() + src_end, v.y.data() + dst_begin - (ns + 1));

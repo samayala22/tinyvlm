@@ -36,15 +36,15 @@ pitch_axis = -1 # leading edge
 
 def atime(t: float): return 2. * u_inf * t / c
 
-amplitudes = [0.1, 0.1, 0.1] 
-reduced_frequencies = [0.5, 0.75, 1.5]
+amplitudes = [0.1] 
+reduced_frequencies = [0.5]
 
 t_final = 30
 nb_pts = 500
-t = np.linspace(0, t_final, nb_pts)
+vec_t = np.linspace(0, t_final, nb_pts)
 
 fig, axs = plt.subplot_mosaic(
-    [["time"],["heave"]],  # Disposition des graphiques
+    [["time"],["error"], ["heave"]],  # Disposition des graphiques
     constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
     figsize=(11, 6),  # Ajuster la taille de la figure (x,y)
 )
@@ -60,7 +60,7 @@ for amp, k in zip(amplitudes, reduced_frequencies):
 
     # pure heaving
     def pitch(t): return 0
-    def heave(t): return - amplitude * np.sin(omega * t)
+    def heave(t): return -amplitude * np.sin(omega * t)
     
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -68,8 +68,8 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     def dx1ds(s: float, x1: float): return b1 * beta_1 * w(s) - beta_1 * x1
     def dx2ds(s: float, x2: float): return b2 * beta_2 * w(s) - beta_2 * x2
 
-    x1_solution = spi.solve_ivp(dx1ds, [0, t_final], [0], t_eval=t)
-    x2_solution = spi.solve_ivp(dx2ds, [0, t_final], [0], t_eval=t)
+    x1_solution = spi.solve_ivp(dx1ds, [0, t_final], [0], t_eval=vec_t)
+    x2_solution = spi.solve_ivp(dx2ds, [0, t_final], [0], t_eval=vec_t)
     
     def x1(s: float): return np.interp(s, x1_solution.t, x1_solution.y[0])
     def x2(s: float): return np.interp(s, x2_solution.t, x2_solution.y[0])
@@ -84,11 +84,11 @@ for amp, k in zip(amplitudes, reduced_frequencies):
         # L = rho * b * b * np.pi * (u_inf * derivative(pitch, t) + derivative2(heave, t) - b * pitch_axis * derivative2(pitch, t)) + 2 * np.pi * rho * u_inf * b * (u_inf * pitch(t) + derivative(heave, t) + b * (0.5 - pitch_axis) * derivative(pitch, t)) * pade_approximation(k)
         # return L / (0.5 * rho * u_inf * u_inf * a * (2*b))
     
-    cl = np.array([cl_theodorsen(ti) for ti in t])
-    coord_z = np.array([heave(ti) / (2*b) for ti in t])
+    cl_theo = np.array([cl_theodorsen(ti) for ti in vec_t])
+    coord_z = np.array([-heave(ti) / (2*b) for ti in vec_t])
 
-    axs["time"].plot(t, cl, label=f"k={k}")
-    axs["heave"].plot(coord_z[int(nb_pts//2):], cl[int(nb_pts//2):], label=f"k={k}")
+    axs["time"].plot(vec_t, cl_theo, label=f"k={k}")
+    axs["heave"].plot(coord_z[int(nb_pts//2):], cl_theo[int(nb_pts//2):], label=f"k={k}")
 
 uvlm_cl = []
 uvlm_t = []
@@ -100,9 +100,13 @@ with open("build/windows/x64/debug/cl_data.txt", "r") as f:
         uvlm_z.append(float(z))
         uvlm_cl.append(float(cl))
 
-axs["time"].plot(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", linestyle="--")
-axs["time"].plot(uvlm_t, uvlm_z, label="Heave (k=0.5)", linestyle="--")
-axs["heave"].plot(uvlm_z[len(uvlm_cl)//4:], uvlm_cl[len(uvlm_cl)//4:], label="UVLM (k=0.5)", linestyle="--")
+
+uvlm_cl = np.array(uvlm_cl)
+analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t])
+
+axs["error"].plot(uvlm_t, 100.0 * np.abs((uvlm_cl-analytical_cl)/analytical_cl), label="rel")
+axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", facecolors='none', edgecolors='b', s=15)
+axs["heave"].scatter(uvlm_z[len(uvlm_cl)//4:], uvlm_cl[len(uvlm_cl)//4:], label="UVLM (k=0.5)", facecolors='none', edgecolors='b', s=15)
 
 # axs["time"].plot(t, [0.548311] * len(t), label="VLM (alpha=5)")
 
@@ -110,6 +114,11 @@ axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')
 axs["time"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
 axs["time"].legend()
+
+axs["error"].set_xlabel('t')
+axs["error"].set_ylabel('err')
+axs["error"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+axs["error"].legend()
 
 axs["heave"].set_xlabel('h/c')
 axs["heave"].set_ylabel('CL')
