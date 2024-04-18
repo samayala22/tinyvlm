@@ -137,7 +137,7 @@ int main() {
         backend->lu_factor();
 
         // Unsteady loop
-        std::cout << "Timesteps: " << vec_t.size() << "\n";
+        std::cout << "TIMESTEP: " << vec_t.size() << "\n";
         for (u64 i = 0; i < vec_t.size()-1; i++) {
             #ifdef DEBUG_DISPLACEMENT_DATA
             dump_buffer(wing_data, mesh->v.x.data(), mesh->v.x.data() + mesh->nb_vertices_wing());
@@ -161,11 +161,8 @@ int main() {
 
             auto base_vertex = mesh->get_v0(0);
             auto base_velocity = kinematics.velocity(t, {base_vertex[0], base_vertex[1], base_vertex[2], 1.0f});
-            std::cout << "velocity: " << base_velocity << "\n";
-            std::cout << "position: " << base_vertex << "\n";
 
             const FlowData flow{linalg::alias::float3{-base_velocity[0], -base_velocity[1], -base_velocity[2]}, 1.0f};
-            std::cout << "lift axis: " << flow.lift_axis << "\n";
 
             backend->compute_rhs(flow);
             backend->add_wake_influence(flow);
