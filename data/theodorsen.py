@@ -103,8 +103,13 @@ with open("build/windows/x64/debug/cl_data.txt", "r") as f:
 
 uvlm_cl = np.array(uvlm_cl)
 analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t])
+err_rel = np.abs((uvlm_cl-analytical_cl)/analytical_cl)
+quotient = np.abs(uvlm_cl / analytical_cl)
+print("Avg rel error: ", 100.0 * np.mean(err_rel))
+print("Quotient: ", np.mean(quotient))
 
-axs["error"].plot(uvlm_t, 100.0 * np.abs((uvlm_cl-analytical_cl)/analytical_cl), label="rel")
+axs["error"].plot(uvlm_t, err_rel, label="rel")
+axs["error"].plot(uvlm_t, quotient, label="quotient")
 axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", facecolors='none', edgecolors='b', s=15)
 axs["heave"].scatter(uvlm_z[len(uvlm_cl)//4:], uvlm_cl[len(uvlm_cl)//4:], label="UVLM (k=0.5)", facecolors='none', edgecolors='b', s=15)
 
