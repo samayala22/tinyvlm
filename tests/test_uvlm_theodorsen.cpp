@@ -64,7 +64,7 @@ void dump_buffer(std::ofstream& stream, T* start, T* end) {
 
 int main() {
     // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x8.x"};
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x20.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/long_rectangular_10x10.x"};
 
     const std::vector<std::string> backends = get_available_backends();
 
