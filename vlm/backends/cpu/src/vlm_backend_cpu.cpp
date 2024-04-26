@@ -19,6 +19,16 @@
 #include <cblas.h>
 
 using namespace vlm;
+
+template<typename T>
+void print_buffer(const T* start, u64 size) {
+    std::cout << "[";
+    for (u64 i = 0; i < size; i++) {
+        std::cout << start[i] << ",";
+    }
+    std::cout << "]\n";
+}
+
 using namespace linalg::ostream_overloads;
 
 BackendCPU::~BackendCPU() = default; // Destructor definition

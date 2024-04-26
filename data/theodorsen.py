@@ -14,9 +14,6 @@ def derivative2(f, x):
 def solve_ivp(x0: float, s0: float, sf: float, f: callable):
     return spi.solve_ivp(f, [s0, sf], [x0]).y[-1] # return only the result at t=sf
 
-def pade_approximation(k: float):
-    return (0.5177*k*k + 0.2752*k + 0.01576) / (k*k + 0.3414*k + 0.01582)
-
 # Some info in Katz Plotkin p414 (eq 13.73a)
 # Jone's approximation of Wagner function
 b0 = 1
@@ -51,8 +48,8 @@ fig, axs = plt.subplot_mosaic(
 
 for amp, k in zip(amplitudes, reduced_frequencies):
     # heave parameters
-    amplitude = amp / (2*b)
-    omega = k * u_inf / (2*b) # pitch frequency
+    amplitude = amp / c
+    omega = k * u_inf / c # pitch frequency
 
     # sudden acceleration
     # def pitch(t): return np.radians(5)
@@ -78,14 +75,9 @@ for amp, k in zip(amplitudes, reduced_frequencies):
         L_m = rho * b * b * np.pi * (u_inf * derivative(pitch, t) + derivative2(heave, t) - b * pitch_axis * derivative2(pitch, t))
         L_c = -2 * np.pi * rho * u_inf * b * (-(b0 + b1 + b2) * w(t) + x1(t) + x2(t))
         return (L_m + L_c) / (0.5 * rho * u_inf * u_inf * c)
-
-    # def cl_theodorsen(t: float): # using Pade approximation
-        # return 0.5 * np.pi * (derivative2(heave, t) + derivative(pitch, t) - 0.5 * pitch_axis * derivative2(pitch, t)) + 2.0 * np.pi * (pitch(t) + derivative(heave, t) + 0.5 * derivative(pitch, t) * (0.5 - pitch_axis)) * pade_approximation(k)
-        # L = rho * b * b * np.pi * (u_inf * derivative(pitch, t) + derivative2(heave, t) - b * pitch_axis * derivative2(pitch, t)) + 2 * np.pi * rho * u_inf * b * (u_inf * pitch(t) + derivative(heave, t) + b * (0.5 - pitch_axis) * derivative(pitch, t)) * pade_approximation(k)
-        # return L / (0.5 * rho * u_inf * u_inf * a * (2*b))
     
     cl_theo = np.array([cl_theodorsen(ti) for ti in vec_t])
-    coord_z = np.array([-heave(ti) / (2*b) for ti in vec_t])
+    coord_z = np.array([-heave(ti) / c for ti in vec_t])
 
     axs["time"].plot(vec_t, cl_theo, label=f"k={k}")
     axs["heave"].plot(coord_z[int(nb_pts//2):], cl_theo[int(nb_pts//2):], label=f"k={k}")
@@ -104,16 +96,13 @@ with open("build/windows/x64/debug/cl_data.txt", "r") as f:
 uvlm_cl = np.array(uvlm_cl)
 analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t])
 err_rel = np.abs((uvlm_cl-analytical_cl)/analytical_cl)
-quotient = np.abs(uvlm_cl / analytical_cl)
 print("Avg rel error: ", 100.0 * np.mean(err_rel))
-print("Quotient: ", np.mean(quotient))
 
-axs["error"].plot(uvlm_t, err_rel, label="rel")
-axs["error"].plot(uvlm_t, quotient, label="quotient")
+axs["error"].plot(uvlm_t, 100.0 * err_rel, label="rel (%)")
 axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", facecolors='none', edgecolors='b', s=15)
 axs["heave"].scatter(uvlm_z[len(uvlm_cl)//4:], uvlm_cl[len(uvlm_cl)//4:], label="UVLM (k=0.5)", facecolors='none', edgecolors='b', s=15)
 
-# axs["time"].plot(t, [0.548311] * len(t), label="VLM (alpha=5)")
+# axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
 
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')
@@ -131,4 +120,6 @@ axs["heave"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray'
 axs["heave"].legend()
 
 plt.suptitle("Verification of UVLM with Theodorsen harmonic heave motion")
+# plt.suptitle("Verification of UVLM with sudden acceleration motion")
+
 plt.show()
