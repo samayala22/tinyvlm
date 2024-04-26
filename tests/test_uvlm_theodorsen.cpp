@@ -62,9 +62,18 @@ void dump_buffer(std::ofstream& stream, T* start, T* end) {
     stream << "\n";
 }
 
+template<typename T>
+void print_buffer(const T* start, u64 size) {
+    std::cout << "[";
+    for (u64 i = 0; i < size; i++) {
+        std::cout << start[i] << ",";
+    }
+    std::cout << "]\n";
+}
+
 int main() {
     // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x8.x"};
-    const std::vector<std::string> meshes = {"../../../../mesh/long_rectangular_10x10.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x20.x"};
 
     const std::vector<std::string> backends = get_available_backends();
 
@@ -120,7 +129,7 @@ int main() {
         std::ofstream wing_data("wing_data.txt");
         std::ofstream wake_data("wake_data.txt");
         std::ofstream cl_data("cl_data.txt");
-        
+
         wing_data << mesh->nc << " " << mesh->ns << "\n";
         wing_data << vec_t.size() - 1 << "\n\n";
 
@@ -171,7 +180,7 @@ int main() {
             if (i > 0) {
                 // TODO: this should take a vector of local velocities magnitude because it can be different for each point on the mesh
                 const f32 cl_unsteady = backend->compute_coefficient_unsteady_cl(flow, dt, mesh->s_ref, 0, mesh->ns);
-                // const f32 cl_unsteady = backend->compute_coefficient_cl(flow);
+
                 std::printf("t: %f, CL: %f\n", t, cl_unsteady);
                 #ifdef DEBUG_DISPLACEMENT_DATA
                 cl_data << t << " " << mesh->v.z[0] << " " << cl_unsteady << "\n";
@@ -181,6 +190,6 @@ int main() {
             mesh->move(kinematics.relative_displacement(t, t+dt));
         }
     }
-  
+
     return 0;
 }
