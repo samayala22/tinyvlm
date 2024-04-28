@@ -11,6 +11,7 @@
 #include "vlm_data.hpp"
 #include "vlm_types.hpp"
 #include "vlm_utils.hpp"
+#include "vlm_executor.hpp"
 
 #define DEBUG_DISPLACEMENT_DATA
 
@@ -72,6 +73,7 @@ void print_buffer(const T* start, u64 size) {
 }
 
 int main() {
+    vlm::Executor::instance(1);
     // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x8.x"};
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x20.x"};
 
@@ -83,33 +85,49 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 t_final = 30.0f;
+    const f32 t_final = 10.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.5f; // reduced frequency
+    const f32 k = 1.0f; // reduced frequency
 
     const f32 omega = k * u_inf / (2*b);
 
     Kinematics kinematics{};
 
     // Periodic heaving
-    kinematics.add([=](f32 t) {
-        return linalg::translation_matrix(linalg::alias::float3{
-            -u_inf*t, // freestream
-            0.0f,
-            amplitude * std::sin(omega* t) // heaving
-        });
-    });
-
-    // Sudden acceleration
-    // const f32 alpha = to_radians(5.0f);
     // kinematics.add([=](f32 t) {
     //     return linalg::translation_matrix(linalg::alias::float3{
-    //         -u_inf*cos(alpha)*t,
+    //         -u_inf*t, // freestream
     //         0.0f,
-    //         -u_inf*sin(alpha)*t
+    //         amplitude * std::sin(omega* t) // heaving
     //     });
     // });
+
+    // Periodic pitching
+    // kinematics.add([=](f32 t) {
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         -u_inf*t, // freestream
+    //         0.0f,
+    //         0.0f
+    //     });
+    // });
+    // kinematics.add([=](f32 t) {
+    //     return linalg::rotation_matrix(
+    //         linalg::alias::float3{0.0f, 0.0f, 0.0f},
+    //         linalg::alias::float3{0.0f, 1.0f, 0.0f},
+    //         to_radians(std::sin(omega * t))
+    //     );
+    // });
+    
+    // Sudden acceleration
+    const f32 alpha = to_radians(5.0f);
+    kinematics.add([=](f32 t) {
+        return linalg::translation_matrix(linalg::alias::float3{
+            -u_inf*cos(alpha)*t,
+            0.0f,
+            -u_inf*sin(alpha)*t
+        });
+    });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
         const std::unique_ptr<Mesh> mesh = create_mesh(mesh_name);
@@ -117,12 +135,32 @@ int main() {
         // Pre-calculate timesteps to determine wake size
         // Note: calculation should be made on the four corners of the wing
         std::vector<f32> vec_t; // timesteps
-        vec_t.push_back(0.0f);
-        for (f32 t = 0.0f; t < t_final;) {
-            // TODO: this is currently not accurate for rotational motion
-            const f32 dt = mesh->panel_length(mesh->nc-1, 0) / kinematics.velocity_magnitude(t, {0.f, 0.f, 0.f, 1.f});
-            t += dt;
-            vec_t.push_back(t);
+        SoA_3D_t<f32> velocities;
+        velocities.resize(mesh->nb_panels_wing());
+        {
+            SoA_3D_t<f32> trailing_vertices;
+            trailing_vertices.resize(mesh->ns+1);
+            std::copy(mesh->v.x.data() + mesh->nb_vertices_wing() - mesh->ns - 1, mesh->v.x.data() + mesh->nb_vertices_wing(), trailing_vertices.x.data());
+            std::copy(mesh->v.y.data() + mesh->nb_vertices_wing() - mesh->ns - 1, mesh->v.y.data() + mesh->nb_vertices_wing(), trailing_vertices.y.data());
+            std::copy(mesh->v.z.data() + mesh->nb_vertices_wing() - mesh->ns - 1, mesh->v.z.data() + mesh->nb_vertices_wing(), trailing_vertices.z.data());
+            const f32 segment_chord = mesh->panel_length(mesh->nc-1, 0); // TODO: this can be variable
+            
+            vec_t.push_back(0.0f);
+            for (f32 t = 0.0f; t < t_final;) {
+                f32 dt = segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[0], trailing_vertices.y[0], trailing_vertices.z[0], 1.0f});
+                for (u64 i = 1; i < trailing_vertices.size; i++) {
+                    dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
+                }
+                auto transform = kinematics.relative_displacement(t, t+dt);
+                for (u64 i = 0; i < trailing_vertices.size; i++) {
+                    const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.f});
+                    trailing_vertices.x[i] = transformed_pt.x;
+                    trailing_vertices.y[i] = transformed_pt.y;
+                    trailing_vertices.z[i] = transformed_pt.z;
+                }
+                t += dt;
+                vec_t.push_back(t);
+            }
         }
 
         #ifdef DEBUG_DISPLACEMENT_DATA
@@ -141,12 +179,11 @@ int main() {
         const std::unique_ptr<Backend> backend = create_backend(backend_name, *mesh); // create after mesh has been resized
 
         // Precompute the LHS since wing geometry is constant
-        const FlowData flow_dummy{0.0f, 0.0f, 1.0f, 1.0f};
-        backend->compute_lhs(flow_dummy);
+        backend->compute_lhs();
         backend->lu_factor();
 
         // Unsteady loop
-        std::cout << "TIMESTEP: " << vec_t.size() << "\n";
+        std::cout << "SIMULATION NB OF TIMESTEPS: " << vec_t.size() << "\n";
         for (u64 i = 0; i < vec_t.size()-1; i++) {
             #ifdef DEBUG_DISPLACEMENT_DATA
             dump_buffer(wing_data, mesh->v.x.data(), mesh->v.x.data() + mesh->nb_vertices_wing());
@@ -157,7 +194,7 @@ int main() {
             const u64 wake_start = (mesh->nc + mesh->nw - i) * (mesh->ns + 1);
             const u64 wake_end = mesh->nb_vertices_total();
             // std::cout << "Buffer size: " << mesh->v.x.size() << " | " << wake_start << " | " << wake_end << std::endl;
-
+ 
             dump_buffer(wake_data, mesh->v.x.data() + wake_start, mesh->v.x.data() + wake_end);
             dump_buffer(wake_data, mesh->v.y.data() + wake_start, mesh->v.y.data() + wake_end);
             dump_buffer(wake_data, mesh->v.z.data() + wake_start, mesh->v.z.data() + wake_end);
@@ -168,22 +205,25 @@ int main() {
             const f32 dt = vec_t[i+1] - t;
             std::cout << "\n----------------\n" << "T = " << t << "\n";
 
-            auto base_vertex = mesh->get_v0(0);
-            auto base_velocity = kinematics.velocity(t, {base_vertex[0], base_vertex[1], base_vertex[2], 1.0f});
+            for (u64 idx = 0; idx < mesh->nb_panels_wing(); idx++) {
+                const linalg::alias::float4 colloc_pt{mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f};
+                auto local_velocity = -kinematics.velocity(t, colloc_pt);
+                velocities.x[idx] = local_velocity[0];
+                velocities.y[idx] = local_velocity[1];
+                velocities.z[idx] = local_velocity[2];
+            }
 
-            const FlowData flow{linalg::alias::float3{-base_velocity[0], -base_velocity[1], -base_velocity[2]}, 1.0f};
-
-            backend->compute_rhs(flow);
-            backend->add_wake_influence(flow);
+            backend->compute_rhs(velocities);
+            backend->add_wake_influence();
             backend->lu_solve();
             backend->compute_delta_gamma();
             if (i > 0) {
                 // TODO: this should take a vector of local velocities magnitude because it can be different for each point on the mesh
-                const f32 cl_unsteady = backend->compute_coefficient_unsteady_cl(flow, dt, mesh->s_ref, 0, mesh->ns);
+                const f32 cl_unsteady = backend->compute_coefficient_unsteady_cl(velocities, dt, mesh->s_ref, 0, mesh->ns);
 
                 std::printf("t: %f, CL: %f\n", t, cl_unsteady);
                 #ifdef DEBUG_DISPLACEMENT_DATA
-                cl_data << t << " " << mesh->v.z[0] << " " << cl_unsteady << "\n";
+                cl_data << t << " " << mesh->v.z[0] << " " << cl_unsteady << " " << std::sin(omega * t) << "\n";
                 #endif
             }
             backend->shed_gamma(); // shed before moving & incrementing currentnw

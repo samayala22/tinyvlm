@@ -5,6 +5,9 @@
 #include "tinyconfig.hpp"
 
 #include "vlm_data.hpp"
+#include "vlm_mesh.hpp"
+#include "vlm_types.hpp"
+#include "vlm_utils.hpp"
 #include <utility>
 
 #include <iostream>
@@ -24,7 +27,7 @@ AeroCoefficients LinearVLM::solve(const FlowData& flow) {
     backend->reset();
     mesh->update_wake(flow.freestream);
     mesh->correction_high_aoa(flow.alpha); // must be after update_wake
-    backend->compute_lhs(flow);
+    backend->compute_lhs();
     backend->compute_rhs(flow);
     backend->lu_factor();
     backend->lu_solve();
@@ -39,17 +42,33 @@ AeroCoefficients LinearVLM::solve(const FlowData& flow) {
 AeroCoefficients NonLinearVLM::solve(const FlowData& flow, const Database& db) {
     f64 err = 1.0f; // l1 error
     strip_alphas.resize(mesh->ns);
+    SoA_3D_t<f32> velocities;
+    velocities.resize(mesh->nb_vertices_wing());
+
     std::fill(strip_alphas.begin(), strip_alphas.end(), flow.alpha); // memset
 
     backend->reset();
     mesh->update_wake(flow.freestream); // Create wake panels in freestream axis
     mesh->correction_high_aoa(flow.alpha); // Correct collocation point
-    backend->compute_lhs(flow); // Create influence matrix
+    backend->compute_lhs(); // Create influence matrix
     backend->lu_factor(); // Factorize the influence matrix into LU form
 
     for (u64 iter = 0; iter < max_iter && err > tol; iter++) {
         err = 0.0; // reset l1 error
-        backend->compute_rhs(flow, strip_alphas); // Compute RHS using strip alphas
+        // TODO cleanup this:
+        for (u64 j = 0; j < mesh->ns; j++) {
+            auto fs = compute_freestream(1.0f, strip_alphas[j], 0.0f);
+            velocities.x[j] = fs.x;
+            velocities.y[j] = fs.y;
+            velocities.z[j] = fs.z;
+        }
+        for (u64 i = 1; i < mesh->nc; i++) {
+            std::copy(velocities.x.data(), velocities.x.data()+mesh->ns, velocities.x.data() + i*mesh->ns);
+            std::copy(velocities.y.data(), velocities.y.data()+mesh->ns, velocities.y.data() + i*mesh->ns);
+            std::copy(velocities.z.data(), velocities.z.data()+mesh->ns, velocities.z.data() + i*mesh->ns);
+        }
+
+        backend->compute_rhs(velocities); // Compute RHS using strip alphas
         backend->lu_solve(); // Solve for the gammas
         backend->compute_delta_gamma(); // Compute the chordwise delta gammas for force computation
         
