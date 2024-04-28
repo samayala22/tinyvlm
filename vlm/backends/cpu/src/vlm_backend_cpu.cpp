@@ -6,6 +6,7 @@
 #include "tinytimer.hpp"
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
+#include "vlm_types.hpp"
 #include "vlm_utils.hpp"
 #include "vlm_executor.hpp" // includes taskflow/taskflow.hpp
 
@@ -63,7 +64,7 @@ void BackendCPU::compute_delta_gamma() {
     }
 }
 
-void BackendCPU::compute_lhs(const FlowData& flow) {
+void BackendCPU::compute_lhs() {
     tiny::ScopedTimer timer("LHS");
     Mesh& m = mesh;
 
@@ -81,7 +82,7 @@ void BackendCPU::compute_lhs(const FlowData& flow) {
 
     auto init = taskflow.placeholder();
     auto wing_pass = taskflow.for_each_index(zero, end_wing, [&] (u64 i) {
-        ispc::kernel_influence(mesh_proxy, lhs.data(), i, i, flow.sigma_vatistas);
+        ispc::kernel_influence(mesh_proxy, lhs.data(), i, i, sigma_vatistas);
     });
 
     u64 idx = m.nc - 1;
@@ -91,7 +92,7 @@ void BackendCPU::compute_lhs(const FlowData& flow) {
     auto wake_pass = taskflow.for_each_index(zero, m.ns, [&] (u64 j) {
         const u64 ia = (m.nc - 1) * m.ns + j;
         const u64 lidx = idx * m.ns + j;
-        ispc::kernel_influence(mesh_proxy, lhs.data(), ia, lidx, flow.sigma_vatistas);
+        ispc::kernel_influence(mesh_proxy, lhs.data(), ia, lidx, sigma_vatistas);
     });
     auto back = taskflow.emplace([&]{
         idx++;
@@ -122,7 +123,7 @@ void BackendCPU::compute_rhs(const FlowData& flow) {
 }
 
 // TODO: consider changing FlowData to SolverData
-void BackendCPU::add_wake_influence(const FlowData& flow) {
+void BackendCPU::add_wake_influence() {
     const tiny::ScopedTimer timer("Wake Influence");
 
     tf::Taskflow taskflow;
@@ -143,7 +144,7 @@ void BackendCPU::add_wake_influence(const FlowData& flow) {
     //     // parallel for
     //     for (u64 j = 0; j < mesh.ns; j++) { // loop over columns
     //         const u64 lidx = wake_row_start + j; // TODO: replace this ASAP
-    //         ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, flow.sigma_vatistas);
+    //         ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, sigma_vatistas);
     //     }
 
     //     cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
@@ -161,7 +162,7 @@ void BackendCPU::add_wake_influence(const FlowData& flow) {
     });
     auto wake_influence = taskflow.for_each_index((u64)0, m.ns, [&] (u64 j) {
         const u64 lidx = wake_row_start + j;
-        ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, flow.sigma_vatistas);
+        ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, sigma_vatistas);
     });
     auto back = taskflow.emplace([&]{
         cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
@@ -189,16 +190,11 @@ void BackendCPU::shed_gamma() {
     std::copy(gamma.data() + m.ns * (m.nc-1), gamma.data() + m.nb_panels_wing(), gamma.data() + wake_row_start);
 }
 
-void BackendCPU::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
+void BackendCPU::compute_rhs(const SoA_3D_t<f32>& velocities) {
     const tiny::ScopedTimer timer("Rebuild RHS");
-    assert(section_alphas.size() == mesh.ns);
     const Mesh& m = mesh;
-    for (u64 i = 0; i < mesh.nc; i++) {
-        for (u64 j = 0; j < mesh.ns; j++) {
-            const u64 li = i * mesh.ns + j; // linear index
-            const linalg::alias::float3 freestream = compute_freestream(flow.u_inf, section_alphas[j], flow.beta);
-            rhs[li] = - (freestream.x * m.normal.x[li] + freestream.y * m.normal.y[li] + freestream.z * m.normal.z[li]);
-        }
+    for (u64 i = 0; i < m.nb_panels_wing(); i++) {
+        rhs[i] = - (velocities.x[i] * m.normal.x[i] + velocities.y[i] * m.normal.y[i] + velocities.z[i] * m.normal.z[i]); 
     }
 }
 
@@ -245,16 +241,20 @@ f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area, con
     return cl;
 }
 
-f32 BackendCPU::compute_coefficient_unsteady_cl(const FlowData& flow, f32 dt, const f32 area, const u64 j, const u64 n) {
+f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) {
     assert(n > 0);
     assert(j >= 0 && j+n <= mesh.ns);
     
     f32 cl = 0.0f;
+    const f32 rho = 1.0f; // TODO: remove hardcoded rho
 
     for (u64 u = 0; u < mesh.nc; u++) {
         for (u64 v = j; v < j + n; v++) {
             const u64 li = u * mesh.ns + v; // linear index
-            
+
+            const linalg::alias::float3 freestream{vel.x[li], vel.y[li], vel.z[li]};
+            const linalg::alias::float3 lift_axis = compute_lift_axis(freestream);
+
             const linalg::alias::float3 v0 = mesh.get_v0(li);
             const linalg::alias::float3 v1 = mesh.get_v1(li);
             const linalg::alias::float3 v2 = mesh.get_v2(li);
@@ -272,14 +272,14 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const FlowData& flow, f32 dt, co
             linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
             const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
             const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
-            delta_p += flow.rho * linalg::dot(flow.freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
-            delta_p += flow.rho * linalg::dot(flow.freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
+            delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
+            delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
             delta_p += (gamma[li] - gamma_prev[li]) / dt;
             force = (delta_p * mesh.area[li]) * normal;
-            cl += linalg::dot(force, flow.lift_axis);
+            cl += linalg::dot(force, lift_axis);
         }
     }
-    cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
+    cl /= 0.5f * rho * 1.0f * area; // TODO: remove uinf hardcoded as 1.0f
 
     return cl;
 }
@@ -331,7 +331,7 @@ f32 BackendCPU::compute_coefficient_cd(
         {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
         {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
     };
-    f32 cd = ispc::kernel_trefftz_cd(mesh_proxy, gamma.data(), trefftz_buffer.data(), j, n, flow.sigma_vatistas);
+    f32 cd = ispc::kernel_trefftz_cd(mesh_proxy, gamma.data(), trefftz_buffer.data(), j, n, sigma_vatistas);
     cd /= linalg::length2(flow.freestream) * area;
     return cd;
 }

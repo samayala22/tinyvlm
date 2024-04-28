@@ -2,6 +2,7 @@
 
 #include <utility>
 #include <cstdint>
+#include <vcruntime.h>
 #include <vector>
 #include <array>
 #include <string>
@@ -67,12 +68,38 @@ struct SoA_3D_t {
     }
 };
 
+template<typename T, size_t N>
+class StackArray {
+    T data[N];
+};
+
 template<typename T>
-struct SoA3D_t {
-    T* x = nullptr;
-    T* y = nullptr;
-    T* z = nullptr;
-    u64 size = 0;
+class HeapArray {
+    T* first;
+    T* last;
+    T* end;
+};
+
+template<typename T, size_t N>
+class View {
+    private:
+        const T* data;
+        const StackArray<T, N> dims;
+        const StackArray<T, N> strides;
+    public:
+        T* operator()() {
+            return data;
+        }
+        template<typename... Idx>
+        const T& operator()(Idx... idx) const {
+            static_assert(sizeof...(idx) == N, "The number of indices must match the dimension N.");
+            const size_t indices[N] = {idx...};
+            size_t index = 0;
+            for (size_t i = 0; i < N; ++i) {
+                index += indices[i] * strides.data[i];
+            }
+            return data[index];
+        }
 };
 
 } // namespace vlm

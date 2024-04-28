@@ -14,7 +14,6 @@ class FlowData {
     const f32 beta; // global sideslip angle
     const f32 u_inf; // freestream velocity magnitude
     const f32 rho; // fluid density
-    const f32 sigma_vatistas = 0.0f; // vatistas coefficient
 
     const linalg::alias::float3 freestream;
     const linalg::alias::float3 lift_axis;
@@ -22,12 +21,6 @@ class FlowData {
 
     FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_);
     FlowData(const linalg::alias::float3& freestream_, const f32 rho_);
-};
-
-class SolverData {
-    public:
-    // Poses defined in global stationary frame
-    const f32 sigma_vatistas = 0.0f; // vatistas coefficient
 };
 
 class AeroCoefficients {

@@ -302,7 +302,7 @@ void BackendCUDA::compute_lhs(const FlowData& flow) {
 
     dim3 block_size(BlockSizeX, BlockSizeY);
     dim3 grid_size(get_grid_size(mesh.nb_panels_wing(), block_size.x), get_grid_size((mesh.nc - 1) * mesh.ns, block_size.y));
-    kernel_influence_cuda<<<grid_size, block_size>>>(d_mesh, d_lhs, 0, (mesh.nc - 1) * mesh.ns, 0, flow.sigma_vatistas);
+    kernel_influence_cuda<<<grid_size, block_size>>>(d_mesh, d_lhs, 0, (mesh.nc - 1) * mesh.ns, 0, sigma_vatistas);
     
     // cudaError_t error = cudaGetLastError();
     // if (error != cudaSuccess) {
@@ -313,7 +313,7 @@ void BackendCUDA::compute_lhs(const FlowData& flow) {
 
     dim3 grid_size2(get_grid_size(mesh.nb_panels_wing(), block_size.x), get_grid_size(mesh.ns, block_size.y));
     for (u64 offset = 0; offset < mesh.current_nw + 1; offset++) {
-        kernel_influence_cuda<<<grid_size2, block_size>>>(d_mesh, d_lhs, (mesh.nc - 1) * mesh.ns, mesh.ns, offset*mesh.ns, flow.sigma_vatistas);
+        kernel_influence_cuda<<<grid_size2, block_size>>>(d_mesh, d_lhs, (mesh.nc - 1) * mesh.ns, mesh.ns, offset*mesh.ns, sigma_vatistas);
         // cudaError_t error = cudaGetLastError();
         // if (error != cudaSuccess) {
         //     fprintf(stderr, "CUDA Error after kernel launch: %s\n", cudaGetErrorString(error));
