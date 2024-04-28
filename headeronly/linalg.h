@@ -537,8 +537,9 @@ namespace linalg
     template<class T> mat<T,4,4> rotation_matrix   (const vec<T,3> & point, const vec<T,3> & axis, T angle) {
         //mat<T,4,4> matrix = identity;
         const mat<T,3,3> skew_mat = skew_matrix(axis);
-        const mat<T,3,3> rodrigues = identity + std::sin(angle)*skew_mat + (1-std::cos(angle))*mul(skew_mat, skew_mat);
-        const vec<T,3> trans_part = mul((identity - rodrigues), point);
+        const mat<T,3,3> i = identity;
+        const mat<T,3,3> rodrigues = i + std::sin(angle)*skew_mat + (1-std::cos(angle))*mul(skew_mat, skew_mat);
+        const vec<T,3> trans_part = mul((i - rodrigues), point);
         return {
             {rodrigues.x.x, rodrigues.x.y, rodrigues.x.z, 0}, // 1st col
             {rodrigues.y.x, rodrigues.y.y, rodrigues.y.z, 0},

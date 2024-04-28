@@ -87,10 +87,12 @@ export void kernel_influence(
     uniform float* uniform lhs,
     uniform uint64 ia, uniform uint64 lidx, uniform float sigma
     ) {
+
     const uniform uint64 v0 = lidx + lidx / m.ns;
     const uniform uint64 v1 = v0 + 1;
     const uniform uint64 v3 = v0 + m.ns+1;
     const uniform uint64 v2 = v3 + 1;
+
 
     // Broadcast vertices
     uniform float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
@@ -98,9 +100,20 @@ export void kernel_influence(
     uniform float3 vertex2 = {m.v.x[v2], m.v.y[v2], m.v.z[v2]};
     uniform float3 vertex3 = {m.v.x[v3], m.v.y[v3], m.v.z[v3]};
 
+    // print("Influencer %: \n", lidx);
+    // print("Vertex 0: % % %\n", vertex0.x, vertex0.y, vertex0.z);
+    // print("Vertex 1: % % %\n", vertex1.x, vertex1.y, vertex1.z);
+    // print("Vertex 2: % % %\n", vertex2.x, vertex2.y, vertex2.z);
+    // print("Vertex 3: % % %\n", vertex3.x, vertex3.y, vertex3.z);
+
     foreach(ia2 = 0 ... m.nb_panels) {
         const float3 colloc = {m.colloc.x[ia2], m.colloc.y[ia2], m.colloc.z[ia2]};
         const float3 normal = {m.normal.x[ia2], m.normal.y[ia2], m.normal.z[ia2]};
+        
+        // print("Influenced: %\n", ia2);
+        // print("Colloc: \n % \n % \n %\n", colloc.x, colloc.y, colloc.z);
+        // print("Normal: \n % \n % \n %\n", normal.x, normal.y, normal.z);
+
         float3 inf = {0.0f, 0.0f, 0.0f};
 
         kernel_symmetry(inf, colloc, vertex0, vertex1, sigma);

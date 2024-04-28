@@ -34,9 +34,9 @@ pitch_axis = -1 # leading edge
 def atime(t: float): return 2. * u_inf * t / c
 
 amplitudes = [0.1] 
-reduced_frequencies = [0.5]
+reduced_frequencies = [1.0]
 
-t_final = 30
+t_final = 10
 nb_pts = 500
 vec_t = np.linspace(0, t_final, nb_pts)
 
@@ -52,13 +52,17 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     omega = k * u_inf / c # pitch frequency
 
     # sudden acceleration
-    # def pitch(t): return np.radians(5)
-    # def heave(t): return 0
+    def pitch(t): return np.radians(5)
+    def heave(t): return 0
 
     # pure heaving
-    def pitch(t): return 0
-    def heave(t): return -amplitude * np.sin(omega * t)
-    
+    # def pitch(t): return 0
+    # def heave(t): return -amplitude * np.sin(omega * t)
+
+    # pure pitching
+    # def pitch(t): return np.radians(np.sin(omega * t))
+    # def heave(t): return 0
+
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
 
@@ -78,29 +82,35 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     
     cl_theo = np.array([cl_theodorsen(ti) for ti in vec_t])
     coord_z = np.array([-heave(ti) / c for ti in vec_t])
+    angle = np.array([np.degrees(pitch(ti)) for ti in vec_t])
 
     axs["time"].plot(vec_t, cl_theo, label=f"k={k}")
-    axs["heave"].plot(coord_z[int(nb_pts//2):], cl_theo[int(nb_pts//2):], label=f"k={k}")
+    axs["heave"].plot(angle[int(nb_pts//2):], cl_theo[int(nb_pts//2):], label=f"k={k}")
 
 uvlm_cl = []
 uvlm_t = []
 uvlm_z = []
+uvlm_alpha = []
 with open("build/windows/x64/debug/cl_data.txt", "r") as f:
     for line in f:
-        time_step, z, cl = line.split()
+        time_step, z, cl, alpha = line.split()
         uvlm_t.append(float(time_step))
         uvlm_z.append(float(z))
         uvlm_cl.append(float(cl))
+        uvlm_alpha.append(float(alpha))
 
-
+n = len(uvlm_t) # number of time steps
+uvlm_alpha = np.array(uvlm_alpha)
 uvlm_cl = np.array(uvlm_cl)
 analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t])
 err_rel = np.abs((uvlm_cl-analytical_cl)/analytical_cl)
 print("Avg rel error: ", 100.0 * np.mean(err_rel))
 
 axs["error"].plot(uvlm_t, 100.0 * err_rel, label="rel (%)")
-axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM (k=0.5)", facecolors='none', edgecolors='b', s=15)
-axs["heave"].scatter(uvlm_z[len(uvlm_cl)//4:], uvlm_cl[len(uvlm_cl)//4:], label="UVLM (k=0.5)", facecolors='none', edgecolors='b', s=15)
+axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM", facecolors='none', edgecolors='b', s=15)
+# axs["heave"].scatter(uvlm_z[len(uvlm_cl)//4:], uvlm_cl[len(uvlm_cl)//4:], label="UVLM", facecolors='none', edgecolors='b', s=15)
+# axs["heave"].scatter(np.degrees(uvlm_alpha[len(uvlm_cl)//4:]), uvlm_cl[len(uvlm_cl)//4:], label="UVLM", facecolors='none', edgecolors='b', s=15)
+axs["heave"].scatter(uvlm_alpha[n//2:], uvlm_cl[n//2:], label="UVLM", facecolors='none', edgecolors='b', s=15)
 
 # axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
 

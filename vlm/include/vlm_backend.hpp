@@ -8,18 +8,19 @@ namespace vlm {
 class Backend {
     public:
         Mesh& mesh;
+        f32 sigma_vatistas = 0.0f;
 
         Backend(Mesh& mesh) : mesh(mesh) {};
         virtual void reset() = 0;
-        virtual void compute_lhs(const FlowData& flow) = 0;
+        virtual void compute_lhs() = 0;
         virtual void compute_rhs(const FlowData& flow) = 0;
-        virtual void compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) = 0; 
-        virtual void add_wake_influence(const FlowData& flow) = 0;
+        virtual void compute_rhs(const SoA_3D_t<f32>& velocities) = 0; 
+        virtual void add_wake_influence() = 0;
         virtual void shed_gamma() = 0;
         virtual void lu_factor() = 0;
         virtual void lu_solve() = 0;
         virtual f32 compute_coefficient_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) = 0;
-        virtual f32 compute_coefficient_unsteady_cl(const FlowData& flow, f32 dt, const f32 area, const u64 j, const u64 n) = 0;
+        virtual f32 compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) = 0;
         f32 compute_coefficient_cl(const FlowData& flow);
         virtual linalg::alias::float3 compute_coefficient_cm(const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) = 0;
         linalg::alias::float3 compute_coefficient_cm(const FlowData& flow);

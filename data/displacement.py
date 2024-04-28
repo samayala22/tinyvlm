@@ -54,15 +54,15 @@ def displacement_wing(t): return translation_matrix([0, 0, np.sin(0.9 * t)])
 def displacement_freestream(t): return translation_matrix([-1 * t, 0, 0])
 # def displacement_rotor(t, frame): 
 #     return rotation_matrix(frame @ [0, 0, 0, 1], frame @ [0, 0, 1, 0], 1 * t)
-def displacement_rotor(t): 
-    return rotation_matrix([0, 0, 0], [0, 0, 1], 7 * t)
+# def displacement_rotor(t): 
+#     return rotation_matrix([0, 0, 0], [0, 0, 1], 7 * t)
 def pitching(t): 
-    return rotation_matrix([0, 0, 0], [0, 1, 0], 0.5 * np.pi * np.sin(2.0 * t))
+    return rotation_matrix([0, 0, 0], [0, 1, 0], np.sin(t))
 
 kinematics = Kinematics()
-kinematics.add_joint(displacement_freestream, np.identity(4))
+# kinematics.add_joint(displacement_freestream, np.identity(4))
 # kinematics.add_joint(displacement_wing, np.identity(4))
-# kinematics.add_joint(pitching, np.identity(4))
+kinematics.add_joint(pitching, np.identity(4))
 
 dt = 0.2
 t_final = 15
@@ -95,36 +95,34 @@ ax.invert_yaxis()  # Invert y axis
 line, = ax.plot3D(vertices[0, :], vertices[1, :], vertices[2, :], '-') 
 scatter = ax.scatter(vertices[0, :], vertices[1, :], vertices[2, :], c='r', marker='o')
 
-print(kinematics.velocity(0.2, [0, 0, 0, 1]))
-
-# current_frame = 0
-# def update(frame):
-#     global vertices, kinematics, current_frame
-#     t = frame * dt
+current_frame = 0
+def update(frame):
+    global vertices, kinematics, current_frame
+    t = frame * dt
     
-#     vertices_velocity = np.array([kinematics.absolute_velocity(t, vertex) for vertex in vertices.T])
-#     if frame == current_frame: # otherwise invalid velocity value
-#         print(f"velocity: {kinematics.velocity(t, vertices[:, 0])}")
-#         print(f"frame: {frame} | vel: {vertices_velocity[:-1]}")
+    vertices_velocity = np.array([kinematics.absolute_velocity(t, vertex) for vertex in vertices.T])
+    # if frame == current_frame: # otherwise invalid velocity value
+    #     print(f"velocity: {kinematics.velocity(t, vertices[:, 0])}")
+    #     print(f"frame: {frame} | vel: {vertices_velocity[:-1]}")
 
-#     norm = plt.Normalize(vertices_velocity.min(), vertices_velocity.max())
-#     colors = cm.viridis(norm(vertices_velocity))
+    norm = plt.Normalize(vertices_velocity.min(), vertices_velocity.max())
+    colors = cm.viridis(norm(vertices_velocity))
 
-#     # Update the line object for 3D
-#     line.set_data(vertices[0, :], vertices[1, :])  # y and z for 2D part of set_data
-#     line.set_3d_properties(vertices[2, :])  # x for the 3rd dimension
+    # Update the line object for 3D
+    line.set_data(vertices[0, :], vertices[1, :])  # y and z for 2D part of set_data
+    line.set_3d_properties(vertices[2, :])  # x for the 3rd dimension
 
-#     scatter._offsets3d = (vertices[0, :], vertices[1, :], vertices[2, :])
-#     scatter.set_facecolor(colors)
+    scatter._offsets3d = (vertices[0, :], vertices[1, :], vertices[2, :])
+    scatter.set_facecolor(colors)
 
-#     if (frame == current_frame): # fix double frame 0 issue
-#         print(f"t = {t:.2f}/{t_final}", end='\r')
-#         vertices = move_vertices(vertices, kinematics.relative_displacement(t, t+dt))
-#         current_frame += 1
+    if (frame == current_frame): # fix double frame 0 issue
+        print(f"t = {t:.2f}/{t_final}", end='\r')
+        vertices = move_vertices(vertices, kinematics.relative_displacement(t, t+dt))
+        current_frame += 1
 
-#     return line, scatter
+    return line, scatter
 
-# ani = animation.FuncAnimation(fig, update, frames=np.arange(0, t_final/dt), blit=False, repeat=False)
-# # ani.save('animation.mp4', fps=30, extra_args=['-vcodec', 'libx264'])
+ani = animation.FuncAnimation(fig, update, frames=np.arange(0, t_final/dt), blit=False, repeat=False)
+# ani.save('animation.mp4', fps=30, extra_args=['-vcodec', 'libx264'])
 
-# plt.show()
+plt.show()
