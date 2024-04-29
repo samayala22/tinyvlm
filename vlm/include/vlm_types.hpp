@@ -2,7 +2,6 @@
 
 #include <utility>
 #include <cstdint>
-#include <vcruntime.h>
 #include <vector>
 #include <array>
 #include <string>
