@@ -42,7 +42,7 @@ def atime(t: float): return 2. * u_inf * t / c
 
 cycles = 4
 amplitudes = [0.1] 
-reduced_frequencies = [3.0]
+reduced_frequencies = [0.6]
 
 t_final = cycles * 2 * np.pi / (reduced_frequencies[0] * 2.0 * u_inf / c) # 4 cycles
 nb_pts = 500

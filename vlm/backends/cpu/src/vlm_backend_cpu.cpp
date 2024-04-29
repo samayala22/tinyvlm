@@ -276,6 +276,7 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt
             // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
             // delta_p += (gamma[li] - gamma_prev[li]) / dt;
             // force = (delta_p * mesh.area[li]) * normal;
+            
             cl += linalg::dot(force, lift_axis);
         }
     }
