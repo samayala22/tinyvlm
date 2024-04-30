@@ -42,7 +42,7 @@ def atime(t: float): return 2. * u_inf * t / c
 
 cycles = 4
 amplitudes = [0.1] 
-reduced_frequencies = [0.6]
+reduced_frequencies = [0.75]
 
 t_final = cycles * 2 * np.pi / (reduced_frequencies[0] * 2.0 * u_inf / c) # 4 cycles
 nb_pts = 500
@@ -65,12 +65,12 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     # def heave(t): return 0
 
     # pure heaving
-    # def pitch(t): return 0
-    # def heave(t): return -amplitude * np.sin(omega * t)
+    def pitch(t): return 0
+    def heave(t): return -amplitude * np.sin(omega * t)
 
     # pure pitching
-    def pitch(t): return np.radians(np.sin(omega * t))
-    def heave(t): return 0
+    # def pitch(t): return np.radians(np.sin(omega * t))
+    # def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -89,23 +89,18 @@ for amp, k in zip(amplitudes, reduced_frequencies):
         L_c = -2 * np.pi * rho * u_inf * b * (-(b0 + b1 + b2) * w(t) + x1(t) + x2(t))
         return (L_m + L_c) / (0.5 * rho * u_inf * u_inf * c)
 
-    # def cl_theodorsen(t: float):
-    #     L_m = rho * b * b * np.pi * (u_inf * derivative(pitch, t) + derivative2(heave, t) - b * pitch_axis * derivative2(pitch, t))
-    #     L_c = 2 * np.pi * rho * u_inf * b * theo_fun(k) * w(t)
-    #     return (L_m + L_c) / (0.5 * rho * u_inf * u_inf * c)
-
     cl_theo = np.array([cl_theodorsen(ti) for ti in vec_t])
     coord_z = np.array([-heave(ti) / c for ti in vec_t])
     angle = np.array([np.degrees(pitch(ti)) for ti in vec_t])
 
     axs["time"].plot(vec_t, cl_theo, label=f"k={k}")
-    axs["heave"].plot(angle[cycle_idx:], cl_theo[cycle_idx:], label=f"k={k}")
+    axs["heave"].plot(coord_z[cycle_idx:], cl_theo[cycle_idx:], label=f"k={k}")
 
 uvlm_cl = []
 uvlm_t = []
 uvlm_z = []
 uvlm_alpha = []
-with open("build/windows/x64/release/cl_data.txt", "r") as f:
+with open("build/windows/x64/debug/cl_data.txt", "r") as f:
     for line in f:
         time_step, z, cl, alpha = line.split()
         uvlm_t.append(float(time_step))
@@ -124,7 +119,7 @@ error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx))
 print(f"Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
 axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM", facecolors='none', edgecolors='r', s=20)
-axs["heave"].scatter(uvlm_alpha[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label="UVLM", facecolors='none', edgecolors='r', s=20)
+axs["heave"].scatter(uvlm_z[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label="UVLM", facecolors='none', edgecolors='r', s=20)
 
 # axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
 
