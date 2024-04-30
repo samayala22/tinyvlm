@@ -47,8 +47,8 @@ class Kinematics {
     linalg::alias::float4 velocity(f32 t, const linalg::alias::float4& vertex) {
         //const f32 EPS = std::max(10.f * t *EPS_f, EPS_f); // adaptive epsilon
         const f32 EPS = std::max(std::sqrt(t) * EPS_sqrt_f, EPS_f);
-        return (linalg::mul(relative_displacement(t, t+EPS), vertex)-vertex)/EPS;
-        //return (linalg::mul(relative_displacement(t, t+EPS), vertex) - linalg::mul(relative_displacement(t, t-EPS), vertex))/ (2*EPS); // central diff
+        //return (linalg::mul(relative_displacement(t, t+EPS), vertex)-vertex)/EPS;
+        return (linalg::mul(relative_displacement(t, t+EPS), vertex) - linalg::mul(relative_displacement(t, t-EPS), vertex))/ (2*EPS); // central diff
     }
 
     f32 velocity_magnitude(f32 t, const linalg::alias::float4& vertex) {
@@ -90,36 +90,36 @@ int main() {
     const f32 cycles = 4.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.6f; // reduced frequency
+    const f32 k = 0.75f; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
 
     Kinematics kinematics{};
 
     // Periodic heaving
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
-    //         -u_inf*t, // freestream
-    //         0.0f,
-    //         amplitude * std::sin(omega * t) // heaving
-    //     });
-    // });
-
-    // Periodic pitching
     kinematics.add([=](f32 t) {
         return linalg::translation_matrix(linalg::alias::float3{
             -u_inf*t, // freestream
             0.0f,
-            0.0f
+            amplitude * std::sin(omega * t) // heaving
         });
     });
-    kinematics.add([=](f32 t) {
-        return linalg::rotation_matrix(
-            linalg::alias::float3{0.0f, 0.0f, 0.0f},
-            linalg::alias::float3{0.0f, 1.0f, 0.0f},
-            to_radians(std::sin(omega * t))
-        );
-    });
+
+    // Periodic pitching
+    // kinematics.add([=](f32 t) {
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         -u_inf*t, // freestream
+    //         0.0f,
+    //         0.0f
+    //     });
+    // });
+    // kinematics.add([=](f32 t) {
+    //     return linalg::rotation_matrix(
+    //         linalg::alias::float3{0.0f, 0.0f, 0.0f},
+    //         linalg::alias::float3{0.0f, 1.0f, 0.0f},
+    //         to_radians(std::sin(omega * t))
+    //     );
+    // });
     
     // Sudden acceleration
     // const f32 alpha = to_radians(5.0f);
@@ -147,6 +147,7 @@ int main() {
             std::copy(mesh->v.z.data() + mesh->nb_vertices_wing() - mesh->ns - 1, mesh->v.z.data() + mesh->nb_vertices_wing(), trailing_vertices.z.data());
             const f32 segment_chord = mesh->panel_length(mesh->nc-1, 0); // TODO: this can be variable
             
+            std::cout << "Timestep calculation\n";
             vec_t.push_back(0.0f);
             for (f32 t = 0.0f; t < t_final;) {
                 f32 dt = segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[0], trailing_vertices.y[0], trailing_vertices.z[0], 1.0f});
@@ -187,6 +188,7 @@ int main() {
 
         // Unsteady loop
         std::cout << "SIMULATION NB OF TIMESTEPS: " << vec_t.size() << "\n";
+        f32 avg_vel_error = 0.0f;
         for (u64 i = 0; i < vec_t.size()-1; i++) {
             #ifdef DEBUG_DISPLACEMENT_DATA
             dump_buffer(wing_data, mesh->v.x.data(), mesh->v.x.data() + mesh->nb_vertices_wing());
@@ -211,9 +213,16 @@ int main() {
             for (u64 idx = 0; idx < mesh->nb_panels_wing(); idx++) {
                 const linalg::alias::float4 colloc_pt{mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f};
                 auto local_velocity = -kinematics.velocity(t, colloc_pt);
-                velocities.x[idx] = local_velocity[0];
-                velocities.y[idx] = local_velocity[1];
-                velocities.z[idx] = local_velocity[2];
+                velocities.x[idx] = local_velocity.x;
+                velocities.y[idx] = local_velocity.y;
+                velocities.z[idx] = local_velocity.z;
+
+                if (idx == 0) {
+                    f32 analytical_vel = - amplitude * omega * std::cos(omega * t);
+                    f32 rel_error = 100.0f * std::abs((analytical_vel - local_velocity.z) / analytical_vel);
+                    std::cout << "vel error:" << rel_error << "%\n";
+                    avg_vel_error += rel_error;
+                }
             }
 
             backend->compute_rhs(velocities);
@@ -232,6 +241,9 @@ int main() {
             backend->shed_gamma(); // shed before moving & incrementing currentnw
             mesh->move(kinematics.relative_displacement(t, t+dt));
         }
+
+        avg_vel_error /= (f32)(vec_t.size()-1);
+        std::cout << "Average velocity error: " << avg_vel_error << "%\n";
     }
 
     return 0;

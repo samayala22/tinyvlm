@@ -280,7 +280,7 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt
             cl += linalg::dot(force, lift_axis);
         }
     }
-    cl /= 0.5f * rho * 1.0f * area; // TODO: remove uinf hardcoded as 1.0f
+    cl /= 0.5f * rho * 1.0f * 1.0f * area; // TODO: remove uinf hardcoded as 1.0f
 
     return cl;
 }
