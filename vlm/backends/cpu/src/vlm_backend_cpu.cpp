@@ -187,6 +187,7 @@ void BackendCPU::shed_gamma() {
     const u64 wake_row_start = (m.nc + m.nw - m.current_nw - 1) * m.ns;
 
     std::copy(gamma.data(), gamma.data() + m.nb_panels_wing(), gamma_prev.data()); // store current timestep for delta_gamma
+    //std::copy(delta_gamma.data(), delta_gamma.data() + m.nb_panels_wing(), gamma_prev.data()); // store current timestep for delta_gamma
     std::copy(gamma.data() + m.ns * (m.nc-1), gamma.data() + m.nb_panels_wing(), gamma.data() + wake_row_start);
 }
 
@@ -262,20 +263,22 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt
             const linalg::alias::float3 normal{mesh.normal.x[li], mesh.normal.y[li], mesh.normal.z[li]};
 
             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
-            
+            const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
+
             // Joukowski method
             force += rho * delta_gamma[li] * linalg::cross(freestream, v1 - v0);
-            const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
             force += rho * gamma_dt * mesh.area[li] * normal;
-            
+
             // Katz Plotkin method
             // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
             // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
             // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
             // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
             // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
-            // delta_p += (gamma[li] - gamma_prev[li]) / dt;
+            // delta_p += gamma_dt / dt;
             // force = (delta_p * mesh.area[li]) * normal;
+
+            // force /= linalg::length2(freestream);
             
             cl += linalg::dot(force, lift_axis);
         }
