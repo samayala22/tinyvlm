@@ -77,7 +77,7 @@ int main() {
     const tiny::ScopedTimer timer("UVLM TOTAL");
     // vlm::Executor::instance(1);
     // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x8.x"};
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x5.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x2.x"};
 
     const std::vector<std::string> backends = get_available_backends();
 
@@ -90,9 +90,10 @@ int main() {
     const f32 cycles = 4.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.75f; // reduced frequency
+    const f32 k = 0.5; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
+    //const f32 t_final = 5.0f;
 
     Kinematics kinematics{};
 
@@ -153,7 +154,7 @@ int main() {
                 f32 dt = segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[0], trailing_vertices.y[0], trailing_vertices.z[0], 1.0f});
                 for (u64 i = 1; i < trailing_vertices.size; i++) {
                     dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
-                }
+                }                
 
                 auto transform = kinematics.relative_displacement(t, t+dt);
                 for (u64 i = 0; i < trailing_vertices.size; i++) {

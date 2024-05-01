@@ -42,7 +42,7 @@ def atime(t: float): return 2. * u_inf * t / c
 
 cycles = 4
 amplitudes = [0.1] 
-reduced_frequencies = [0.75]
+reduced_frequencies = [0.5]
 
 t_final = cycles * 2 * np.pi / (reduced_frequencies[0] * 2.0 * u_inf / c) # 4 cycles
 nb_pts = 500
@@ -57,7 +57,7 @@ fig, axs = plt.subplot_mosaic(
 
 for amp, k in zip(amplitudes, reduced_frequencies):
     # heave parameters
-    amplitude = amp / c
+    amplitude = amp
     omega = k * 2.0 * u_inf / c # pitch frequency
 
     # sudden acceleration
@@ -65,12 +65,12 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     # def heave(t): return 0
 
     # pure heaving
-    def pitch(t): return 0
-    def heave(t): return -amplitude * np.sin(omega * t)
+    # def pitch(t): return 0
+    # def heave(t): return -amplitude * np.sin(omega * t)
 
     # pure pitching
-    # def pitch(t): return np.radians(np.sin(omega * t))
-    # def heave(t): return 0
+    def pitch(t): return np.radians(np.sin(omega * t))
+    def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -119,6 +119,7 @@ error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx))
 print(f"Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
 axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM", facecolors='none', edgecolors='r', s=20)
+# axs["time"].scatter(uvlm_t, uvlm_z, label="UVLM z", facecolors='none', edgecolors='r', s=20)
 axs["heave"].scatter(uvlm_z[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label="UVLM", facecolors='none', edgecolors='r', s=20)
 
 # axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
