@@ -38,6 +38,15 @@ BackendCPU::~BackendCPU() = default; // Destructor definition
 BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
     wake_buffer.resize(mesh.nb_panels_wing() * mesh.ns);
+
+    uw.resize(mesh.nb_panels_wing() * mesh.ns);
+    vw.resize(mesh.nb_panels_wing() * mesh.ns);
+    ww.resize(mesh.nb_panels_wing() * mesh.ns);
+
+    panel_uw.resize(mesh.nb_panels_wing());
+    panel_vw.resize(mesh.nb_panels_wing());
+    panel_ww.resize(mesh.nb_panels_wing());
+
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
     gamma.resize((mesh.nc + mesh.nw) * mesh.ns); // store wake gamma as well
@@ -136,50 +145,60 @@ void BackendCPU::add_wake_influence() {
         {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
     };
 
+    std::fill(panel_uw.begin(), panel_uw.end(), 0.0f);
+    std::fill(panel_vw.begin(), panel_vw.end(), 0.0f);
+    std::fill(panel_ww.begin(), panel_ww.end(), 0.0f);
+
     // loop over wake rows
-    // for (u64 i = 0; i < mesh.current_nw; i++) {
-    //     const u64 wake_row_start = (m.nc + m.nw - i - 1) * m.ns;
-    //     std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
-    //     // Actually fill the wake buffer
-    //     // parallel for
-    //     for (u64 j = 0; j < mesh.ns; j++) { // loop over columns
-    //         const u64 lidx = wake_row_start + j; // TODO: replace this ASAP
-    //         ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, sigma_vatistas);
-    //     }
-
-    //     cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
-    // }
-
-    u64 idx = 0;
-    u64 wake_row_start = (m.nc + m.nw - 1) * m.ns;
-
-    auto init = taskflow.placeholder();
-    auto cond = taskflow.emplace([&]{
-        return idx < mesh.current_nw ? 0 : 1; // 0 means continue, 1 means break
-    });
-    auto zero_buffer = taskflow.emplace([&]{
+    for (u64 i = 0; i < mesh.current_nw; i++) {
+        const u64 wake_row_start = (m.nc + m.nw - i - 1) * m.ns;
         std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
-    });
-    auto wake_influence = taskflow.for_each_index((u64)0, m.ns, [&] (u64 j) {
-        const u64 lidx = wake_row_start + j;
-        ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, sigma_vatistas);
-    });
-    auto back = taskflow.emplace([&]{
+        std::fill(uw.begin(), uw.end(), 0.0f);
+        std::fill(vw.begin(), vw.end(), 0.0f);
+        std::fill(ww.begin(), ww.end(), 0.0f);
+        // Actually fill the wake buffer
+        // parallel for
+        for (u64 j = 0; j < mesh.ns; j++) { // loop over columns
+            const u64 lidx = wake_row_start + j; // TODO: replace this ASAP
+            ispc::kernel_influence2(mesh_proxy, wake_buffer.data(), uw.data(), vw.data(), ww.data(), j, lidx, sigma_vatistas);
+        }
+
         cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
+        cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, 1.0f, uw.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, panel_uw.data(), 1);
+        cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, 1.0f, vw.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, panel_vw.data(), 1);
+        cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, 1.0f, ww.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, panel_ww.data(), 1);
+    }
 
-        idx++;
-        wake_row_start -= m.ns;
-        return 0; // 0 means continue
-    });
-    auto sync = taskflow.placeholder();
+    // u64 idx = 0;
+    // u64 wake_row_start = (m.nc + m.nw - 1) * m.ns;
 
-    init.precede(cond);
-    cond.precede(zero_buffer, sync);
-    zero_buffer.precede(wake_influence);
-    wake_influence.precede(back);
-    back.precede(cond);
+    // auto init = taskflow.placeholder();
+    // auto cond = taskflow.emplace([&]{
+    //     return idx < mesh.current_nw ? 0 : 1; // 0 means continue, 1 means break
+    // });
+    // auto zero_buffer = taskflow.emplace([&]{
+    //     std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
+    // });
+    // auto wake_influence = taskflow.for_each_index((u64)0, m.ns, [&] (u64 j) {
+    //     const u64 lidx = wake_row_start + j;
+    //     ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, sigma_vatistas);
+    // });
+    // auto back = taskflow.emplace([&]{
+    //     cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
 
-    Executor::get().run(taskflow).wait();
+    //     idx++;
+    //     wake_row_start -= m.ns;
+    //     return 0; // 0 means continue
+    // });
+    // auto sync = taskflow.placeholder();
+
+    // init.precede(cond);
+    // cond.precede(zero_buffer, sync);
+    // zero_buffer.precede(wake_influence);
+    // wake_influence.precede(back);
+    // back.precede(cond);
+
+    // Executor::get().run(taskflow).wait();
 }
 
 void BackendCPU::shed_gamma() {
@@ -249,11 +268,22 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt
     f32 cl = 0.0f;
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
 
+    // for (auto& elem : rhs) {
+    //     std::cout << elem << " ";
+    // }
+    // std::cout << "\n";
+
     for (u64 u = 0; u < mesh.nc; u++) {
         for (u64 v = j; v < j + n; v++) {
             const u64 li = u * mesh.ns + v; // linear index
 
-            const linalg::alias::float3 freestream{vel.x[li], vel.y[li], vel.z[li]};
+            linalg::alias::float3 freestream{vel.x[li], vel.y[li], vel.z[li]};
+            //std::cout << "Without: " << freestream << "\n";
+            freestream.x += panel_uw[li];
+            freestream.y += panel_vw[li];
+            freestream.z += panel_ww[li];
+            // std::cout << "With: " << freestream << "\n";
+            
             const linalg::alias::float3 lift_axis = compute_lift_axis(freestream);
 
             const linalg::alias::float3 v0 = mesh.get_v0(li);
@@ -266,17 +296,17 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt
             const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
 
             // Joukowski method
-            force += rho * delta_gamma[li] * linalg::cross(freestream, v1 - v0);
-            force += rho * gamma_dt * mesh.area[li] * normal;
+            // force += rho * delta_gamma[li] * linalg::cross(freestream, v1 - v0);
+            // force += rho * gamma_dt * mesh.area[li] * normal;
 
             // Katz Plotkin method
-            // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
-            // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
-            // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
-            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
-            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
-            // delta_p += gamma_dt / dt;
-            // force = (delta_p * mesh.area[li]) * normal;
+            linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
+            const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
+            const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
+            delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
+            delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
+            delta_p += gamma_dt;
+            force = (delta_p * mesh.area[li]) * normal;
 
             // force /= linalg::length2(freestream);
             
