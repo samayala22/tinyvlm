@@ -65,12 +65,12 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     # def heave(t): return 0
 
     # pure heaving
-    # def pitch(t): return 0
-    # def heave(t): return -amplitude * np.sin(omega * t)
+    def pitch(t): return 0
+    def heave(t): return -amplitude * np.sin(omega * t)
 
     # pure pitching
-    def pitch(t): return np.radians(np.sin(omega * t))
-    def heave(t): return 0
+    # def pitch(t): return np.radians(np.sin(omega * t))
+    # def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -100,7 +100,7 @@ uvlm_cl = []
 uvlm_t = []
 uvlm_z = []
 uvlm_alpha = []
-with open("build/windows/x64/debug/cl_data.txt", "r") as f:
+with open("build/windows/x64/release/cl_data.txt", "r") as f:
     for line in f:
         time_step, z, cl, alpha = line.split()
         uvlm_t.append(float(time_step))

@@ -16,6 +16,7 @@ class Backend {
         virtual void compute_rhs(const FlowData& flow) = 0;
         virtual void compute_rhs(const SoA_3D_t<f32>& velocities) = 0; 
         virtual void add_wake_influence() = 0;
+        virtual void wake_rollup(float dt) = 0;
         virtual void shed_gamma() = 0;
         virtual void lu_factor() = 0;
         virtual void lu_solve() = 0;
