@@ -201,6 +201,25 @@ void BackendCPU::add_wake_influence() {
     // Executor::get().run(taskflow).wait();
 }
 
+void BackendCPU::wake_rollup(float dt) {
+    const tiny::ScopedTimer timer("Wake Rollup");
+
+    ispc::MeshView mesh_view = {
+        mesh.nc, mesh.ns, mesh.nw, mesh.current_nw,
+        {mesh.v.x.data(), mesh.v.y.data(), mesh.v.z.data()},
+        {mesh.colloc.x.data(), mesh.colloc.y.data(), mesh.colloc.z.data()},
+        {mesh.normal.x.data(), mesh.normal.y.data(), mesh.normal.z.data()},
+    };
+
+    const u64 wake_vertices_begin = (mesh.nc + mesh.nw - mesh.current_nw + 1) * (mesh.ns+1);
+    const u64 wake_vertices_end = (mesh.nc + mesh.nw + 1) * (mesh.ns + 1);
+
+    // parallel for
+    for (u64 vidx = wake_vertices_begin; vidx < wake_vertices_end; vidx++) {
+        ispc::kernel_induced_vel(mesh_view, vidx, dt, gamma.data(), sigma_vatistas);
+    }
+}
+
 void BackendCPU::shed_gamma() {
     const Mesh& m = mesh;
     const u64 wake_row_start = (m.nc + m.nw - m.current_nw - 1) * m.ns;

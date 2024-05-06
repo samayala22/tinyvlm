@@ -20,7 +20,7 @@ def coords_to_verts(coords, nc, ns):
 coords_wing = []
 coords_wake = []
 
-with open("build/windows/x64/debug/wing_data.txt") as f:
+with open("build/windows/x64/release/wing_data.txt") as f:
     # first line
     nc, ns = map(int, f.readline().split())
     timesteps = int(f.readline())
@@ -32,7 +32,7 @@ with open("build/windows/x64/debug/wing_data.txt") as f:
         coords[2, :] = np.array(list(map(float, f.readline().split())))
         coords_wing.append(coords)
 
-with open("build/windows/x64/debug/wake_data.txt") as f:
+with open("build/windows/x64/release/wake_data.txt") as f:
     # first line
     f.readline() # skip first line
     f.readline() # skip second line
