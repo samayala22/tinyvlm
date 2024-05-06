@@ -29,6 +29,7 @@ class BackendCPU : public Backend {
         void compute_rhs(const FlowData& flow) override;
         void compute_rhs(const SoA_3D_t<f32>& velocities) override; 
         void add_wake_influence() override;
+        void wake_rollup(float dt) override;
         void shed_gamma() override;
         void lu_factor() override;
         void lu_solve() override;

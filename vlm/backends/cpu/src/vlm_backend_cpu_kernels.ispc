@@ -43,14 +43,25 @@ export struct MeshProxy {
     uniform SoA3D normal; // normals
 };
 
+export struct MeshView {
+    uniform uint64 ni; // wing chord panels
+    uniform uint64 nj; // wing span panels
+    uniform uint64 nw; // wake chord capacity
+    uniform uint64 cw; // number of active wake panels
+    uniform SoA3D v; // vertices
+    uniform SoA3D colloc; // collocation points
+    uniform SoA3D normal; // normals
+};
+
 // Bio-savart Kernel
 #define RCUT 1e-10f
 #define RCUT2 1e-5f
 
 #define PI_f 3.141593f
 
-inline float3 kernel_biosavart(float3& colloc, const uniform float3& vertex1, const uniform float3& vertex2, const uniform float& sigma) {
-    uniform float3 r0 = vertex2 - vertex1;
+template<typename C, typename V>
+inline float3 kernel_biosavart(C& colloc, const V& vertex1, const V& vertex2, const uniform float& sigma) {
+    V r0 = vertex2 - vertex1;
     float3 r1 = colloc - vertex1;
     float3 r2 = colloc - vertex2;
     // Katz Plotkin, Low speed Aero | Eq 10.115
@@ -64,13 +75,14 @@ inline float3 kernel_biosavart(float3& colloc, const uniform float3& vertex1, co
         return res;
     }
 
-    uniform float smoother = sigma*sigma*length2(r0);
+    float smoother = sigma*sigma*length2(r0);
 
     float coeff = (dot(r0,r1)*r2_norm - dot(r0, r2)*r1_norm) / (4.0f*PI_f*sqrt(square*square + smoother*smoother)*r1_norm*r2_norm);
     return r1r2cross * coeff;
 }
 
-inline void kernel_symmetry(float3& inf, float3 colloc, const uniform float3& vertex0, const uniform float3& vertex1, const uniform float& sigma) {
+template<typename C, typename V>
+inline void kernel_symmetry(float3& inf, C colloc, const V& vertex0, const V& vertex1, const uniform float& sigma) {
     float3 induced_speed = kernel_biosavart(colloc, vertex0, vertex1, sigma);
     inf.x += induced_speed.x;
     inf.y += induced_speed.y;
@@ -135,7 +147,6 @@ export void kernel_influence2(
     const uniform uint64 v3 = v0 + m.ns+1;
     const uniform uint64 v2 = v3 + 1;
 
-
     // Broadcast vertices
     uniform float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
     uniform float3 vertex1 = {m.v.x[v1], m.v.y[v1], m.v.z[v1]};
@@ -167,6 +178,68 @@ export void kernel_influence2(
         vw[ia * m.nb_panels + ia2] += inf.y;
         ww[ia * m.nb_panels + ia2] += inf.z;
     }
+}
+
+export void kernel_induced_vel(
+    uniform const MeshView& m, uniform uint64 vidx, uniform float dt,
+    uniform float* uniform gamma, uniform float sigma
+    ) {
+
+    const uniform float3 vertex_influenced = {m.v.x[vidx], m.v.y[vidx], m.v.z[vidx]};
+
+    float3 induced_vel = {0.0f, 0.0f, 0.0f};
+
+    // Wing influence
+    for (uint64 i = 0; i < m.ni; i++) {
+        foreach(j = 0 ... m.nj) {
+            uint64 v0 = (i+0) * (m.nj+1) + j;
+            uint64 v1 = (i+0) * (m.nj+1) + j + 1;
+            uint64 v2 = (i+1) * (m.nj+1) + j + 1;
+            uint64 v3 = (i+1) * (m.nj+1) + j;
+
+            // Loads
+            const float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
+            const float3 vertex1 = {m.v.x[v1], m.v.y[v1], m.v.z[v1]};
+            const float3 vertex2 = {m.v.x[v2], m.v.y[v2], m.v.z[v2]};
+            const float3 vertex3 = {m.v.x[v3], m.v.y[v3], m.v.z[v3]};
+        
+            float3 ind = {0.0f, 0.0f, 0.0f};
+            kernel_symmetry(ind, vertex_influenced, vertex0, vertex1, sigma);
+            kernel_symmetry(ind, vertex_influenced, vertex1, vertex2, sigma);
+            kernel_symmetry(ind, vertex_influenced, vertex2, vertex3, sigma);
+            kernel_symmetry(ind, vertex_influenced, vertex3, vertex0, sigma);
+
+            induced_vel += ind * gamma[i * m.nj + j];
+        }
+    }
+
+    // Wake influence
+    for (uint64 i = m.ni + m.nw - m.cw; i < m.ni + m.nw; i++) {
+        foreach(j = 0 ... m.nj) {
+            uint64 v0 = (i+0) * (m.nj+1) + j;
+            uint64 v1 = (i+0) * (m.nj+1) + j + 1;
+            uint64 v2 = (i+1) * (m.nj+1) + j + 1;
+            uint64 v3 = (i+1) * (m.nj+1) + j;
+
+            // Loads
+            const float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
+            const float3 vertex1 = {m.v.x[v1], m.v.y[v1], m.v.z[v1]};
+            const float3 vertex2 = {m.v.x[v2], m.v.y[v2], m.v.z[v2]};
+            const float3 vertex3 = {m.v.x[v3], m.v.y[v3], m.v.z[v3]};
+        
+            float3 ind = {0.0f, 0.0f, 0.0f};
+            kernel_symmetry(ind, vertex_influenced, vertex0, vertex1, sigma);
+            kernel_symmetry(ind, vertex_influenced, vertex1, vertex2, sigma);
+            kernel_symmetry(ind, vertex_influenced, vertex2, vertex3, sigma);
+            kernel_symmetry(ind, vertex_influenced, vertex3, vertex0, sigma);
+
+            induced_vel += ind * gamma[i * m.nj + j];
+        }
+    }
+
+    m.v.x[vidx] += reduce_add(induced_vel.x) * dt;
+    m.v.y[vidx] += reduce_add(induced_vel.y) * dt;
+    m.v.z[vidx] += reduce_add(induced_vel.z) * dt;
 }
 
 export uniform float kernel_trefftz_cd(
