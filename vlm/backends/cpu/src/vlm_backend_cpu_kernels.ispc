@@ -181,8 +181,9 @@ export void kernel_influence2(
 }
 
 export void kernel_induced_vel(
-    uniform const MeshView& m, uniform uint64 vidx, uniform float dt,
-    uniform float* uniform gamma, uniform float sigma
+    uniform MeshView& m, uniform float dt, 
+    uniform float* uniform rollup_vx, uniform float* uniform rollup_vy, uniform float* uniform rollup_vz,
+    uniform uint64 vidx, uniform float* uniform gamma, uniform float sigma
     ) {
 
     const uniform float3 vertex_influenced = {m.v.x[vidx], m.v.y[vidx], m.v.z[vidx]};
@@ -237,9 +238,9 @@ export void kernel_induced_vel(
         }
     }
 
-    m.v.x[vidx] += reduce_add(induced_vel.x) * dt;
-    m.v.y[vidx] += reduce_add(induced_vel.y) * dt;
-    m.v.z[vidx] += reduce_add(induced_vel.z) * dt;
+    rollup_vx[vidx] = m.v.x[vidx] + reduce_add(induced_vel.x) * dt;
+    rollup_vy[vidx] = m.v.y[vidx] + reduce_add(induced_vel.y) * dt;
+    rollup_vz[vidx] = m.v.z[vidx] + reduce_add(induced_vel.z) * dt;
 }
 
 export uniform float kernel_trefftz_cd(
