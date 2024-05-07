@@ -2,6 +2,7 @@
 
 #include "vlm_fwd.hpp"
 #include "vlm_types.hpp"
+#include "vlm_mesh.hpp"
 
 namespace vlm {
 

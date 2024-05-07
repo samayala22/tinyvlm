@@ -182,7 +182,7 @@ int main() {
 
         mesh->resize_wake(vec_t.size()-1); // +1 for the initial pose
         const std::unique_ptr<Backend> backend = create_backend(backend_name, *mesh); // create after mesh has been resized
-
+        
         // Precompute the LHS since wing geometry is constant
         backend->compute_lhs();
         backend->lu_factor();
@@ -219,8 +219,8 @@ int main() {
                 velocities.z[idx] = local_velocity.z;
 
                 if (idx == 0) {
-                    f32 analytical_vel = - amplitude * omega * std::cos(omega * t);
-                    f32 rel_error = 100.0f * std::abs((analytical_vel - local_velocity.z) / analytical_vel);
+                    const f32 analytical_vel = - amplitude * omega * std::cos(omega * t);
+                    const f32 rel_error = 100.0f * std::abs((analytical_vel - local_velocity.z) / analytical_vel);
                     std::cout << "vel error:" << rel_error << "%\n";
                     avg_vel_error += rel_error;
                 }
