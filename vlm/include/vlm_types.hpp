@@ -54,9 +54,9 @@ struct SoA_3D_t {
     
     void resize(u64 size_) {
         size = size_;
-        x.resize(size);
-        y.resize(size);
-        z.resize(size);
+        x.resize(size, 0.f);
+        y.resize(size, 0.f);
+        z.resize(size, 0.f);
     }
 
     void reserve(u64 size_) {

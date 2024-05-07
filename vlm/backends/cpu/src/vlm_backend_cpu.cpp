@@ -39,6 +39,7 @@ BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
     wake_buffer.resize(mesh.nb_panels_wing() * mesh.ns);
 
+    rollup_vertices.resize(mesh.nb_vertices_total());
     uw.resize(mesh.nb_panels_wing() * mesh.ns);
     vw.resize(mesh.nb_panels_wing() * mesh.ns);
     ww.resize(mesh.nb_panels_wing() * mesh.ns);
@@ -131,7 +132,6 @@ void BackendCPU::compute_rhs(const FlowData& flow) {
     kernel_cpu_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
 }
 
-// TODO: consider changing FlowData to SolverData
 void BackendCPU::add_wake_influence() {
     // const tiny::ScopedTimer timer("Wake Influence");
 
@@ -214,10 +214,30 @@ void BackendCPU::wake_rollup(float dt) {
     const u64 wake_vertices_begin = (mesh.nc + mesh.nw - mesh.current_nw + 1) * (mesh.ns+1);
     const u64 wake_vertices_end = (mesh.nc + mesh.nw + 1) * (mesh.ns + 1);
 
-    // parallel for
-    for (u64 vidx = wake_vertices_begin; vidx < wake_vertices_end; vidx++) {
-        ispc::kernel_induced_vel(mesh_view, vidx, dt, gamma.data(), sigma_vatistas);
-    }
+    tf::Taskflow taskflow;
+
+    auto init = taskflow.placeholder();
+    auto rollup = taskflow.for_each_index(wake_vertices_begin, wake_vertices_end, [&] (u64 vidx) {
+        ispc::kernel_induced_vel(mesh_view, dt, rollup_vertices.x.data(), rollup_vertices.y.data(), rollup_vertices.z.data(), vidx, gamma.data(), sigma_vatistas);
+    });
+    auto copy = taskflow.emplace([&]{
+        std::copy(rollup_vertices.x.data() + wake_vertices_begin, rollup_vertices.x.data() + wake_vertices_end, mesh.v.x.data() + wake_vertices_begin);
+        std::copy(rollup_vertices.y.data() + wake_vertices_begin, rollup_vertices.y.data() + wake_vertices_end, mesh.v.y.data() + wake_vertices_begin);
+        std::copy(rollup_vertices.z.data() + wake_vertices_begin, rollup_vertices.z.data() + wake_vertices_end, mesh.v.z.data() + wake_vertices_begin);
+    });
+    auto sync = taskflow.placeholder();
+    init.precede(rollup);
+    rollup.precede(copy);
+    copy.precede(sync);
+
+    Executor::get().run(taskflow).wait();
+
+    // for (u64 vidx = wake_vertices_begin; vidx < wake_vertices_end; vidx++) {
+    //     ispc::kernel_induced_vel(mesh_view, dt, rollup_vertices.x.data(), rollup_vertices.y.data(), rollup_vertices.z.data(), vidx, gamma.data(), sigma_vatistas);
+    // }
+    // std::copy(rollup_vertices.x.data() + wake_vertices_begin, rollup_vertices.x.data() + rollup_vertices.size, mesh.v.x.data() + wake_vertices_begin);
+    // std::copy(rollup_vertices.y.data() + wake_vertices_begin, rollup_vertices.y.data() + rollup_vertices.size, mesh.v.y.data() + wake_vertices_begin);
+    // std::copy(rollup_vertices.z.data() + wake_vertices_begin, rollup_vertices.z.data() + rollup_vertices.size, mesh.v.z.data() + wake_vertices_begin);
 }
 
 void BackendCPU::shed_gamma() {
@@ -298,9 +318,9 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt
 
             linalg::alias::float3 freestream{vel.x[li], vel.y[li], vel.z[li]};
             //std::cout << "Without: " << freestream << "\n";
-            freestream.x += panel_uw[li];
-            freestream.y += panel_vw[li];
-            freestream.z += panel_ww[li];
+            // freestream.x += panel_uw[li];
+            // freestream.y += panel_vw[li];
+            // freestream.z += panel_ww[li];
             // std::cout << "With: " << freestream << "\n";
             
             const linalg::alias::float3 lift_axis = compute_lift_axis(freestream);
@@ -315,17 +335,17 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt
             const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
 
             // Joukowski method
-            // force += rho * delta_gamma[li] * linalg::cross(freestream, v1 - v0);
-            // force += rho * gamma_dt * mesh.area[li] * normal;
+            force += rho * delta_gamma[li] * linalg::cross(freestream, v1 - v0);
+            force += rho * gamma_dt * mesh.area[li] * normal;
 
             // Katz Plotkin method
-            linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
-            const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
-            const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
-            delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
-            delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
-            delta_p += gamma_dt;
-            force = (delta_p * mesh.area[li]) * normal;
+            // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
+            // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
+            // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
+            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
+            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
+            // delta_p += gamma_dt;
+            // force = (delta_p * mesh.area[li]) * normal;
 
             // force /= linalg::length2(freestream);
             

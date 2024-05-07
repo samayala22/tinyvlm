@@ -14,6 +14,7 @@ class BackendCPU : public Backend {
         std::vector<f32> panel_uw;
         std::vector<f32> panel_vw;
         std::vector<f32> panel_ww;
+        SoA_3D_t<f32> rollup_vertices;
         std::vector<f32> wake_buffer; // (ns*nc) * ns
         std::vector<f32> rhs;
         std::vector<i32> ipiv;
