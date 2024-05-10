@@ -22,7 +22,7 @@ class Backend {
         virtual void lu_factor() = 0;
         virtual void lu_solve() = 0;
         virtual f32 compute_coefficient_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) = 0;
-        virtual f32 compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) = 0;
+        virtual f32 compute_coefficient_unsteady_cl(const linalg::alias::float3& freestream, const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) = 0;
         f32 compute_coefficient_cl(const FlowData& flow);
         virtual linalg::alias::float3 compute_coefficient_cm(const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) = 0;
         linalg::alias::float3 compute_coefficient_cm(const FlowData& flow);

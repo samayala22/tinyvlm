@@ -38,11 +38,28 @@ c = 2*b # chord
 a = ar / c # full span
 pitch_axis = -0.5 # leading edge
 
-def atime(t: float): return 2. * u_inf * t / c
+cycles = 4 # number of periods
 
-cycles = 4
+uvlm_cl = []
+uvlm_t = []
+uvlm_z = []
+uvlm_alpha = []
+with open("build/windows/x64/release/cl_data.txt", "r") as f:
+    freq = float(f.readline()) # get reduced frequency of the simulation
+    for line in f:
+        time_step, z, cl, alpha = line.split()
+        uvlm_t.append(float(time_step))
+        uvlm_z.append(float(z))
+        uvlm_cl.append(float(cl))
+        uvlm_alpha.append(float(alpha))
+
+n = len(uvlm_t) # number of time steps
+uvlm_cycle_idx = int((1 - 1 / cycles) * n - 1)
+uvlm_alpha = np.array(uvlm_alpha)
+uvlm_cl = np.array(uvlm_cl)
+
 amplitudes = [0.1] 
-reduced_frequencies = [0.5]
+reduced_frequencies = [freq]
 
 t_final = cycles * 2 * np.pi / (reduced_frequencies[0] * 2.0 * u_inf / c) # 4 cycles
 nb_pts = 500
@@ -61,12 +78,12 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     omega = k * 2.0 * u_inf / c # pitch frequency
 
     # sudden acceleration
-    # def pitch(t): return np.radians(5)
-    # def heave(t): return 0
+    def pitch(t): return np.radians(5)
+    def heave(t): return 0
 
     # pure heaving
-    def pitch(t): return 0
-    def heave(t): return -amplitude * np.sin(omega * t)
+    # def pitch(t): return 0
+    # def heave(t): return -amplitude * np.sin(omega * t)
 
     # pure pitching
     # def pitch(t): return np.radians(np.sin(omega * t))
@@ -95,23 +112,6 @@ for amp, k in zip(amplitudes, reduced_frequencies):
 
     axs["time"].plot(vec_t, cl_theo, label=f"k={k}")
     axs["heave"].plot(coord_z[cycle_idx:], cl_theo[cycle_idx:], label=f"k={k}")
-
-uvlm_cl = []
-uvlm_t = []
-uvlm_z = []
-uvlm_alpha = []
-with open("build/windows/x64/release/cl_data.txt", "r") as f:
-    for line in f:
-        time_step, z, cl, alpha = line.split()
-        uvlm_t.append(float(time_step))
-        uvlm_z.append(float(z))
-        uvlm_cl.append(float(cl))
-        uvlm_alpha.append(float(alpha))
-
-n = len(uvlm_t) # number of time steps
-uvlm_cycle_idx = int((1 - 1 / cycles) * n - 1)
-uvlm_alpha = np.array(uvlm_alpha)
-uvlm_cl = np.array(uvlm_cl)
 
 analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cycle_idx:]])
 difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl

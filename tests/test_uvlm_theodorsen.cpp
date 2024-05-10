@@ -21,39 +21,43 @@ using namespace linalg::ostream_overloads;
 
 using tmatrix = linalg::alias::float4x4; // transformation matri
 
+// TODO: add caching for transformation matrices 
 class Kinematics {
     public:
-    std::vector<std::function<tmatrix(f32 t)>> joints;
     Kinematics() = default;
     ~Kinematics() = default;
 
     void add(std::function<tmatrix(f32 t)>&& joint) {
-        joints.push_back(std::move(joint));
+        m_joints.push_back(std::move(joint));
     }
 
-    tmatrix displacement(f32 t) {
+    tmatrix displacement(f32 t, u64 n = 0) {
         tmatrix result = linalg::identity;
-        for (const auto& joint : joints) {
-            result = linalg::mul(result, joint(t));
+        const u64 end_joint = n == 0 ? m_joints.size() : n;
+        for (u64 i = 0; i < end_joint; i++) {
+            result = linalg::mul(result, m_joints[i](t));
         }
         return result;
     }
 
-    tmatrix relative_displacement(f32 t0, f32 t1) {
-        //std::printf("t0: %.10f, t1: %.10f ", t0, t1);
-        return linalg::mul(displacement(t1), linalg::inverse(displacement(t0)));
+    tmatrix relative_displacement(f32 t0, f32 t1, u64 n = 0) {
+        return linalg::mul(displacement(t1, n), linalg::inverse(displacement(t0, n)));
     }
 
-    linalg::alias::float4 velocity(f32 t, const linalg::alias::float4& vertex) {
+    // Compute the instantaneous velocity vector at a given point at a given time for n joints (starting from the first, 0 = all joints)
+    linalg::alias::float4 velocity(f32 t, const linalg::alias::float4& vertex, u64 n = 0) {
         //const f32 EPS = std::max(10.f * t *EPS_f, EPS_f); // adaptive epsilon
-        const f32 EPS = std::max(std::sqrt(t) * EPS_sqrt_f, EPS_f);
+        const f32 EPS = EPS_sqrt_f;
         //return (linalg::mul(relative_displacement(t, t+EPS), vertex)-vertex)/EPS;
-        return (linalg::mul(relative_displacement(t, t+EPS), vertex) - linalg::mul(relative_displacement(t, t-EPS), vertex))/ (2*EPS); // central diff
+        return (linalg::mul(relative_displacement(t, t+EPS, n), vertex) - linalg::mul(relative_displacement(t, t-EPS, n), vertex))/ (2*EPS); // central diff
     }
 
     f32 velocity_magnitude(f32 t, const linalg::alias::float4& vertex) {
         return linalg::length(velocity(t, vertex));
     }
+
+    private:
+    std::vector<std::function<tmatrix(f32 t)>> m_joints;
 };
 
 template<typename T>
@@ -77,7 +81,7 @@ int main() {
     const tiny::ScopedTimer timer("UVLM TOTAL");
     // vlm::Executor::instance(1);
     // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x8.x"};
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x10.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x5.x"};
 
     const std::vector<std::string> backends = get_available_backends();
 
@@ -90,7 +94,7 @@ int main() {
     const f32 cycles = 4.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.5; // reduced frequency
+    const f32 k = 0.75; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
@@ -98,13 +102,20 @@ int main() {
     Kinematics kinematics{};
 
     // Periodic heaving
-    kinematics.add([=](f32 t) {
-        return linalg::translation_matrix(linalg::alias::float3{
-            -u_inf*t, // freestream
-            0.0f,
-            amplitude * std::sin(omega * t) // heaving
-        });
-    });
+    // kinematics.add([=](f32 t) {
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         -u_inf*t,
+    //         0.0f,
+    //         0.0f
+    //     });
+    // });
+    // kinematics.add([=](f32 t) {
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         0.0f,
+    //         0.0f,
+    //         amplitude * std::sin(omega * t) // heaving
+    //     });
+    // });
 
     // Periodic pitching
     // kinematics.add([=](f32 t) {
@@ -123,14 +134,14 @@ int main() {
     // });
     
     // Sudden acceleration
-    // const f32 alpha = to_radians(5.0f);
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
-    //         -u_inf*cos(alpha)*t,
-    //         0.0f,
-    //         -u_inf*sin(alpha)*t
-    //     });
-    // });
+    const f32 alpha = to_radians(5.0f);
+    kinematics.add([=](f32 t) {
+        return linalg::translation_matrix(linalg::alias::float3{
+            -u_inf*cos(alpha)*t,
+            0.0f,
+            -u_inf*sin(alpha)*t
+        });
+    });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
         const std::unique_ptr<Mesh> mesh = create_mesh(mesh_name);
@@ -154,7 +165,7 @@ int main() {
                 f32 dt = segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[0], trailing_vertices.y[0], trailing_vertices.z[0], 1.0f});
                 for (u64 i = 1; i < trailing_vertices.size; i++) {
                     dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
-                }                
+                }
 
                 auto transform = kinematics.relative_displacement(t, t+dt);
                 for (u64 i = 0; i < trailing_vertices.size; i++) {
@@ -172,6 +183,8 @@ int main() {
         std::ofstream wing_data("wing_data.txt");
         std::ofstream wake_data("wake_data.txt");
         std::ofstream cl_data("cl_data.txt");
+
+        cl_data << k << "\n";
 
         wing_data << mesh->nc << " " << mesh->ns << "\n";
         wing_data << vec_t.size() - 1 << "\n\n";
@@ -211,6 +224,7 @@ int main() {
             const f32 dt = vec_t[i+1] - t;
             std::cout << "\n----------------\n" << "T = " << t << "\n";
 
+            linalg::alias::float3 freestream;
             for (u64 idx = 0; idx < mesh->nb_panels_wing(); idx++) {
                 const linalg::alias::float4 colloc_pt{mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f};
                 auto local_velocity = -kinematics.velocity(t, colloc_pt);
@@ -218,7 +232,14 @@ int main() {
                 velocities.y[idx] = local_velocity.y;
                 velocities.z[idx] = local_velocity.z;
 
+                // velocities.x[idx] = u_inf*cos(alpha);
+                // velocities.y[idx] = 0.f;
+                // velocities.z[idx] = u_inf*sin(alpha);
+
                 if (idx == 0) {
+                    linalg::alias::float4 freestream_vel = -kinematics.velocity(t, colloc_pt, 1);
+                    freestream = {freestream_vel.x, freestream_vel.y, freestream_vel.z};
+                    std::cout << freestream << "\n";
                     const f32 analytical_vel = - amplitude * omega * std::cos(omega * t);
                     const f32 rel_error = 100.0f * std::abs((analytical_vel - local_velocity.z) / analytical_vel);
                     std::cout << "vel error:" << rel_error << "%\n";
@@ -232,16 +253,17 @@ int main() {
             backend->compute_delta_gamma();
             if (i > 0) {
                 // TODO: this should take a vector of local velocities magnitude because it can be different for each point on the mesh
-                const f32 cl_unsteady = backend->compute_coefficient_unsteady_cl(velocities, dt, mesh->s_ref, 0, mesh->ns);
+                const f32 cl_unsteady = backend->compute_coefficient_unsteady_cl(freestream, velocities, dt, mesh->s_ref, 0, mesh->ns);
 
                 std::printf("t: %f, CL: %f\n", t, cl_unsteady);
                 #ifdef DEBUG_DISPLACEMENT_DATA
                 cl_data << t << " " << mesh->v.z[0] << " " << cl_unsteady << " " << std::sin(omega * t) << "\n";
                 #endif
             }
-            backend->wake_rollup(dt);
+            //backend->wake_rollup(dt);
             backend->shed_gamma(); // shed before moving & incrementing currentnw
             mesh->move(kinematics.relative_displacement(t, t+dt));
+            mesh->frame = linalg::mul(mesh->frame, kinematics.relative_displacement(t, t+dt));
         }
 
         avg_vel_error /= (f32)(vec_t.size()-1);
