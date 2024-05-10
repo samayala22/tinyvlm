@@ -1,11 +1,30 @@
 import numpy as np
 
-lhs = np.array([-1.27324,3.81972e-10,0.424413,3.81972e-10,3.81972e-10,-1.27324,-1.46841e-08,0.424413,0.424413,3.81972e-10,-1.27324,3.81972e-10,1.54481e-08,0.424413,3.81972e-10,-1.27324]).reshape((4,4)).T
+EPS_f = np.float32(1.19209e-07)
+EPS_sqrt_f = np.sqrt(EPS_f)
 
-rhs = np.array([-0.0871557519] * 4)
-wake_buf = np.array([0.0848438,3.80518e-10,0.424593,3.80518e-10,6.40765e-09,0.0848438,1.54434e-08,0.424593]).reshape((2,4)).T
-gamma = np.array([0.102677956, 0.102677956])
+a = np.float32(0.1)
+b = np.float32(0.75)
 
+def func(t: np.float32):
+    return a * np.sin(b * t)
 
-print(wake_buf)
-print(rhs - wake_buf @ gamma)
+def analytical_derivative(t: np.float32):
+    return a * b * np.cos(b * t)
+
+def derivative(f, t):
+    # h = np.max((np.sqrt(t) * EPS_sqrt_f, EPS_f))
+    h = EPS_sqrt_f
+    return (f(t + h) - f(t - h)) / (2 * h)
+
+def complex_step_derivative(f, t, h=EPS_sqrt_f):
+    return np.imag(f(t + h*1j)) / h
+
+n = 500
+vec_t = np.linspace(0, 100, n)
+
+abs_err_fdm = [np.abs(derivative(func, t) - analytical_derivative(t)) for t in vec_t]
+abs_err_csd = [np.abs(complex_step_derivative(func, t) - analytical_derivative(t)) for t in vec_t]
+
+print(f"Avg. abs. error (FDM): {np.mean(abs_err_fdm):.3e}")
+print(f"Avg. abs. error (CSD): {np.mean(abs_err_csd):.3e}")

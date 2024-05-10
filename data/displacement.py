@@ -6,7 +6,7 @@ from matplotlib import cm
 class Kinematics:
     joints = [] # list of transformation lambdas
 
-    def add_joint(self, joint, frame):
+    def add_joint(self, joint):
         self.joints.append(joint)
 
     def displacement(self, t):
@@ -50,19 +50,21 @@ def rotation_matrix(center, axis, theta):
 def move_vertices(vertices, displacement):
     return displacement @ vertices
 
-def displacement_wing(t): return translation_matrix([0, 0, np.sin(0.9 * t)])
-def displacement_freestream(t): return translation_matrix([-1 * t, 0, 0])
+
 # def displacement_rotor(t, frame): 
 #     return rotation_matrix(frame @ [0, 0, 0, 1], frame @ [0, 0, 1, 0], 1 * t)
 # def displacement_rotor(t): 
 #     return rotation_matrix([0, 0, 0], [0, 0, 1], 7 * t)
+def displacement_wing(t): return translation_matrix([0, 0, np.sin(0.9 * t)])
+def freestream(t): return translation_matrix([-1 * t, 0, 0])
+alpha = np.radians(5)
+def freestream2(t): return translation_matrix([-np.cos(alpha)*t, 0, -np.sin(alpha)*t])
 def pitching(t): 
-    return rotation_matrix([0, 0, 0], [0, 1, 0], np.sin(t))
+    return rotation_matrix([0, 0, 0], [0, 1, 0], 0.25 * np.pi * np.sin(t))
 
 kinematics = Kinematics()
-# kinematics.add_joint(displacement_freestream, np.identity(4))
-# kinematics.add_joint(displacement_wing, np.identity(4))
-kinematics.add_joint(pitching, np.identity(4))
+kinematics.add_joint(freestream2)
+kinematics.add_joint(pitching)
 
 dt = 0.2
 t_final = 15
@@ -75,6 +77,9 @@ vertices = np.array([
     [1.0, 1.0, 1.0, 1.0]  # homogeneous coordinates
 ])
 vertices = np.column_stack((vertices, vertices[:,0]))
+
+# print("Analytical vel: ", [-np.cos(alpha), 0, -np.sin(alpha)])
+print("Numerical vel: ", kinematics.velocity(0, [4.0,0,0,1]))
 
 # Setup animation
 fig = plt.figure()

@@ -133,72 +133,29 @@ void BackendCPU::compute_rhs(const FlowData& flow) {
 }
 
 void BackendCPU::add_wake_influence() {
-    // const tiny::ScopedTimer timer("Wake Influence");
+    const tiny::ScopedTimer timer("Wake Influence");
 
     tf::Taskflow taskflow;
 
     Mesh& m = mesh;
-    ispc::MeshProxy mesh_proxy = {
-        m.ns, m.nc, m.nb_panels_wing(),
-        {m.v.x.data(), m.v.y.data(), m.v.z.data()}, 
-        {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
-        {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
+
+    ispc::MeshView mesh_view = {
+        mesh.nc, mesh.ns, mesh.nw, mesh.current_nw,
+        {mesh.v.x.data(), mesh.v.y.data(), mesh.v.z.data()},
+        {mesh.colloc.x.data(), mesh.colloc.y.data(), mesh.colloc.z.data()},
+        {mesh.normal.x.data(), mesh.normal.y.data(), mesh.normal.z.data()},
     };
 
-    std::fill(panel_uw.begin(), panel_uw.end(), 0.0f);
-    std::fill(panel_vw.begin(), panel_vw.end(), 0.0f);
-    std::fill(panel_ww.begin(), panel_ww.end(), 0.0f);
+    auto init = taskflow.placeholder();
+    auto wake_influence = taskflow.for_each_index((u64)0, m.ns * m.nc, [&] (u64 lidx) {
+        ispc::kernel_wake_influence(mesh_view, lidx, gamma.data(), rhs.data(), sigma_vatistas);
+    });
+    auto sync = taskflow.placeholder();
 
-    // loop over wake rows
-    for (u64 i = 0; i < mesh.current_nw; i++) {
-        const u64 wake_row_start = (m.nc + m.nw - i - 1) * m.ns;
-        std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
-        std::fill(uw.begin(), uw.end(), 0.0f);
-        std::fill(vw.begin(), vw.end(), 0.0f);
-        std::fill(ww.begin(), ww.end(), 0.0f);
-        // Actually fill the wake buffer
-        // parallel for
-        for (u64 j = 0; j < mesh.ns; j++) { // loop over columns
-            const u64 lidx = wake_row_start + j; // TODO: replace this ASAP
-            ispc::kernel_influence2(mesh_proxy, wake_buffer.data(), uw.data(), vw.data(), ww.data(), j, lidx, sigma_vatistas);
-        }
+    init.precede(wake_influence);
+    wake_influence.precede(sync);
 
-        cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
-        cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, 1.0f, uw.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, panel_uw.data(), 1);
-        cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, 1.0f, vw.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, panel_vw.data(), 1);
-        cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, 1.0f, ww.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, panel_ww.data(), 1);
-    }
-
-    // u64 idx = 0;
-    // u64 wake_row_start = (m.nc + m.nw - 1) * m.ns;
-
-    // auto init = taskflow.placeholder();
-    // auto cond = taskflow.emplace([&]{
-    //     return idx < mesh.current_nw ? 0 : 1; // 0 means continue, 1 means break
-    // });
-    // auto zero_buffer = taskflow.emplace([&]{
-    //     std::fill(wake_buffer.begin(), wake_buffer.end(), 0.0f); // zero out 
-    // });
-    // auto wake_influence = taskflow.for_each_index((u64)0, m.ns, [&] (u64 j) {
-    //     const u64 lidx = wake_row_start + j;
-    //     ispc::kernel_influence(mesh_proxy, wake_buffer.data(), j, lidx, sigma_vatistas);
-    // });
-    // auto back = taskflow.emplace([&]{
-    //     cblas_sgemv(CblasColMajor, CblasNoTrans, m.nb_panels_wing(), m.ns, -1.0f, wake_buffer.data(), m.nb_panels_wing(), gamma.data() + wake_row_start, 1, 1.0f, rhs.data(), 1);
-
-    //     idx++;
-    //     wake_row_start -= m.ns;
-    //     return 0; // 0 means continue
-    // });
-    // auto sync = taskflow.placeholder();
-
-    // init.precede(cond);
-    // cond.precede(zero_buffer, sync);
-    // zero_buffer.precede(wake_influence);
-    // wake_influence.precede(back);
-    // back.precede(cond);
-
-    // Executor::get().run(taskflow).wait();
+    Executor::get().run(taskflow).wait();
 }
 
 void BackendCPU::wake_rollup(float dt) {
@@ -218,7 +175,7 @@ void BackendCPU::wake_rollup(float dt) {
 
     auto init = taskflow.placeholder();
     auto rollup = taskflow.for_each_index(wake_vertices_begin, wake_vertices_end, [&] (u64 vidx) {
-        ispc::kernel_induced_vel(mesh_view, dt, rollup_vertices.x.data(), rollup_vertices.y.data(), rollup_vertices.z.data(), vidx, gamma.data(), sigma_vatistas);
+        ispc::kernel_rollup(mesh_view, dt, rollup_vertices.x.data(), rollup_vertices.y.data(), rollup_vertices.z.data(), vidx, gamma.data(), sigma_vatistas);
     });
     auto copy = taskflow.emplace([&]{
         std::copy(rollup_vertices.x.data() + wake_vertices_begin, rollup_vertices.x.data() + wake_vertices_end, mesh.v.x.data() + wake_vertices_begin);
@@ -300,30 +257,20 @@ f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area, con
     return cl;
 }
 
-f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) {
+f32 BackendCPU::compute_coefficient_unsteady_cl(const linalg::alias::float3& freestream, const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) {
     assert(n > 0);
     assert(j >= 0 && j+n <= mesh.ns);
     
     f32 cl = 0.0f;
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
-
-    // for (auto& elem : rhs) {
-    //     std::cout << elem << " ";
-    // }
-    // std::cout << "\n";
+    const linalg::alias::float3 span_axis{mesh.frame.y[0], mesh.frame.y[1], mesh.frame.y[2]};
+    const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
 
     for (u64 u = 0; u < mesh.nc; u++) {
         for (u64 v = j; v < j + n; v++) {
             const u64 li = u * mesh.ns + v; // linear index
 
-            linalg::alias::float3 freestream{vel.x[li], vel.y[li], vel.z[li]};
-            //std::cout << "Without: " << freestream << "\n";
-            // freestream.x += panel_uw[li];
-            // freestream.y += panel_vw[li];
-            // freestream.z += panel_ww[li];
-            // std::cout << "With: " << freestream << "\n";
-            
-            const linalg::alias::float3 lift_axis = compute_lift_axis(freestream);
+            linalg::alias::float3 V{vel.x[li], vel.y[li], vel.z[li]}; // local velocity (freestream + displacement vel)
 
             const linalg::alias::float3 v0 = mesh.get_v0(li);
             const linalg::alias::float3 v1 = mesh.get_v1(li);
@@ -352,7 +299,7 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const SoA_3D_t<f32>& vel, f32 dt
             cl += linalg::dot(force, lift_axis);
         }
     }
-    cl /= 0.5f * rho * 1.0f * 1.0f * area; // TODO: remove uinf hardcoded as 1.0f
+    cl /= 0.5f * rho * linalg::length2(freestream) * area; // TODO: remove uinf hardcoded as 1.0f
 
     return cl;
 }
