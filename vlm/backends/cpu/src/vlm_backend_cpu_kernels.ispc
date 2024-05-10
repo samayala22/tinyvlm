@@ -180,7 +180,45 @@ export void kernel_influence2(
     }
 }
 
-export void kernel_induced_vel(
+export void kernel_wake_influence(
+    uniform MeshView& m,
+    uniform uint64 lidx, uniform float* uniform gamma, uniform float* uniform rhs, uniform float sigma
+    ) {
+
+    const uniform float3 colloc_influenced = {m.colloc.x[lidx], m.colloc.y[lidx], m.colloc.z[lidx]};
+
+    float3 induced_vel = {0.0f, 0.0f, 0.0f};
+
+    // Wake influence on wing
+    for (uint64 i = m.ni + m.nw - m.cw; i < m.ni + m.nw; i++) {
+        foreach(j = 0 ... m.nj) {
+            uint64 v0 = (i+0) * (m.nj+1) + j;
+            uint64 v1 = (i+0) * (m.nj+1) + j + 1;
+            uint64 v2 = (i+1) * (m.nj+1) + j + 1;
+            uint64 v3 = (i+1) * (m.nj+1) + j;
+
+            // Loads
+            const float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
+            const float3 vertex1 = {m.v.x[v1], m.v.y[v1], m.v.z[v1]};
+            const float3 vertex2 = {m.v.x[v2], m.v.y[v2], m.v.z[v2]};
+            const float3 vertex3 = {m.v.x[v3], m.v.y[v3], m.v.z[v3]};
+        
+            float3 ind = {0.0f, 0.0f, 0.0f};
+            kernel_symmetry(ind, colloc_influenced, vertex0, vertex1, sigma);
+            kernel_symmetry(ind, colloc_influenced, vertex1, vertex2, sigma);
+            kernel_symmetry(ind, colloc_influenced, vertex2, vertex3, sigma);
+            kernel_symmetry(ind, colloc_influenced, vertex3, vertex0, sigma);
+
+            induced_vel += ind * gamma[i * m.nj + j];
+        }
+    }
+
+    const uniform float3 normal = {m.normal.x[lidx], m.normal.y[lidx], m.normal.z[lidx]};
+    const float induced_vel_dot_normal = dot(induced_vel, normal); // vertical 2 fma + mul
+    rhs[lidx] -= reduce_add(induced_vel_dot_normal);
+}
+
+export void kernel_rollup(
     uniform MeshView& m, uniform float dt, 
     uniform float* uniform rollup_vx, uniform float* uniform rollup_vy, uniform float* uniform rollup_vz,
     uniform uint64 vidx, uniform float* uniform gamma, uniform float sigma
