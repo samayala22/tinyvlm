@@ -32,7 +32,7 @@ beta_2 = 0.3
 # UVLM parameters
 rho = 1 # fluid density
 u_inf = 1 # freestream
-ar = 500 # aspect ratio
+ar = 10000 # aspect ratio
 b = 0.5 # half chord
 c = 2*b # chord
 a = ar / c # full span
@@ -78,12 +78,12 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     omega = k * 2.0 * u_inf / c # pitch frequency
 
     # sudden acceleration
-    def pitch(t): return np.radians(5)
-    def heave(t): return 0
+    # def pitch(t): return np.radians(5)
+    # def heave(t): return 0
 
     # pure heaving
-    # def pitch(t): return 0
-    # def heave(t): return -amplitude * np.sin(omega * t)
+    def pitch(t): return np.radians(-5)
+    def heave(t): return -amplitude * np.sin(omega * t)
 
     # pure pitching
     # def pitch(t): return np.radians(np.sin(omega * t))
@@ -117,6 +117,16 @@ analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cy
 difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
 error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx)) 
 print(f"Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
+
+katz_t = []
+katz_cl = []
+with open("data/katz/katz_cl.txt", "r") as f:
+    for line in f:
+        t, cl = line.split()
+        katz_t.append(float(t))
+        katz_cl.append(float(cl))
+
+axs["time"].scatter(katz_t[1:], katz_cl[1:], label="Katz", facecolors='none', edgecolors='g', s=20)
 
 axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM", facecolors='none', edgecolors='r', s=20)
 # axs["time"].scatter(uvlm_t, uvlm_z, label="UVLM z", facecolors='none', edgecolors='r', s=20)

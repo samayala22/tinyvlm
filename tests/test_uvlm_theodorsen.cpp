@@ -46,7 +46,6 @@ class Kinematics {
 
     // Compute the instantaneous velocity vector at a given point at a given time for n joints (starting from the first, 0 = all joints)
     linalg::alias::float4 velocity(f32 t, const linalg::alias::float4& vertex, u64 n = 0) {
-        //const f32 EPS = std::max(10.f * t *EPS_f, EPS_f); // adaptive epsilon
         const f32 EPS = EPS_sqrt_f;
         //return (linalg::mul(relative_displacement(t, t+EPS), vertex)-vertex)/EPS;
         return (linalg::mul(relative_displacement(t, t+EPS, n), vertex) - linalg::mul(relative_displacement(t, t-EPS, n), vertex))/ (2*EPS); // central diff
@@ -79,10 +78,12 @@ void print_buffer(const T* start, u64 size) {
 
 int main() {
     const tiny::ScopedTimer timer("UVLM TOTAL");
-    // vlm::Executor::instance(1);
-    // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x8.x"};
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x5.x"};
 
+    const u64 ni = 10;
+    const u64 nj = 5;
+    // vlm::Executor::instance(1);
+    const std::vector<std::string> meshes = {"../../../../mesh/rectangular_5x10.x"};
+    //const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
@@ -94,28 +95,36 @@ int main() {
     const f32 cycles = 4.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.75; // reduced frequency
+    const f32 k = 0.5; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
 
     Kinematics kinematics{};
 
+    tmatrix initial_pose = linalg::rotation_matrix(
+        linalg::alias::float3{0.0f, 0.0f, 0.0f}, // take into account quarter chord panel offset
+        linalg::alias::float3{0.0f, 1.0f, 0.0f},
+        to_radians(-5.f)
+    );
+
+    //tmatrix initial_pose = linalg::identity;
+
     // Periodic heaving
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
-    //         -u_inf*t,
-    //         0.0f,
-    //         0.0f
-    //     });
-    // });
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
-    //         0.0f,
-    //         0.0f,
-    //         amplitude * std::sin(omega * t) // heaving
-    //     });
-    // });
+    kinematics.add([=](f32 t) {
+        return linalg::translation_matrix(linalg::alias::float3{
+            -u_inf*t,
+            0.0f,
+            0.0f
+        });
+    });
+    kinematics.add([=](f32 t) {
+        return linalg::translation_matrix(linalg::alias::float3{
+            0.0f,
+            0.0f,
+            amplitude * std::sin(omega * t) // heaving
+        });
+    });
 
     // Periodic pitching
     // kinematics.add([=](f32 t) {
@@ -127,21 +136,28 @@ int main() {
     // });
     // kinematics.add([=](f32 t) {
     //     return linalg::rotation_matrix(
-    //         linalg::alias::float3{0.0f, 0.0f, 0.0f},
+    //         linalg::alias::float3{-(2.f*b) / (f32)ni, 0.0f, 0.0f}, // take into account quarter chord panel offset
     //         linalg::alias::float3{0.0f, 1.0f, 0.0f},
     //         to_radians(std::sin(omega * t))
     //     );
     // });
     
     // Sudden acceleration
-    const f32 alpha = to_radians(5.0f);
-    kinematics.add([=](f32 t) {
-        return linalg::translation_matrix(linalg::alias::float3{
-            -u_inf*cos(alpha)*t,
-            0.0f,
-            -u_inf*sin(alpha)*t
-        });
-    });
+    // const f32 alpha = to_radians(5.0f);
+    // kinematics.add([=](f32 t) {
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         -u_inf*cos(alpha)*t,
+    //         0.0f,
+    //         -u_inf*sin(alpha)*t
+    //     });
+    // });
+    // kinematics.add([=](f32 t) {
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         -u_inf*t,
+    //         0.0f,
+    //         0.0f
+    //     });
+    // });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
         const std::unique_ptr<Mesh> mesh = create_mesh(mesh_name);
@@ -166,6 +182,7 @@ int main() {
                 for (u64 i = 1; i < trailing_vertices.size; i++) {
                     dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
                 }
+                dt = 0.2f;
 
                 auto transform = kinematics.relative_displacement(t, t+dt);
                 for (u64 i = 0; i < trailing_vertices.size; i++) {
@@ -196,6 +213,15 @@ int main() {
         mesh->resize_wake(vec_t.size()-1); // +1 for the initial pose
         const std::unique_ptr<Backend> backend = create_backend(backend_name, *mesh); // create after mesh has been resized
         
+        // Initial position
+        for (u64 i = 0; i < mesh->nb_vertices_wing(); i++) {
+            const linalg::alias::float4 transformed_pt = linalg::mul(initial_pose, linalg::alias::float4{mesh->v.x[i], mesh->v.y[i], mesh->v.z[i], 1.f});
+            mesh->v.x[i] = transformed_pt.x;
+            mesh->v.y[i] = transformed_pt.y;
+            mesh->v.z[i] = transformed_pt.z;
+        }
+        mesh->compute_metrics_wing();
+
         // Precompute the LHS since wing geometry is constant
         backend->compute_lhs();
         backend->lu_factor();
@@ -231,10 +257,6 @@ int main() {
                 velocities.x[idx] = local_velocity.x;
                 velocities.y[idx] = local_velocity.y;
                 velocities.z[idx] = local_velocity.z;
-
-                // velocities.x[idx] = u_inf*cos(alpha);
-                // velocities.y[idx] = 0.f;
-                // velocities.z[idx] = u_inf*sin(alpha);
 
                 if (idx == 0) {
                     linalg::alias::float4 freestream_vel = -kinematics.velocity(t, colloc_pt, 1);
