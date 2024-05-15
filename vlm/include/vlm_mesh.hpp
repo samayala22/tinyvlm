@@ -83,6 +83,7 @@ class Mesh {
 
     void update_wake(const linalg::alias::float3& u_inf); // update wake vertices
     void correction_high_aoa(f32 alpha_rad); // correct collocation points for high aoa
+    void create_vortex_panels(); // create true vortex panels
     void compute_connectivity(); // fill offsets, connectivity
     void compute_metrics_wing(); // fill colloc, normal, area
     void compute_metrics_wake();
