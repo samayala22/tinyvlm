@@ -41,7 +41,11 @@ std::unique_ptr<Mesh> vlm::create_mesh(const std::string& filename, const u64 nw
     return std::make_unique<Mesh>(filename, nw);
 }
 
+void Mesh::create_vortex_panels() {
+}
+
 void Mesh::init() {
+    create_vortex_panels();
     if (c_ref == 0.0f) c_ref = chord_mean(0, ns+1); // use MAC as default
     if (s_ref == 0.0f) s_ref = panels_area_xy(0,0, nc, ns); // use projected area as default
     compute_connectivity();
