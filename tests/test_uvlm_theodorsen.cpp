@@ -82,8 +82,8 @@ int main() {
     const u64 ni = 10;
     const u64 nj = 5;
     // vlm::Executor::instance(1);
-    const std::vector<std::string> meshes = {"../../../../mesh/rectangular_5x10.x"};
-    //const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
+    //const std::vector<std::string> meshes = {"../../../../mesh/rectangular_5x10.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
@@ -92,23 +92,23 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 4.0f;
+    const f32 cycles = 3.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.5; // reduced frequency
+    const f32 k = 0.75; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
 
     Kinematics kinematics{};
 
-    tmatrix initial_pose = linalg::rotation_matrix(
+    const f32 initial_angle = 0.0f;
+
+    const tmatrix initial_pose = linalg::rotation_matrix(
         linalg::alias::float3{0.0f, 0.0f, 0.0f}, // take into account quarter chord panel offset
         linalg::alias::float3{0.0f, 1.0f, 0.0f},
-        to_radians(-5.f)
+        to_radians(initial_angle)
     );
-
-    //tmatrix initial_pose = linalg::identity;
 
     // Periodic heaving
     kinematics.add([=](f32 t) {
@@ -182,7 +182,6 @@ int main() {
                 for (u64 i = 1; i < trailing_vertices.size; i++) {
                     dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
                 }
-                dt = 0.2f;
 
                 auto transform = kinematics.relative_displacement(t, t+dt);
                 for (u64 i = 0; i < trailing_vertices.size; i++) {
@@ -261,7 +260,7 @@ int main() {
                 if (idx == 0) {
                     linalg::alias::float4 freestream_vel = -kinematics.velocity(t, colloc_pt, 1);
                     freestream = {freestream_vel.x, freestream_vel.y, freestream_vel.z};
-                    std::cout << freestream << "\n";
+                    std::cout << "Freestream: " << freestream << "\n";
                     const f32 analytical_vel = - amplitude * omega * std::cos(omega * t);
                     const f32 rel_error = 100.0f * std::abs((analytical_vel - local_velocity.z) / analytical_vel);
                     std::cout << "vel error:" << rel_error << "%\n";
