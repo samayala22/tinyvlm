@@ -42,6 +42,27 @@ std::unique_ptr<Mesh> vlm::create_mesh(const std::string& filename, const u64 nw
 }
 
 void Mesh::create_vortex_panels() {
+    for (u64 i = 0; i < nc; i++) {
+        for (u64 j = 0; j < ns+1; j++) {
+            const u64 v0 = (i+0) * (ns+1) + j;
+            const u64 v3 = (i+1) * (ns+1) + j;
+
+            v.x[v0] = 0.75f * v.x[v0] + 0.25f * v.x[v3];
+            v.y[v0] = 0.75f * v.y[v0] + 0.25f * v.y[v3];
+            v.z[v0] = 0.75f * v.z[v0] + 0.25f * v.z[v3];
+        }
+    }
+
+    // Trailing edge vertices
+    const u64 i = nc;
+    for (u64 j = 0; j < ns+1; j++) {
+        const u64 v0 = (i+0) * (ns+1) + j;
+        const u64 v3 = (i+1) * (ns+1) + j;
+        
+        v.x[v3] = 1.25f * v.x[v3] - 0.25f * v.x[v0];
+        v.y[v3] = 1.25f * v.y[v3] - 0.25f * v.y[v0];
+        v.z[v3] = 1.25f * v.z[v3] - 0.25f * v.z[v0];
+    }
 }
 
 void Mesh::init() {

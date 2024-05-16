@@ -4,3 +4,4 @@
 - [ ] Rename many functions and harmonize the API
 - [ ] Decide what to do with SoA3D and evaluate the fusion of the 3 buffers into one 
 - [ ] using a view for multidimensional indexing.
+- [ ] Instead of view, use a function that returns a tuple of the panel's vertex indices that takes in arg i, j values for chordwise and spanwise location

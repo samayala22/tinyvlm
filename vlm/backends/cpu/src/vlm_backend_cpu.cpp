@@ -282,7 +282,7 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const linalg::alias::float3& fre
             const f32 gamma_dt = (gamma[li] - gamma_prev[li]) / dt; // backward difference
 
             // Joukowski method
-            force += rho * delta_gamma[li] * linalg::cross(freestream, v1 - v0);
+            force += rho * delta_gamma[li] * linalg::cross(V, v1 - v0);
             force += rho * gamma_dt * mesh.area[li] * normal;
 
             // Katz Plotkin method
