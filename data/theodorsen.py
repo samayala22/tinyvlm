@@ -38,7 +38,7 @@ c = 2*b # chord
 a = ar / c # full span
 pitch_axis = -0.5 # leading edge
 
-cycles = 4 # number of periods
+cycles = 3 # number of periods
 
 uvlm_cl = []
 uvlm_t = []
@@ -82,7 +82,7 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     # def heave(t): return 0
 
     # pure heaving
-    def pitch(t): return np.radians(-5)
+    def pitch(t): return 0
     def heave(t): return -amplitude * np.sin(omega * t)
 
     # pure pitching
@@ -118,15 +118,15 @@ difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
 error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx)) 
 print(f"Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
-katz_t = []
-katz_cl = []
-with open("data/katz/katz_cl.txt", "r") as f:
-    for line in f:
-        t, cl = line.split()
-        katz_t.append(float(t))
-        katz_cl.append(float(cl))
+# katz_t = []
+# katz_cl = []
+# with open("data/katz/katz_cl.txt", "r") as f:
+#     for line in f:
+#         t, cl = line.split()
+#         katz_t.append(float(t))
+#         katz_cl.append(float(cl))
 
-axs["time"].scatter(katz_t[1:], katz_cl[1:], label="Katz", facecolors='none', edgecolors='g', s=20)
+# axs["time"].scatter(katz_t[1:], katz_cl[1:], label="Katz", facecolors='none', edgecolors='g', s=20)
 
 axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM", facecolors='none', edgecolors='r', s=20)
 # axs["time"].scatter(uvlm_t, uvlm_z, label="UVLM z", facecolors='none', edgecolors='r', s=20)
