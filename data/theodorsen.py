@@ -82,12 +82,12 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     # def heave(t): return 0
 
     # pure heaving
-    def pitch(t): return 0
-    def heave(t): return -amplitude * np.sin(omega * t)
+    # def pitch(t): return 0
+    # def heave(t): return -amplitude * np.sin(omega * t)
 
     # pure pitching
-    # def pitch(t): return np.radians(np.sin(omega * t))
-    # def heave(t): return 0
+    def pitch(t): return np.radians(np.sin(omega * t))
+    def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -111,7 +111,7 @@ for amp, k in zip(amplitudes, reduced_frequencies):
     angle = np.array([np.degrees(pitch(ti)) for ti in vec_t])
 
     axs["time"].plot(vec_t, cl_theo, label=f"k={k}")
-    axs["heave"].plot(coord_z[cycle_idx:], cl_theo[cycle_idx:], label=f"k={k}")
+    axs["heave"].plot(angle[cycle_idx:], cl_theo[cycle_idx:], label=f"k={k}")
 
 analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cycle_idx:]])
 difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
@@ -130,7 +130,7 @@ print(f"Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
 axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM", facecolors='none', edgecolors='r', s=20)
 # axs["time"].scatter(uvlm_t, uvlm_z, label="UVLM z", facecolors='none', edgecolors='r', s=20)
-axs["heave"].scatter(uvlm_z[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label="UVLM", facecolors='none', edgecolors='r', s=20)
+axs["heave"].scatter(uvlm_alpha[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label="UVLM", facecolors='none', edgecolors='r', s=20)
 
 # axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
 
