@@ -79,7 +79,7 @@ void print_buffer(const T* start, u64 size) {
 int main() {
     const tiny::ScopedTimer timer("UVLM TOTAL");
 
-    const u64 ni = 10;
+    const u64 ni = 20;
     const u64 nj = 5;
     // vlm::Executor::instance(1);
     //const std::vector<std::string> meshes = {"../../../../mesh/rectangular_5x10.x"};
@@ -95,7 +95,7 @@ int main() {
     const f32 cycles = 3.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.75; // reduced frequency
+    const f32 k = 0.2; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
@@ -111,36 +111,36 @@ int main() {
     );
 
     // Periodic heaving
-    kinematics.add([=](f32 t) {
-        return linalg::translation_matrix(linalg::alias::float3{
-            -u_inf*t,
-            0.0f,
-            0.0f
-        });
-    });
-    kinematics.add([=](f32 t) {
-        return linalg::translation_matrix(linalg::alias::float3{
-            0.0f,
-            0.0f,
-            amplitude * std::sin(omega * t) // heaving
-        });
-    });
-
-    // Periodic pitching
     // kinematics.add([=](f32 t) {
     //     return linalg::translation_matrix(linalg::alias::float3{
-    //         -u_inf*t, // freestream
+    //         -u_inf*t,
     //         0.0f,
     //         0.0f
     //     });
     // });
     // kinematics.add([=](f32 t) {
-    //     return linalg::rotation_matrix(
-    //         linalg::alias::float3{-(2.f*b) / (f32)ni, 0.0f, 0.0f}, // take into account quarter chord panel offset
-    //         linalg::alias::float3{0.0f, 1.0f, 0.0f},
-    //         to_radians(std::sin(omega * t))
-    //     );
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         0.0f,
+    //         0.0f,
+    //         amplitude * std::sin(omega * t) // heaving
+    //     });
     // });
+
+    // Periodic pitching
+    kinematics.add([=](f32 t) {
+        return linalg::translation_matrix(linalg::alias::float3{
+            -u_inf*t, // freestream
+            0.0f,
+            0.0f
+        });
+    });
+    kinematics.add([=](f32 t) {
+        return linalg::rotation_matrix(
+            linalg::alias::float3{0.25f, 0.0f, 0.0f},
+            linalg::alias::float3{0.0f, 1.0f, 0.0f},
+            to_radians(std::sin(omega * t))
+        );
+    });
     
     // Sudden acceleration
     // const f32 alpha = to_radians(5.0f);
