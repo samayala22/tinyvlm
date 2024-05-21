@@ -21,6 +21,24 @@ def theo_fun(k):
     C = H1 / (H1 + 1.0j * H0)
     return C
 
+def uvlm_data(filename):
+    uvlm_cl = []
+    uvlm_t = []
+    uvlm_z = []
+    uvlm_alpha = []
+    with open(f"build/windows/x64/release/{filename}.txt", "r") as f:
+        k = float(f.readline()) # get reduced frequency of the simulation
+        for line in f:
+            time_step, z, cl, alpha = line.split()
+            uvlm_t.append(float(time_step))
+            uvlm_z.append(float(z))
+            uvlm_cl.append(float(cl))
+            uvlm_alpha.append(float(alpha))
+
+    uvlm_alpha = np.array(uvlm_alpha)
+    uvlm_cl = np.array(uvlm_cl)
+    return k, uvlm_t, uvlm_z, uvlm_cl, uvlm_alpha
+
 # Some info in Katz Plotkin p414 (eq 13.73a)
 # Jone's approximation of Wagner function
 b0 = 1
@@ -38,33 +56,10 @@ c = 2*b # chord
 a = ar / c # full span
 pitch_axis = -0.5 # leading edge
 
+# Theodorsen numerical simulation param
 cycles = 3 # number of periods
-
-uvlm_cl = []
-uvlm_t = []
-uvlm_z = []
-uvlm_alpha = []
-with open("build/windows/x64/release/cl_data.txt", "r") as f:
-    freq = float(f.readline()) # get reduced frequency of the simulation
-    for line in f:
-        time_step, z, cl, alpha = line.split()
-        uvlm_t.append(float(time_step))
-        uvlm_z.append(float(z))
-        uvlm_cl.append(float(cl))
-        uvlm_alpha.append(float(alpha))
-
-n = len(uvlm_t) # number of time steps
-uvlm_cycle_idx = int((1 - 1 / cycles) * n - 1)
-uvlm_alpha = np.array(uvlm_alpha)
-uvlm_cl = np.array(uvlm_cl)
-
-amplitudes = [0.1] 
-reduced_frequencies = [freq]
-
-t_final = cycles * 2 * np.pi / (reduced_frequencies[0] * 2.0 * u_inf / c) # 4 cycles
-nb_pts = 500
+nb_pts = 1000
 cycle_idx = int((1 - 1 / cycles) * nb_pts - 1)
-vec_t = np.linspace(0, t_final, nb_pts)
 
 fig, axs = plt.subplot_mosaic(
     [["time"], ["heave"]],  # Disposition des graphiques
@@ -72,22 +67,34 @@ fig, axs = plt.subplot_mosaic(
     figsize=(11, 6),  # Ajuster la taille de la figure (x,y)
 )
 
-for amp, k in zip(amplitudes, reduced_frequencies):
-    # heave parameters
-    amplitude = amp
-    omega = k * 2.0 * u_inf / c # pitch frequency
+files = [
+    "cl_data_01",
+    "cl_data_03",
+    "cl_data_05",
+    "cl_data_07",
+]
+
+for file in files:
+    k, uvlm_t, uvlm_z, uvlm_cl, uvlm_alpha = uvlm_data(file)
+    t_final = cycles * 2 * np.pi / (k * 2.0 * u_inf / c)
+    omega = k * 2.0 * u_inf / c # frequency
+
+    vec_t = np.linspace(0, t_final, nb_pts)
+
+    n = len(uvlm_t) # number of time steps
+    uvlm_cycle_idx = int((1 - 1 / cycles) * n - 1)
 
     # sudden acceleration
     # def pitch(t): return np.radians(5)
     # def heave(t): return 0
 
     # pure heaving
-    # def pitch(t): return 0
-    # def heave(t): return -amplitude * np.sin(omega * t)
+    def pitch(t): return 0
+    def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    def pitch(t): return np.radians(np.sin(omega * t))
-    def heave(t): return 0
+    # def pitch(t): return np.radians(np.sin(omega * t))
+    # def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -107,30 +114,19 @@ for amp, k in zip(amplitudes, reduced_frequencies):
         return (L_m + L_c) / (0.5 * rho * u_inf * u_inf * c)
 
     cl_theo = np.array([cl_theodorsen(ti) for ti in vec_t])
-    coord_z = np.array([-heave(ti) / c for ti in vec_t])
+    h = np.array([-heave(ti) / c for ti in vec_t])
     angle = np.array([np.degrees(pitch(ti)) for ti in vec_t])
 
-    axs["time"].plot(vec_t, cl_theo, label=f"k={k}")
-    axs["heave"].plot(angle[cycle_idx:], cl_theo[cycle_idx:], label=f"k={k}")
+    plotc, = axs["time"].plot(vec_t, cl_theo, label=f"Theodorsen (k={k})")
+    axs["heave"].plot(h[cycle_idx:], cl_theo[cycle_idx:], label=f"Theodorsen (k={k})")
 
-analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cycle_idx:]])
-difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
-error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx)) 
-print(f"Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
+    axs["time"].scatter(uvlm_t, uvlm_cl, label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
+    axs["heave"].scatter(uvlm_z[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
 
-# katz_t = []
-# katz_cl = []
-# with open("data/katz/katz_cl.txt", "r") as f:
-#     for line in f:
-#         t, cl = line.split()
-#         katz_t.append(float(t))
-#         katz_cl.append(float(cl))
-
-# axs["time"].scatter(katz_t[1:], katz_cl[1:], label="Katz", facecolors='none', edgecolors='g', s=20)
-
-axs["time"].scatter(uvlm_t, uvlm_cl, label="UVLM", facecolors='none', edgecolors='r', s=20)
-# axs["time"].scatter(uvlm_t, uvlm_z, label="UVLM z", facecolors='none', edgecolors='r', s=20)
-axs["heave"].scatter(uvlm_alpha[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label="UVLM", facecolors='none', edgecolors='r', s=20)
+    analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cycle_idx:]])
+    difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
+    error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx)) 
+    print(f"Freq: {k}, Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
 # axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
 
