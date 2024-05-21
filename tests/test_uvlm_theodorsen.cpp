@@ -95,7 +95,7 @@ int main() {
     const f32 cycles = 3.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.2; // reduced frequency
+    const f32 k = 0.7; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
@@ -111,36 +111,36 @@ int main() {
     );
 
     // Periodic heaving
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
-    //         -u_inf*t,
-    //         0.0f,
-    //         0.0f
-    //     });
-    // });
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
-    //         0.0f,
-    //         0.0f,
-    //         amplitude * std::sin(omega * t) // heaving
-    //     });
-    // });
-
-    // Periodic pitching
     kinematics.add([=](f32 t) {
         return linalg::translation_matrix(linalg::alias::float3{
-            -u_inf*t, // freestream
+            -u_inf*t,
             0.0f,
             0.0f
         });
     });
     kinematics.add([=](f32 t) {
-        return linalg::rotation_matrix(
-            linalg::alias::float3{0.25f, 0.0f, 0.0f},
-            linalg::alias::float3{0.0f, 1.0f, 0.0f},
-            to_radians(std::sin(omega * t))
-        );
+        return linalg::translation_matrix(linalg::alias::float3{
+            0.0f,
+            0.0f,
+            amplitude * std::sin(omega * t) // heaving
+        });
     });
+
+    // Periodic pitching
+    // kinematics.add([=](f32 t) {
+    //     return linalg::translation_matrix(linalg::alias::float3{
+    //         -u_inf*t, // freestream
+    //         0.0f,
+    //         0.0f
+    //     });
+    // });
+    // kinematics.add([=](f32 t) {
+    //     return linalg::rotation_matrix(
+    //         linalg::alias::float3{0.25f, 0.0f, 0.0f},
+    //         linalg::alias::float3{0.0f, 1.0f, 0.0f},
+    //         to_radians(std::sin(omega * t))
+    //     );
+    // });
     
     // Sudden acceleration
     // const f32 alpha = to_radians(5.0f);
@@ -252,19 +252,23 @@ int main() {
             linalg::alias::float3 freestream;
             for (u64 idx = 0; idx < mesh->nb_panels_wing(); idx++) {
                 const linalg::alias::float4 colloc_pt{mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f};
-                auto local_velocity = -kinematics.velocity(t, colloc_pt);
-                velocities.x[idx] = local_velocity.x;
-                velocities.y[idx] = local_velocity.y;
-                velocities.z[idx] = local_velocity.z;
+                // auto local_velocity = -kinematics.velocity(t, colloc_pt);
+                // velocities.x[idx] = local_velocity.x;
+                // velocities.y[idx] = local_velocity.y;
+                // velocities.z[idx] = local_velocity.z;
+
+                velocities.x[idx] = u_inf;
+                velocities.y[idx] = 0.0f;
+                velocities.z[idx] = - omega * amplitude * std::cos(omega * t);
 
                 if (idx == 0) {
                     linalg::alias::float4 freestream_vel = -kinematics.velocity(t, colloc_pt, 1);
                     freestream = {freestream_vel.x, freestream_vel.y, freestream_vel.z};
-                    std::cout << "Freestream: " << freestream << "\n";
-                    const f32 analytical_vel = - amplitude * omega * std::cos(omega * t);
-                    const f32 rel_error = 100.0f * std::abs((analytical_vel - local_velocity.z) / analytical_vel);
-                    std::cout << "vel error:" << rel_error << "%\n";
-                    avg_vel_error += rel_error;
+                    // std::cout << "Freestream: " << freestream << "\n";
+                    // const f32 analytical_vel = - amplitude * omega * std::cos(omega * t);
+                    // const f32 rel_error = 100.0f * std::abs((analytical_vel - local_velocity.z) / analytical_vel);
+                    // std::cout << "vel error:" << rel_error << "%\n";
+                    // avg_vel_error += rel_error;
                 }
             }
 
