@@ -89,11 +89,18 @@ namespace linalg
         // SFINAE helpers to determine result of function application
         template<class F, class... T> using ret_t = decltype(std::declval<F>()(std::declval<T>()...));
 
+        // Type traits for custom scalar
+        enum class Type {Scalar, NonScalar};
+        template<typename T, typename V = void> struct has_type_definition : std::false_type {};
+        template<typename T> struct has_type_definition<T, std::void_t<decltype(T::_linalg_type)>> : std::true_type {};
+        template<typename T, typename Enable = void> struct is_custom_scalar : std::false_type {};
+        template<typename T> struct is_custom_scalar<T, std::enable_if_t<has_type_definition<T>::value && (T::category == Type::Scalar)>> : std::true_type {};
+
         // SFINAE helper which is defined if all provided types are scalars
         struct empty {};
         template<class... T> struct scalars;
         template<> struct scalars<> { using type=void; };
-        template<class T, class... U> struct scalars<T,U...> : std::conditional<std::is_arithmetic<T>::value, scalars<U...>, empty>::type {};
+        template<class T, class... U> struct scalars<T,U...> : std::conditional<std::is_arithmetic<T>::value || is_custom_scalar<T>::value, scalars<U...>, empty>::type {};
         template<class... T> using scalars_t = typename scalars<T...>::type;
 
         // Helpers which indicate how apply(F, ...) should be called for various arguments
