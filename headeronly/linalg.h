@@ -91,8 +91,10 @@ namespace linalg
 
         // Type traits for custom scalar
         enum class Type {Scalar, NonScalar};
+        template<typename T, typename V = void> struct has_type_definition : std::false_type {};
+        template<typename T> struct has_type_definition<T, std::void_t<decltype(T::_linalg_type)>> : std::true_type {};
         template<typename T, typename Enable = void> struct is_custom_scalar : std::false_type {};
-        template<typename T> struct is_custom_scalar<T, std::enable_if_t<std::is_same<decltype(T::_linalg_type), Type>::value && (T::_linalg_type == Type::Scalar)>> : std::true_type {};
+        template<typename T> struct is_custom_scalar<T, std::enable_if_t<has_type_definition<T>::value && (T::_linalg_type == Type::Scalar)>> : std::true_type {};
 
         // SFINAE helper which is defined if all provided types are scalars
         struct empty {};
