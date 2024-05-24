@@ -406,7 +406,7 @@ void Mesh::io_read(const std::string& filename) {
     }
 }
 
-void Mesh::move(const linalg::alias::float4x4& transform) {
+void Mesh::move(const linalg::alias::float4x4& transform, const SoA_3D_t<f32>& origin_pos) {
     assert(current_nw < nw); // check if we have capacity
     
     // Shed wake before moving    
@@ -419,7 +419,7 @@ void Mesh::move(const linalg::alias::float4x4& transform) {
     
     // Perform the movement
     for (u64 i = 0; i < nb_vertices_wing(); i++) {
-        const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{v.x[i], v.y[i], v.z[i], 1.f});
+        const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{origin_pos.x[i], origin_pos.y[i], origin_pos.z[i], 1.f});
         v.x[i] = transformed_pt.x;
         v.y[i] = transformed_pt.y;
         v.z[i] = transformed_pt.z;

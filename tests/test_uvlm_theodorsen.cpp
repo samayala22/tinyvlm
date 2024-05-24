@@ -6,8 +6,9 @@
 #include <functional> // std::function
 
 #include "tinycombination.hpp"
-
+#include "tinyad.hpp"
 #include "tinytimer.hpp"
+
 #include "vlm.hpp"
 #include "vlm_data.hpp"
 #include "vlm_types.hpp"
@@ -19,45 +20,72 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
-using tmatrix = linalg::alias::float4x4; // transformation matri
+using tmatrix = linalg::mat<fwd::Float,4,4>;
 
-// TODO: add caching for transformation matrices 
+linalg::alias::float4x4 dual_to_float(const tmatrix& m) {
+    return {
+        {m.x.x.val(), m.x.y.val(), m.x.z.val(), m.x.w.val()},
+        {m.y.x.val(), m.y.y.val(), m.y.z.val(), m.y.w.val()},
+        {m.z.x.val(), m.z.y.val(), m.z.z.val(), m.z.w.val()},
+        {m.w.x.val(), m.w.y.val(), m.w.z.val(), m.w.w.val()}
+    };
+}
+
 class Kinematics {
     public:
     Kinematics() = default;
     ~Kinematics() = default;
 
-    void add(std::function<tmatrix(f32 t)>&& joint) {
+    void add(std::function<tmatrix(const fwd::Float& t)>&& joint) {
         m_joints.push_back(std::move(joint));
     }
 
-    tmatrix displacement(f32 t, u64 n = 0) {
+    tmatrix displacement(float t, u64 n) {
+        fwd::Float t_dual{t, 1.f};
         tmatrix result = linalg::identity;
-        const u64 end_joint = n == 0 ? m_joints.size() : n;
-        for (u64 i = 0; i < end_joint; i++) {
-            result = linalg::mul(result, m_joints[i](t));
+        for (u64 i = 0; i < n; i++) {
+            result = linalg::mul(result, m_joints[i](t_dual));
         }
         return result;
     }
+    tmatrix displacement(float t) {return displacement(t, m_joints.size());}
 
-    tmatrix relative_displacement(f32 t0, f32 t1, u64 n = 0) {
-        return linalg::mul(displacement(t1, n), linalg::inverse(displacement(t0, n)));
+    linalg::alias::float3 velocity(float t, const linalg::vec<fwd::Float,4> vertex, u64 n = 0) {
+        tmatrix transform = displacement(t);
+        linalg::vec<fwd::Float,4> new_pt = linalg::mul(transform, vertex);
+        return {new_pt.x.grad(), new_pt.y.grad(), new_pt.z.grad()};
     }
 
-    // Compute the instantaneous velocity vector at a given point at a given time for n joints (starting from the first, 0 = all joints)
-    linalg::alias::float4 velocity(f32 t, const linalg::alias::float4& vertex, u64 n = 0) {
-        const f32 EPS = EPS_sqrt_f;
-        //return (linalg::mul(relative_displacement(t, t+EPS), vertex)-vertex)/EPS;
-        return (linalg::mul(relative_displacement(t, t+EPS, n), vertex) - linalg::mul(relative_displacement(t, t-EPS, n), vertex))/ (2*EPS); // central diff
-    }
-
-    f32 velocity_magnitude(f32 t, const linalg::alias::float4& vertex) {
+    f32 velocity_magnitude(float t, const linalg::vec<fwd::Float,4> vertex) {
         return linalg::length(velocity(t, vertex));
     }
 
     private:
-    std::vector<std::function<tmatrix(f32 t)>> m_joints;
+    std::vector<std::function<tmatrix(const fwd::Float& t)>> m_joints;
 };
+
+template<class T> linalg::mat<T,4,4> translation_matrix(const linalg::vec<T,3> & translation) { return {{1,0,0,0},{0,1,0,0},{0,0,1,0},{translation,1}}; }
+
+template<class T> 
+linalg::mat<T,3,3> skew_matrix (const linalg::vec<T,3> & a) {
+ return {{0, a.z, -a.y}, {-a.z, 0, a.x}, {a.y, -a.x, 0}}; 
+}
+
+template<class T> linalg::mat<T,4,4> rotation_matrix   (const linalg::vec<T,3> & point, const linalg::vec<T,3> & axis, T angle) {
+    using std::sin; using std::cos;
+    using fwd::sin; using fwd::cos;
+    const linalg::mat<T,3,3> skew_mat = skew_matrix<T>(axis);
+    const linalg::mat<T,3,3> i = linalg::identity;
+
+    const linalg::mat<T,3,3> rodrigues = i + sin(angle)*skew_mat + (1.f-cos(angle))*linalg::mul(skew_mat, skew_mat);
+    const linalg::vec<T,3> trans_part = linalg::mul((i - rodrigues), point);
+    return {
+        {rodrigues.x.x, rodrigues.x.y, rodrigues.x.z, 0}, // 1st col
+        {rodrigues.y.x, rodrigues.y.y, rodrigues.y.z, 0},
+        {rodrigues.z.x, rodrigues.z.y, rodrigues.z.z, 0},
+        {trans_part.x, trans_part.y, trans_part.z, 1}
+    };
+}
 
 template<typename T>
 void dump_buffer(std::ofstream& stream, T* start, T* end) {
@@ -79,8 +107,8 @@ void print_buffer(const T* start, u64 size) {
 int main() {
     const tiny::ScopedTimer timer("UVLM TOTAL");
 
-    const u64 ni = 20;
-    const u64 nj = 5;
+    const u64 ni = 40;
+    const u64 nj = 10;
     // vlm::Executor::instance(1);
     //const std::vector<std::string> meshes = {"../../../../mesh/rectangular_5x10.x"};
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
@@ -104,26 +132,18 @@ int main() {
 
     const f32 initial_angle = 0.0f;
 
-    const tmatrix initial_pose = linalg::rotation_matrix(
+    const auto initial_pose = rotation_matrix(
         linalg::alias::float3{0.0f, 0.0f, 0.0f}, // take into account quarter chord panel offset
         linalg::alias::float3{0.0f, 1.0f, 0.0f},
         to_radians(initial_angle)
     );
 
     // Periodic heaving
-    kinematics.add([=](f32 t) {
-        return linalg::translation_matrix(linalg::alias::float3{
-            -u_inf*t,
-            0.0f,
-            0.0f
-        });
+    kinematics.add([=](const fwd::Float& t) {
+        return linalg::translation_matrix<fwd::Float>({-1.0f * t, 0.f, 0.f});
     });
-    kinematics.add([=](f32 t) {
-        return linalg::translation_matrix(linalg::alias::float3{
-            0.0f,
-            0.0f,
-            amplitude * std::sin(omega * t) // heaving
-        });
+    kinematics.add([=](const fwd::Float& t) {
+        return linalg::translation_matrix<fwd::Float>({0.f, 0.f, amplitude * fwd::sin(omega * t)});
     });
 
     // Periodic pitching
@@ -162,6 +182,20 @@ int main() {
     for (const auto& [mesh_name, backend_name] : solvers) {
         const std::unique_ptr<Mesh> mesh = create_mesh(mesh_name);
 
+        // Initial position
+        for (u64 i = 0; i < mesh->nb_vertices_wing(); i++) {
+            const linalg::alias::float4 transformed_pt = linalg::mul(initial_pose, linalg::alias::float4{mesh->v.x[i], mesh->v.y[i], mesh->v.z[i], 1.f});
+            mesh->v.x[i] = transformed_pt.x;
+            mesh->v.y[i] = transformed_pt.y;
+            mesh->v.z[i] = transformed_pt.z;
+        }
+
+        SoA_3D_t<f32> origin_pos;
+        origin_pos.resize(mesh->nb_vertices_wing());
+        std::copy(mesh->v.x.data(), mesh->v.x.data() + mesh->nb_vertices_wing(), origin_pos.x.data());
+        std::copy(mesh->v.y.data(), mesh->v.y.data() + mesh->nb_vertices_wing(), origin_pos.y.data());
+        std::copy(mesh->v.z.data(), mesh->v.z.data() + mesh->nb_vertices_wing(), origin_pos.z.data());
+
         // Pre-calculate timesteps to determine wake size
         // Note: calculation should be made on the four corners of the wing
         std::vector<f32> vec_t; // timesteps
@@ -170,9 +204,10 @@ int main() {
         {
             SoA_3D_t<f32> trailing_vertices;
             trailing_vertices.resize(mesh->ns+1);
-            std::copy(mesh->v.x.data() + mesh->nb_vertices_wing() - mesh->ns - 1, mesh->v.x.data() + mesh->nb_vertices_wing(), trailing_vertices.x.data());
-            std::copy(mesh->v.y.data() + mesh->nb_vertices_wing() - mesh->ns - 1, mesh->v.y.data() + mesh->nb_vertices_wing(), trailing_vertices.y.data());
-            std::copy(mesh->v.z.data() + mesh->nb_vertices_wing() - mesh->ns - 1, mesh->v.z.data() + mesh->nb_vertices_wing(), trailing_vertices.z.data());
+            const u64 trailing_begin = mesh->nc * (mesh->ns + 1);
+            std::copy(mesh->v.x.data() + trailing_begin, mesh->v.x.data() + mesh->nb_vertices_wing(), trailing_vertices.x.data());
+            std::copy(mesh->v.y.data() + trailing_begin, mesh->v.y.data() + mesh->nb_vertices_wing(), trailing_vertices.y.data());
+            std::copy(mesh->v.z.data() + trailing_begin, mesh->v.z.data() + mesh->nb_vertices_wing(), trailing_vertices.z.data());
             const f32 segment_chord = mesh->panel_length(mesh->nc-1, 0); // TODO: this can be variable
             
             std::cout << "Timestep calculation\n";
@@ -183,9 +218,9 @@ int main() {
                     dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
                 }
 
-                auto transform = kinematics.relative_displacement(t, t+dt);
+                auto transform = dual_to_float(kinematics.displacement(t+dt));
                 for (u64 i = 0; i < trailing_vertices.size; i++) {
-                    const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.f});
+                    const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{origin_pos.x[trailing_begin+i], origin_pos.y[trailing_begin+i], origin_pos.z[trailing_begin+i], 1.f});
                     trailing_vertices.x[i] = transformed_pt.x;
                     trailing_vertices.y[i] = transformed_pt.y;
                     trailing_vertices.z[i] = transformed_pt.z;
@@ -209,18 +244,10 @@ int main() {
         wake_data << vec_t.size() - 1 << "\n\n";
         #endif
 
-        mesh->resize_wake(vec_t.size()-1); // +1 for the initial pose
+        mesh->resize_wake(vec_t.size()-1); // dont account initial position
         const std::unique_ptr<Backend> backend = create_backend(backend_name, *mesh); // create after mesh has been resized
         
-        // Initial position
-        for (u64 i = 0; i < mesh->nb_vertices_wing(); i++) {
-            const linalg::alias::float4 transformed_pt = linalg::mul(initial_pose, linalg::alias::float4{mesh->v.x[i], mesh->v.y[i], mesh->v.z[i], 1.f});
-            mesh->v.x[i] = transformed_pt.x;
-            mesh->v.y[i] = transformed_pt.y;
-            mesh->v.z[i] = transformed_pt.z;
-        }
-        mesh->compute_metrics_wing();
-
+        mesh->compute_metrics_wing(); // compute new metrics after initial position ajustement
         // Precompute the LHS since wing geometry is constant
         backend->compute_lhs();
         backend->lu_factor();
@@ -251,24 +278,13 @@ int main() {
 
             linalg::alias::float3 freestream;
             for (u64 idx = 0; idx < mesh->nb_panels_wing(); idx++) {
-                const linalg::alias::float4 colloc_pt{mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f};
-                // auto local_velocity = -kinematics.velocity(t, colloc_pt);
-                // velocities.x[idx] = local_velocity.x;
-                // velocities.y[idx] = local_velocity.y;
-                // velocities.z[idx] = local_velocity.z;
-
-                velocities.x[idx] = u_inf;
-                velocities.y[idx] = 0.0f;
-                velocities.z[idx] = - omega * amplitude * std::cos(omega * t);
+                auto local_velocity = -kinematics.velocity(t, {mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f});
+                velocities.x[idx] = local_velocity.x;
+                velocities.y[idx] = local_velocity.y;
+                velocities.z[idx] = local_velocity.z;
 
                 if (idx == 0) {
-                    linalg::alias::float4 freestream_vel = -kinematics.velocity(t, colloc_pt, 1);
-                    freestream = {freestream_vel.x, freestream_vel.y, freestream_vel.z};
-                    // std::cout << "Freestream: " << freestream << "\n";
-                    // const f32 analytical_vel = - amplitude * omega * std::cos(omega * t);
-                    // const f32 rel_error = 100.0f * std::abs((analytical_vel - local_velocity.z) / analytical_vel);
-                    // std::cout << "vel error:" << rel_error << "%\n";
-                    // avg_vel_error += rel_error;
+                    freestream = -kinematics.velocity(t, {mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f}, 1);
                 }
             }
 
@@ -287,12 +303,11 @@ int main() {
             }
             //backend->wake_rollup(dt);
             backend->shed_gamma(); // shed before moving & incrementing currentnw
-            mesh->move(kinematics.relative_displacement(t, t+dt));
-            mesh->frame = linalg::mul(mesh->frame, kinematics.relative_displacement(t, t+dt));
+            const auto transform = dual_to_float(kinematics.displacement(t+dt));
+            mesh->move(transform, origin_pos);
+            const linalg::alias::float4x4 init_frame = linalg::identity;
+            mesh->frame = linalg::mul(transform, init_frame);
         }
-
-        avg_vel_error /= (f32)(vec_t.size()-1);
-        std::cout << "Average velocity error: " << avg_vel_error << "%\n";
     }
 
     return 0;
