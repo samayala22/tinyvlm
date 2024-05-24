@@ -88,7 +88,7 @@ class Mesh {
     void compute_metrics_wing(); // fill colloc, normal, area
     void compute_metrics_wake();
     void compute_metrics_i(u64 i);
-    void move(const linalg::alias::float4x4& transform);
+    void move(const linalg::alias::float4x4& transform, const SoA_3D_t<f32>& origin_pos);
     void resize_wake(const u64 nw);
  
     u64 nb_panels_wing() const;
