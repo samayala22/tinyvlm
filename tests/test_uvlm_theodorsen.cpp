@@ -15,7 +15,7 @@
 #include "vlm_utils.hpp"
 #include "vlm_executor.hpp"
 
-#define DEBUG_DISPLACEMENT_DATA
+// #define DEBUG_DISPLACEMENT_DATA
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
@@ -107,8 +107,8 @@ void print_buffer(const T* start, u64 size) {
 int main() {
     const tiny::ScopedTimer timer("UVLM TOTAL");
 
-    const u64 ni = 40;
-    const u64 nj = 10;
+    const u64 ni = 56;
+    const u64 nj = 5;
     // vlm::Executor::instance(1);
     //const std::vector<std::string> meshes = {"../../../../mesh/rectangular_5x10.x"};
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
@@ -123,7 +123,7 @@ int main() {
     const f32 cycles = 3.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.7; // reduced frequency
+    const f32 k = 1.0; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
@@ -230,12 +230,12 @@ int main() {
             }
         }
 
+        std::ofstream cl_data("cl_data.txt");
+        cl_data << k << "\n";
+
         #ifdef DEBUG_DISPLACEMENT_DATA
         std::ofstream wing_data("wing_data.txt");
         std::ofstream wake_data("wake_data.txt");
-        std::ofstream cl_data("cl_data.txt");
-
-        cl_data << k << "\n";
 
         wing_data << mesh->nc << " " << mesh->ns << "\n";
         wing_data << vec_t.size() - 1 << "\n\n";
@@ -264,7 +264,6 @@ int main() {
 
             const u64 wake_start = (mesh->nc + mesh->nw - i) * (mesh->ns + 1);
             const u64 wake_end = mesh->nb_vertices_total();
-            // std::cout << "Buffer size: " << mesh->v.x.size() << " | " << wake_start << " | " << wake_end << std::endl;
  
             dump_buffer(wake_data, mesh->v.x.data() + wake_start, mesh->v.x.data() + wake_end);
             dump_buffer(wake_data, mesh->v.y.data() + wake_start, mesh->v.y.data() + wake_end);
@@ -297,9 +296,7 @@ int main() {
                 const f32 cl_unsteady = backend->compute_coefficient_unsteady_cl(freestream, velocities, dt, mesh->s_ref, 0, mesh->ns);
 
                 std::printf("t: %f, CL: %f\n", t, cl_unsteady);
-                #ifdef DEBUG_DISPLACEMENT_DATA
                 cl_data << t << " " << mesh->v.z[0] << " " << cl_unsteady << " " << std::sin(omega * t) << "\n";
-                #endif
             }
             //backend->wake_rollup(dt);
             backend->shed_gamma(); // shed before moving & incrementing currentnw
