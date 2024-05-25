@@ -64,6 +64,7 @@ void BackendCPU::reset() {
 }
 
 void BackendCPU::compute_delta_gamma() {
+    // const tiny::ScopedTimer timer("Delta Gamma");
     std::copy(gamma.data(), gamma.data()+mesh.ns, delta_gamma.data());
 
     // note: this is efficient as the memory is contiguous
@@ -133,7 +134,7 @@ void BackendCPU::compute_rhs(const FlowData& flow) {
 }
 
 void BackendCPU::add_wake_influence() {
-    const tiny::ScopedTimer timer("Wake Influence");
+    // const tiny::ScopedTimer timer("Wake Influence");
 
     tf::Taskflow taskflow;
 
@@ -198,6 +199,7 @@ void BackendCPU::wake_rollup(float dt) {
 }
 
 void BackendCPU::shed_gamma() {
+    // const tiny::ScopedTimer timer("Shed Gamma");
     const Mesh& m = mesh;
     const u64 wake_row_start = (m.nc + m.nw - m.current_nw - 1) * m.ns;
 
@@ -221,7 +223,7 @@ void BackendCPU::lu_factor() {
 }
 
 void BackendCPU::lu_solve() {
-    const tiny::ScopedTimer timer("Solve");
+    // const tiny::ScopedTimer timer("Solve");
     const int32_t n = static_cast<int32_t>(mesh.nb_panels_wing());
     std::copy(rhs.begin(), rhs.end(), gamma.begin());
 

@@ -7,7 +7,7 @@ add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.asan")
 -- set_toolchains("cuda")
 
 -- set_toolset("cxx", "clang")
-set_policy("build.sanitizer.address", true)
+-- set_policy("build.sanitizer.address", true)
 set_policy("build.warning", true)
 set_policy("build.cuda.devlink", true) -- magic
 set_policy("run.autobuild", true)

@@ -1,7 +1,9 @@
 #include "vlm_mesh.hpp"
 #include "linalg.h"
 #include "vlm_types.hpp"
+
 #include "tinyconfig.hpp"
+#include "tinytimer.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -407,6 +409,7 @@ void Mesh::io_read(const std::string& filename) {
 }
 
 void Mesh::move(const linalg::alias::float4x4& transform, const SoA_3D_t<f32>& origin_pos) {
+    // const tiny::ScopedTimer t("Mesh::move");
     assert(current_nw < nw); // check if we have capacity
     
     // Shed wake before moving    
