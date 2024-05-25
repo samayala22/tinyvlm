@@ -50,14 +50,13 @@ class Kinematics {
     }
     tmatrix displacement(float t) {return displacement(t, m_joints.size());}
 
-    linalg::alias::float3 velocity(float t, const linalg::vec<fwd::Float,4> vertex, u64 n = 0) {
-        tmatrix transform = displacement(t);
+    linalg::alias::float3 velocity(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) {
         linalg::vec<fwd::Float,4> new_pt = linalg::mul(transform, vertex);
         return {new_pt.x.grad(), new_pt.y.grad(), new_pt.z.grad()};
     }
 
-    f32 velocity_magnitude(float t, const linalg::vec<fwd::Float,4> vertex) {
-        return linalg::length(velocity(t, vertex));
+    f32 velocity_magnitude(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) {
+        return linalg::length(velocity(transform, vertex));
     }
 
     private:
@@ -123,7 +122,7 @@ int main() {
     const f32 cycles = 3.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 1.0; // reduced frequency
+    const f32 k = 0.75; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
@@ -213,9 +212,10 @@ int main() {
             std::cout << "Timestep calculation\n";
             vec_t.push_back(0.0f);
             for (f32 t = 0.0f; t < t_final;) {
-                f32 dt = segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[0], trailing_vertices.y[0], trailing_vertices.z[0], 1.0f});
+                const auto total_transform = kinematics.displacement(t);
+                f32 dt = segment_chord / kinematics.velocity_magnitude(total_transform, {trailing_vertices.x[0], trailing_vertices.y[0], trailing_vertices.z[0], 1.0f});
                 for (u64 i = 1; i < trailing_vertices.size; i++) {
-                    dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(t, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
+                    dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(total_transform, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
                 }
 
                 auto transform = dual_to_float(kinematics.displacement(t+dt));
@@ -254,7 +254,7 @@ int main() {
 
         // Unsteady loop
         std::cout << "SIMULATION NB OF TIMESTEPS: " << vec_t.size() << "\n";
-        f32 avg_vel_error = 0.0f;
+
         for (u64 i = 0; i < vec_t.size()-1; i++) {
             #ifdef DEBUG_DISPLACEMENT_DATA
             dump_buffer(wing_data, mesh->v.x.data(), mesh->v.x.data() + mesh->nb_vertices_wing());
@@ -273,17 +273,18 @@ int main() {
 
             const f32 t = vec_t[i];
             const f32 dt = vec_t[i+1] - t;
-            std::cout << "\n----------------\n" << "T = " << t << "\n";
+            const auto total_transform = kinematics.displacement(t);
+            const auto freestream_transform = kinematics.displacement(t,1);
 
             linalg::alias::float3 freestream;
             for (u64 idx = 0; idx < mesh->nb_panels_wing(); idx++) {
-                auto local_velocity = -kinematics.velocity(t, {mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f});
+                auto local_velocity = -kinematics.velocity(total_transform, {mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f});
                 velocities.x[idx] = local_velocity.x;
                 velocities.y[idx] = local_velocity.y;
                 velocities.z[idx] = local_velocity.z;
 
                 if (idx == 0) {
-                    freestream = -kinematics.velocity(t, {mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f}, 1);
+                    freestream = -kinematics.velocity(freestream_transform, {mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f});
                 }
             }
 
