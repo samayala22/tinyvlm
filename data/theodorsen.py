@@ -57,7 +57,7 @@ a = ar / c # full span
 pitch_axis = -0.5 # leading edge
 
 # Theodorsen numerical simulation param
-cycles = 3 # number of periods
+cycles = 4 # number of periods
 nb_pts = 1000
 cycle_idx = int((1 - 1 / cycles) * nb_pts - 1)
 
@@ -89,12 +89,12 @@ for file in files:
     # def heave(t): return 0
 
     # pure heaving
-    def pitch(t): return 0
-    def heave(t): return -0.1 * np.sin(omega * t)
+    # def pitch(t): return 0
+    # def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    # def pitch(t): return np.radians(np.sin(omega * t))
-    # def heave(t): return 0
+    def pitch(t): return np.radians(np.sin(omega * t))
+    def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -118,10 +118,10 @@ for file in files:
     angle = np.array([np.degrees(pitch(ti)) for ti in vec_t])
 
     plotc, = axs["time"].plot(vec_t, cl_theo, label=f"Theodorsen (k={k})")
-    axs["heave"].plot(h[cycle_idx:], cl_theo[cycle_idx:], label=f"Theodorsen (k={k})")
+    axs["heave"].plot(angle[cycle_idx:], cl_theo[cycle_idx:], label=f"Theodorsen (k={k})")
 
     axs["time"].scatter(uvlm_t, uvlm_cl, label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
-    axs["heave"].scatter(uvlm_z[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
+    axs["heave"].scatter(uvlm_alpha[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
 
     analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cycle_idx:]])
     difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
