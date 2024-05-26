@@ -119,10 +119,10 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 3.0f;
+    const f32 cycles = 4.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 0.75; // reduced frequency
+    const f32 k = 3.0; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
@@ -138,28 +138,21 @@ int main() {
     );
 
     // Periodic heaving
-    kinematics.add([=](const fwd::Float& t) {
-        return linalg::translation_matrix<fwd::Float>({-1.0f * t, 0.f, 0.f});
-    });
-    kinematics.add([=](const fwd::Float& t) {
-        return linalg::translation_matrix<fwd::Float>({0.f, 0.f, amplitude * fwd::sin(omega * t)});
-    });
+    // kinematics.add([=](const fwd::Float& t) {
+    //     return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
+    // });
+    // kinematics.add([=](const fwd::Float& t) {
+    //     return translation_matrix<fwd::Float>({0.f, 0.f, amplitude * fwd::sin(omega * t)});
+    // });
 
     // Periodic pitching
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
-    //         -u_inf*t, // freestream
-    //         0.0f,
-    //         0.0f
-    //     });
-    // });
-    // kinematics.add([=](f32 t) {
-    //     return linalg::rotation_matrix(
-    //         linalg::alias::float3{0.25f, 0.0f, 0.0f},
-    //         linalg::alias::float3{0.0f, 1.0f, 0.0f},
-    //         to_radians(std::sin(omega * t))
-    //     );
-    // });
+    kinematics.add([=](const fwd::Float& t) {
+        return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
+    });
+    const f32 to_rad = PI_f / 180.0f;
+    kinematics.add([=](const fwd::Float& t) {
+        return rotation_matrix<fwd::Float>({0.25f, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_rad * fwd::sin(omega * t));
+    });
     
     // Sudden acceleration
     // const f32 alpha = to_radians(5.0f);
@@ -188,12 +181,18 @@ int main() {
             mesh->v.y[i] = transformed_pt.y;
             mesh->v.z[i] = transformed_pt.z;
         }
+        mesh->compute_metrics_wing(); // compute new metrics after initial position ajustement
 
         SoA_3D_t<f32> origin_pos;
+        SoA_3D_t<f32> origin_colloc;
         origin_pos.resize(mesh->nb_vertices_wing());
+        origin_colloc.resize(mesh->nb_panels_wing());
         std::copy(mesh->v.x.data(), mesh->v.x.data() + mesh->nb_vertices_wing(), origin_pos.x.data());
         std::copy(mesh->v.y.data(), mesh->v.y.data() + mesh->nb_vertices_wing(), origin_pos.y.data());
         std::copy(mesh->v.z.data(), mesh->v.z.data() + mesh->nb_vertices_wing(), origin_pos.z.data());
+        std::copy(mesh->colloc.x.data(), mesh->colloc.x.data() + mesh->nb_panels_wing(), origin_colloc.x.data());
+        std::copy(mesh->colloc.y.data(), mesh->colloc.y.data() + mesh->nb_panels_wing(), origin_colloc.y.data());
+        std::copy(mesh->colloc.z.data(), mesh->colloc.z.data() + mesh->nb_panels_wing(), origin_colloc.z.data());
 
         // Pre-calculate timesteps to determine wake size
         // Note: calculation should be made on the four corners of the wing
@@ -213,17 +212,9 @@ int main() {
             vec_t.push_back(0.0f);
             for (f32 t = 0.0f; t < t_final;) {
                 const auto total_transform = kinematics.displacement(t);
-                f32 dt = segment_chord / kinematics.velocity_magnitude(total_transform, {trailing_vertices.x[0], trailing_vertices.y[0], trailing_vertices.z[0], 1.0f});
+                f32 dt = segment_chord / kinematics.velocity_magnitude(total_transform, {origin_pos.x[trailing_begin], origin_pos.y[trailing_begin], origin_pos.z[trailing_begin], 1.0f});
                 for (u64 i = 1; i < trailing_vertices.size; i++) {
-                    dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(total_transform, {trailing_vertices.x[i], trailing_vertices.y[i], trailing_vertices.z[i], 1.0f}));
-                }
-
-                auto transform = dual_to_float(kinematics.displacement(t+dt));
-                for (u64 i = 0; i < trailing_vertices.size; i++) {
-                    const linalg::alias::float4 transformed_pt = linalg::mul(transform, linalg::alias::float4{origin_pos.x[trailing_begin+i], origin_pos.y[trailing_begin+i], origin_pos.z[trailing_begin+i], 1.f});
-                    trailing_vertices.x[i] = transformed_pt.x;
-                    trailing_vertices.y[i] = transformed_pt.y;
-                    trailing_vertices.z[i] = transformed_pt.z;
+                    dt = std::min(dt, segment_chord / kinematics.velocity_magnitude(total_transform, {origin_pos.x[trailing_begin+i], origin_pos.y[trailing_begin+i], origin_pos.z[trailing_begin+i], 1.0f}));
                 }
                 t += dt;
                 vec_t.push_back(t);
@@ -247,7 +238,6 @@ int main() {
         mesh->resize_wake(vec_t.size()-1); // dont account initial position
         const std::unique_ptr<Backend> backend = create_backend(backend_name, *mesh); // create after mesh has been resized
         
-        mesh->compute_metrics_wing(); // compute new metrics after initial position ajustement
         // Precompute the LHS since wing geometry is constant
         backend->compute_lhs();
         backend->lu_factor();
@@ -278,13 +268,13 @@ int main() {
 
             linalg::alias::float3 freestream;
             for (u64 idx = 0; idx < mesh->nb_panels_wing(); idx++) {
-                auto local_velocity = -kinematics.velocity(total_transform, {mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f});
+                auto local_velocity = -kinematics.velocity(total_transform, {origin_colloc.x[idx], origin_colloc.y[idx], origin_colloc.z[idx], 1.0f});
                 velocities.x[idx] = local_velocity.x;
                 velocities.y[idx] = local_velocity.y;
                 velocities.z[idx] = local_velocity.z;
 
                 if (idx == 0) {
-                    freestream = -kinematics.velocity(freestream_transform, {mesh->colloc.x[idx], mesh->colloc.y[idx], mesh->colloc.z[idx], 1.0f});
+                    freestream = -kinematics.velocity(freestream_transform, {origin_colloc.x[idx], origin_colloc.y[idx], origin_colloc.z[idx], 1.0f});
                 }
             }
 
