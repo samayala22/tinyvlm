@@ -25,10 +25,11 @@ Solver::Solver(const tiny::Config& cfg) {
 
 AeroCoefficients LinearVLM::solve(const FlowData& flow) {
     backend->reset();
+    backend->set_velocities(flow.freestream);
     mesh->update_wake(flow.freestream);
     mesh->correction_high_aoa(flow.alpha); // must be after update_wake
-    backend->compute_lhs();
-    backend->compute_rhs(flow);
+    backend->lhs_assemble();
+    backend->compute_rhs();
     backend->lu_factor();
     backend->lu_solve();
     backend->compute_delta_gamma();
@@ -43,19 +44,19 @@ AeroCoefficients NonLinearVLM::solve(const FlowData& flow, const Database& db) {
     f64 err = 1.0f; // l1 error
     strip_alphas.resize(mesh->ns);
     SoA_3D_t<f32> velocities;
-    velocities.resize(mesh->nb_vertices_wing());
+    velocities.resize(mesh->nb_panels_wing());
 
     std::fill(strip_alphas.begin(), strip_alphas.end(), flow.alpha); // memset
 
     backend->reset();
     mesh->update_wake(flow.freestream); // Create wake panels in freestream axis
     mesh->correction_high_aoa(flow.alpha); // Correct collocation point
-    backend->compute_lhs(); // Create influence matrix
-    backend->lu_factor(); // Factorize the influence matrix into LU form
+    backend->lhs_assemble(); // Create influence matrix (copy mesh to device)
+    backend->lu_factor(); // LU factorization on device
 
     for (u64 iter = 0; iter < max_iter && err > tol; iter++) {
         err = 0.0; // reset l1 error
-        // TODO cleanup this:
+        // BEGIN TODO: cleanup this
         for (u64 j = 0; j < mesh->ns; j++) {
             auto fs = compute_freestream(1.0f, strip_alphas[j], 0.0f);
             velocities.x[j] = fs.x;
@@ -67,9 +68,11 @@ AeroCoefficients NonLinearVLM::solve(const FlowData& flow, const Database& db) {
             std::copy(velocities.y.data(), velocities.y.data()+mesh->ns, velocities.y.data() + i*mesh->ns);
             std::copy(velocities.z.data(), velocities.z.data()+mesh->ns, velocities.z.data() + i*mesh->ns);
         }
+        // END TODO
 
-        backend->compute_rhs(velocities); // Compute RHS using strip alphas
-        backend->lu_solve(); // Solve for the gammas
+        backend->set_velocities(velocities); // Set local velocities at collocation points
+        backend->compute_rhs(); // Compute RHS using strip alphas (on CPU)
+        backend->lu_solve(); // Copy RHS on device and solve for gamma
         backend->compute_delta_gamma(); // Compute the chordwise delta gammas for force computation
         
         // parallel reduce
