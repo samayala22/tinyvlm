@@ -37,10 +37,9 @@ BackendCPU::~BackendCPU() = default; // Destructor definition
 // TODO: replace any kind of size arithmetic with methods
 BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
-    wake_buffer.resize(mesh.nb_panels_wing() * mesh.ns);
 
-    rollup_vertices.resize(mesh.nb_vertices_total());
-
+    rollup_vertices.resize(mesh.nb_vertices_total()); // TODO: exclude the wing vertices
+    local_velocities.resize(mesh.nb_panels_wing());
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
     gamma.resize((mesh.nc + mesh.nw) * mesh.ns); // store wake gamma as well
@@ -68,7 +67,7 @@ void BackendCPU::compute_delta_gamma() {
     }
 }
 
-void BackendCPU::compute_lhs() {
+void BackendCPU::lhs_assemble() {
     tiny::ScopedTimer timer("LHS");
     Mesh& m = mesh;
 
@@ -113,17 +112,13 @@ void BackendCPU::compute_lhs() {
     Executor::get().run(taskflow).wait();
 }
 
-void kernel_cpu_rhs(u64 n, const float normal_x[], const float normal_y[], const float normal_z[], float freestream_x, float freestream_y, float freestream_z, float rhs[]) {
-    for (u64 i = 0; i < n; i++) {
-        rhs[i] = - (freestream_x * normal_x[i] + freestream_y * normal_y[i] + freestream_z * normal_z[i]);
-    }
-}
-
-void BackendCPU::compute_rhs(const FlowData& flow) {
+void BackendCPU::compute_rhs() {
     const tiny::ScopedTimer timer("RHS");
     const Mesh& m = mesh;
-    
-    kernel_cpu_rhs(m.nb_panels_wing(), m.normal.x.data(), m.normal.y.data(), m.normal.z.data(), flow.freestream.x, flow.freestream.y, flow.freestream.z, rhs.data());
+
+    for (u64 i = 0; i < m.nb_panels_wing(); i++) {
+        rhs[i] = - (local_velocities.x[i] * m.normal.x[i] + local_velocities.y[i] * m.normal.y[i] + local_velocities.z[i] * m.normal.z[i]);
+    }
 }
 
 void BackendCPU::add_wake_influence() {
@@ -182,13 +177,6 @@ void BackendCPU::wake_rollup(float dt) {
     copy.precede(sync);
 
     Executor::get().run(taskflow).wait();
-
-    // for (u64 vidx = wake_vertices_begin; vidx < wake_vertices_end; vidx++) {
-    //     ispc::kernel_induced_vel(mesh_view, dt, rollup_vertices.x.data(), rollup_vertices.y.data(), rollup_vertices.z.data(), vidx, gamma.data(), sigma_vatistas);
-    // }
-    // std::copy(rollup_vertices.x.data() + wake_vertices_begin, rollup_vertices.x.data() + rollup_vertices.size, mesh.v.x.data() + wake_vertices_begin);
-    // std::copy(rollup_vertices.y.data() + wake_vertices_begin, rollup_vertices.y.data() + rollup_vertices.size, mesh.v.y.data() + wake_vertices_begin);
-    // std::copy(rollup_vertices.z.data() + wake_vertices_begin, rollup_vertices.z.data() + rollup_vertices.size, mesh.v.z.data() + wake_vertices_begin);
 }
 
 void BackendCPU::shed_gamma() {
@@ -199,14 +187,6 @@ void BackendCPU::shed_gamma() {
     std::copy(gamma.data(), gamma.data() + m.nb_panels_wing(), gamma_prev.data()); // store current timestep for delta_gamma
     //std::copy(delta_gamma.data(), delta_gamma.data() + m.nb_panels_wing(), gamma_prev.data()); // store current timestep for delta_gamma
     std::copy(gamma.data() + m.ns * (m.nc-1), gamma.data() + m.nb_panels_wing(), gamma.data() + wake_row_start);
-}
-
-void BackendCPU::compute_rhs(const SoA_3D_t<f32>& velocities) {
-    // const tiny::ScopedTimer timer("Rebuild RHS");
-    const Mesh& m = mesh;
-    for (u64 i = 0; i < m.nb_panels_wing(); i++) {
-        rhs[i] = - (velocities.x[i] * m.normal.x[i] + velocities.y[i] * m.normal.y[i] + velocities.z[i] * m.normal.z[i]); 
-    }
 }
 
 void BackendCPU::lu_factor() {
@@ -369,3 +349,15 @@ f32 BackendCPU::compute_coefficient_cd(
 //     cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
 //     return cl;
 // }
+
+void BackendCPU::set_velocities(const linalg::alias::float3& vel) {
+    std::fill(local_velocities.x.begin(), local_velocities.x.end(), vel.x);
+    std::fill(local_velocities.y.begin(), local_velocities.y.end(), vel.y);
+    std::fill(local_velocities.z.begin(), local_velocities.z.end(), vel.z);
+}
+
+void BackendCPU::set_velocities(const SoA_3D_t<f32>& vels) {
+    std::copy(vels.x.begin(), vels.x.end(), local_velocities.x.begin());
+    std::copy(vels.y.begin(), vels.y.end(), local_velocities.y.begin());
+    std::copy(vels.z.begin(), vels.z.end(), local_velocities.z.begin());
+}
