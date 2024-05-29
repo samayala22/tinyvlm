@@ -40,13 +40,6 @@ BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
     wake_buffer.resize(mesh.nb_panels_wing() * mesh.ns);
 
     rollup_vertices.resize(mesh.nb_vertices_total());
-    uw.resize(mesh.nb_panels_wing() * mesh.ns);
-    vw.resize(mesh.nb_panels_wing() * mesh.ns);
-    ww.resize(mesh.nb_panels_wing() * mesh.ns);
-
-    panel_uw.resize(mesh.nb_panels_wing());
-    panel_vw.resize(mesh.nb_panels_wing());
-    panel_ww.resize(mesh.nb_panels_wing());
 
     rhs.resize(mesh.nb_panels_wing());
     ipiv.resize(mesh.nb_panels_wing());
