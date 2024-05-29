@@ -5,3 +5,23 @@
 - [ ] Decide what to do with SoA3D and evaluate the fusion of the 3 buffers into one 
 - [ ] using a view for multidimensional indexing.
 - [ ] Instead of view, use a function that returns a tuple of the panel's vertex indices that takes in arg i, j values for chordwise and spanwise location
+
+// store mesh in the backend ??
+// store kinematics in the backend ??
+// store flow properties in the backend ??
+
+lhs_assemble()
+rhs_assemble_velocities()
+rhs_assemble_wake_influence()
+gamma_shed()
+gamma_delta()
+displace_wing(transform) // store the origin position on device
+displace_wake_rollup()
+coeff_steady_cl(area, j, n)
+coeff_steady_cd
+coeff_steady_cm
+coeff_unsteady_cl(area, j, n)
+coeff_unsteady_cd
+coeff_unsteady_cm
+set_velocities(val)
+set_velocities(vec_val)
