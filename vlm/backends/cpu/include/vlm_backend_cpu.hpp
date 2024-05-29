@@ -7,13 +7,7 @@ namespace vlm {
 
 class BackendCPU : public Backend {
     public:
-        std::vector<f32> lhs;
-        std::vector<f32> uw;
-        std::vector<f32> vw;
-        std::vector<f32> ww;
-        std::vector<f32> panel_uw;
-        std::vector<f32> panel_vw;
-        std::vector<f32> panel_ww;
+        std::vector<f32> lhs; // influence matrix
         SoA_3D_t<f32> rollup_vertices;
         std::vector<f32> wake_buffer; // (ns*nc) * ns
         std::vector<f32> rhs;
