@@ -13,9 +13,8 @@ class Backend {
 
         Backend(Mesh& mesh) : mesh(mesh) {};
         virtual void reset() = 0;
-        virtual void compute_lhs() = 0;
-        virtual void compute_rhs(const FlowData& flow) = 0;
-        virtual void compute_rhs(const SoA_3D_t<f32>& velocities) = 0; 
+        virtual void lhs_assemble() = 0;
+        virtual void compute_rhs() = 0;
         virtual void add_wake_influence() = 0;
         virtual void wake_rollup(float dt) = 0;
         virtual void shed_gamma() = 0;
@@ -29,6 +28,8 @@ class Backend {
         virtual f32 compute_coefficient_cd(const FlowData& flow, const f32 area, const u64 j, const u64 n) = 0;
         f32 compute_coefficient_cd(const FlowData& flow);
         virtual void compute_delta_gamma() = 0;
+        virtual void set_velocities(const linalg::alias::float3& vel) = 0;
+        virtual void set_velocities(const SoA_3D_t<f32>& vels) = 0;
         virtual ~Backend() = default;
 };
 

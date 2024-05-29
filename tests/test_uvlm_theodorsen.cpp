@@ -239,7 +239,7 @@ int main() {
         const std::unique_ptr<Backend> backend = create_backend(backend_name, *mesh); // create after mesh has been resized
         
         // Precompute the LHS since wing geometry is constant
-        backend->compute_lhs();
+        backend->lhs_assemble();
         backend->lu_factor();
 
         // Unsteady loop
@@ -278,7 +278,8 @@ int main() {
                 }
             }
 
-            backend->compute_rhs(velocities);
+            backend->set_velocities(velocities);
+            backend->compute_rhs();
             backend->add_wake_influence();
             backend->lu_solve();
             backend->compute_delta_gamma();

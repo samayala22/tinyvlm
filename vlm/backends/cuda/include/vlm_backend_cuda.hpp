@@ -43,7 +43,7 @@ class BackendCUDA : public Backend {
         ~BackendCUDA();
 
         void reset() override;
-        void compute_lhs(const FlowData& flow) override;
+        void lhs_assemble(const FlowData& flow) override;
         void compute_rhs(const FlowData& flow) override;
         void compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) override; 
         void lu_factor() override;

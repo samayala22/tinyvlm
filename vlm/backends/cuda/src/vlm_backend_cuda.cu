@@ -283,7 +283,7 @@ constexpr u64 get_grid_size(u64 length, u64 block_size) {
     return (length + block_size - 1) / block_size;
 }
 
-void BackendCUDA::compute_lhs(const FlowData& flow) {
+void BackendCUDA::lhs_assemble(const FlowData& flow) {
     tiny::ScopedTimer timer("LHS");
     // Copy the latest mesh that has been corrected for the aoa
     u64 npt = mesh.nb_panels_total();
