@@ -289,7 +289,7 @@ int main() {
                 std::printf("t: %f, CL: %f\n", t, cl_unsteady);
                 cl_data << t << " " << mesh->v.z[0] << " " << cl_unsteady << " " << std::sin(omega * t) << "\n";
             }
-            //backend->wake_rollup(dt);
+            // backend->wake_rollup(dt);
             backend->shed_gamma(); // shed before moving & incrementing currentnw
             const auto transform = dual_to_float(kinematics.displacement(t+dt));
             mesh->move(transform, origin_pos);

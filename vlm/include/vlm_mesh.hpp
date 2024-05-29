@@ -2,8 +2,39 @@
 
 #include "vlm_types.hpp"
 #include "tinyfwd.hpp"
+#include "tinyview.hpp"
 
 namespace vlm {
+
+// class SMesh {
+//     public:
+
+//     tiny::View<f32, 3> vertices_wing();
+//     tiny::View<f32, 3> vertices_wake();
+//     tiny::View<f32, 3> normals();
+//     tiny::View<f32, 3> colloc();
+//     tiny::View<f32, 2> areas();
+
+//     virtual void alloc(u64 nc, u64 ns, u64 nw) = 0;
+//     virtual void dealloc() = 0;
+
+//     private:
+//     f32* _vertices = nullptr;
+//     f32* _normals = nullptr;
+//     f32* _colloc = nullptr;
+//     f32* _area = nullptr;
+
+//     u64 _nc = 0; // number of wing panels chordwise
+//     u64 _ns = 0; // number of wing panels spanwise
+//     u64 _nw = 0; // number of wake panels chordwise
+//     u64 _naw = 0; // number of active wake panels chordwise
+
+//     f32 _s_ref = 0.0f; // reference area
+//     f32 _c_ref = 0.0f; // reference chord
+//     linalg::alias::float4x4 frame = linalg::identity; // mesh orientation and position in inertial frame
+// };
+
+
 /*
 class StructuredSurfaceMesh {
     public:
