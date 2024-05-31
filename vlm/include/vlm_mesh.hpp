@@ -1,73 +1,55 @@
 #pragma once
 
 #include "vlm_types.hpp"
+#include "vlm_allocator.hpp"
+
 #include "tinyfwd.hpp"
 #include "tinyview.hpp"
 
 namespace vlm {
 
-// class SMesh {
-//     public:
+// C interface
+struct MeshProxy {
+    f32* vertices = nullptr; // (nc+nw+1)*(ns+1)*3
+    // TODO: evaluate if we really need those values or we can just compute on the fly in the kernels
+    f32* normals = nullptr; // nc*ns*3
+    f32* colloc = nullptr; // nc*ns*3
+    f32* area = nullptr; // nc*ns
 
-//     tiny::View<f32, 3> vertices_wing();
-//     tiny::View<f32, 3> vertices_wake();
-//     tiny::View<f32, 3> normals();
-//     tiny::View<f32, 3> colloc();
-//     tiny::View<f32, 2> areas();
+    u64 nc = 0; // number of wing panels chordwise
+    u64 ns = 0; // number of wing panels spanwise
+    u64 nw = 0; // number of wake panels chordwise
+    u64 nwa = 0; // number of wake panels active chordwise
 
-//     virtual void alloc(u64 nc, u64 ns, u64 nw) = 0;
-//     virtual void dealloc() = 0;
+    f32 s_ref = 0.0f; // reference area
+    f32 c_ref = 0.0f; // reference chord
+    f32 frame[16] = {}; // 4x4 homogeneous matrix in col major order
 
-//     private:
-//     f32* _vertices = nullptr;
-//     f32* _normals = nullptr;
-//     f32* _colloc = nullptr;
-//     f32* _area = nullptr;
-
-//     u64 _nc = 0; // number of wing panels chordwise
-//     u64 _ns = 0; // number of wing panels spanwise
-//     u64 _nw = 0; // number of wake panels chordwise
-//     u64 _naw = 0; // number of active wake panels chordwise
-
-//     f32 _s_ref = 0.0f; // reference area
-//     f32 _c_ref = 0.0f; // reference chord
-//     linalg::alias::float4x4 frame = linalg::identity; // mesh orientation and position in inertial frame
-// };
-
-
-/*
-class StructuredSurfaceMesh {
-    public:
-    
-    SoA_3D_t<f32> v;
-    SoA_3D_t<f32> normal;
-    std::vector<f32> area = {}; // size ncw*ns
-
-    StructuredSurfaceMesh(const u64 ni, const u64 nj);
-    ~StructuredSurfaceMesh() = default;
-
-    private:
-    const u64 ni;
-    const u64 nj;
+    char* name = nullptr; // mesh name
+    bool lifting = true;
 };
 
-class VLMSurface : public StructuredSurfaceMesh {
-    public:
-    SoA_3D_t<f32> colloc; // collocation points
-
-    const f32 s_ref; // reference area
-    const f32 c_ref; // reference chord
-
-    VLMSurface(const u64 ni, const u64 nj);
-    ~VLMSurface() = default;
+// Contains only the raw geometry 
+struct MeshGeom {
+    f32* vertices = nullptr;
+    u64 nc = 0; // number of wing panels chordwise
+    u64 ns = 0;
 };
 
-class LiftingBody {
-    public:
-    VLMSurface body;
-    VLMSurface wake;
+struct System {
+    MeshProxy* meshes = nullptr; // meshes
+    // Data data; // unified (linearized) data for the whole system
+    u32 n_meshes = 0;
 };
-*/
+
+void mesh_read_file(const std::string& filename, MeshGeom* mesh_geom);
+void mesh_alloc(const Allocator* allocator, MeshProxy* mesh, u64 nc, u64 ns, u64 nw, u64 nwa);
+void mesh_free(const Allocator* allocator, MeshProxy* mesh);
+
+struct AllocatorCPU : Allocator {
+    void* malloc(u64 size) const override { return std::malloc(size); }
+    void free(void* ptr) const override { std::free(ptr); }
+};
 
 
 // === STRUCTURED MESH ===
