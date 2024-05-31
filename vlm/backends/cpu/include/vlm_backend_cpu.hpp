@@ -7,17 +7,7 @@ namespace vlm {
 
 class BackendCPU : public Backend {
     public:
-        std::vector<f32> lhs; // influence matrix (LHS)
-        SoA_3D_t<f32> rollup_vertices; // store displaced vertices at rollup
-        std::vector<f32> rhs; // inpenetrability condition (RHS)
-        SoA_3D_t<f32> local_velocities; // local velocities at collocation points
-        std::vector<i32> ipiv; // LU solver row pivots
-        std::vector<f32> gamma; // vortex strengths of the wing (current timestep) and wake (shed gammas)
-        std::vector<f32> gamma_prev; // vortex strengths of the wing (previous timestep)
-        std::vector<f32> delta_gamma; // chordwise gamma difference
-        std::vector<f32> trefftz_buffer;
-
-        BackendCPU(Mesh& mesh);
+        BackendCPU(const MeshGeom* mesh_geom, int timesteps);
         ~BackendCPU();
         void reset() override;
         void lhs_assemble() override;

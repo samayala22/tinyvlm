@@ -67,38 +67,16 @@ struct SoA_3D_t {
     }
 };
 
-template<typename T, size_t N>
-class StackArray {
-    T data[N];
-};
-
 template<typename T>
-class HeapArray {
-    T* first;
-    T* last;
-    T* end;
-};
-
-template<typename T, size_t N>
-class View {
-    private:
-        const T* data;
-        const StackArray<T, N> dims;
-        const StackArray<T, N> strides;
-    public:
-        T* operator()() {
-            return data;
-        }
-        template<typename... Idx>
-        const T& operator()(Idx... idx) const {
-            static_assert(sizeof...(idx) == N, "The number of indices must match the dimension N.");
-            const size_t indices[N] = {idx...};
-            size_t index = 0;
-            for (size_t i = 0; i < N; ++i) {
-                index += indices[i] * strides.data[i];
-            }
-            return data[index];
-        }
+struct Status {
+    bool ok = false; // true if no error
+    union {
+        struct err_t {
+            int args = 0; // bitfield for position of wrong arguments
+            char* msg = nullptr; // error message
+        } err;
+        T data; // data to return
+    };
 };
 
 } // namespace vlm
