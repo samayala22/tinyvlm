@@ -6,6 +6,22 @@
 
 namespace vlm {
 
+struct Data {
+    f32* lhs = nullptr;
+    f32* rhs = nullptr;
+    f32* gamma = nullptr;
+    f32* delta_gamma = nullptr;
+    f32* rollup_vertices = nullptr;
+    f32* local_velocities = nullptr;
+    f32* trefftz_buffer = nullptr;
+
+    i32* solver_info = nullptr;
+    i32* solver_ipiv = nullptr;
+    f32* solver_buffer = nullptr;
+};
+
+void data_alloc(const Allocator* allocator, Data* data, u64 n, u64 m);
+
 // Flow characteristics
 class FlowData {
     public:

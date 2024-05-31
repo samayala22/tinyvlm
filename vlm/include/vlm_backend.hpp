@@ -3,15 +3,21 @@
 #include "vlm_fwd.hpp"
 #include "vlm_types.hpp"
 #include "vlm_mesh.hpp"
+#include "vlm_data.hpp"
 
 namespace vlm {
 
 class Backend {
     public:
-        Mesh& mesh;
+        Allocator* h_allocator = nullptr;
+        Allocator* d_allocator = nullptr;
+        MeshProxy* h_mesh; 
+        MeshProxy* d_mesh; 
+        Data* h_data; // host (CPU) data
+        Data* d_data; // device (accelerator) data
         f32 sigma_vatistas = 0.0f;
 
-        Backend(Mesh& mesh) : mesh(mesh) {};
+        Backend(const MeshGeom* mesh_geom, int timesteps) {};
         virtual void reset() = 0;
         virtual void lhs_assemble() = 0;
         virtual void compute_rhs() = 0;
@@ -33,7 +39,7 @@ class Backend {
         virtual ~Backend() = default;
 };
 
-std::unique_ptr<Backend> create_backend(const std::string& backend_name, Mesh& mesh);
+std::unique_ptr<Backend> create_backend(const std::string& backend_name, const MeshGeom* mesh, int timesteps);
 std::vector<std::string> get_available_backends();
 
 } // namespace vlm
