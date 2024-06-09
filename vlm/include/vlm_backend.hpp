@@ -4,20 +4,30 @@
 #include "vlm_types.hpp"
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
+#include "vlm_allocator.hpp"
 
 namespace vlm {
 
 class Backend {
     public:
-        Allocator* h_allocator = nullptr;
-        Allocator* d_allocator = nullptr;
-        MeshProxy* h_mesh; 
-        MeshProxy* d_mesh; 
-        Data* h_data; // host (CPU) data
-        Data* d_data; // device (accelerator) data
-        f32 sigma_vatistas = 0.0f;
+        Allocator allocator;
+        
+        // Constant inital position meshes (for kinematics)
+        MeshGeom* hh_mesh_geom; // borrowed ptr
+        MeshGeom* hd_mesh_geom; 
+        MeshGeom* dd_mesh_geom; 
 
-        Backend(const MeshGeom* mesh_geom, int timesteps) {};
+        // Mutable meshes (temporal state)
+        Mesh2* hh_mesh; // host ptr to host buffers for io
+        Mesh2* hd_mesh; // host ptr to device buffers
+        Mesh2* dd_mesh; // device ptr to device buffers for kernels
+
+        Data* hd_data;
+        Data* dd_data;
+
+        f32 sigma_vatistas = 0.0f;
+        Backend(MeshGeom* mesh_geom);
+        void init(u64 timesteps);
         virtual void reset() = 0;
         virtual void lhs_assemble() = 0;
         virtual void compute_rhs() = 0;

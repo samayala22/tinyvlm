@@ -7,7 +7,7 @@ namespace vlm {
 
 class BackendCPU : public Backend {
     public:
-        BackendCPU(const MeshGeom* mesh_geom, int timesteps);
+        BackendCPU();
         ~BackendCPU();
         void reset() override;
         void lhs_assemble() override;

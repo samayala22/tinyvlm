@@ -52,3 +52,36 @@ std::vector<std::string> vlm::get_available_backends() {
     #endif
     return backends;
 }
+
+Backend::Backend(MeshGeom* mesh_geom) : hh_mesh_geom(mesh_geom) {};
+
+void Backend::init(u64 timesteps) {
+    u64 nb_vertices_wing = (hh_mesh_geom->nc+1)*(hh_mesh_geom->ns+1);
+
+    // Mesh structs allocation
+    hd_mesh_geom = (MeshGeom*)allocator.h_malloc(sizeof(MeshGeom));
+    dd_mesh_geom = (MeshGeom*)allocator.d_malloc(sizeof(MeshGeom));
+    hh_mesh = (Mesh2*)allocator.h_malloc(sizeof(Mesh2));
+    hd_mesh = (Mesh2*)allocator.h_malloc(sizeof(Mesh2));
+    dd_mesh = (Mesh2*)allocator.d_malloc(sizeof(Mesh2));
+
+    // Allocate mesh buffers on device and host
+    hd_mesh_geom->vertices = (f32*) allocator.d_malloc(nb_vertices_wing*3*sizeof(f32));
+    // mesh_alloc(allocator.h_malloc, hh_mesh, hh_mesh_geom->nc, hh_mesh_geom->ns, timesteps, 0);
+    mesh_alloc(allocator.d_malloc, hd_mesh, hh_mesh_geom->nc, hh_mesh_geom->ns, timesteps, 0); 
+    
+    // Copy indices
+    hd_mesh_geom->nc = hh_mesh_geom->nc;
+    hd_mesh_geom->ns = hh_mesh_geom->ns;
+    hd_mesh->nc = hh_mesh_geom->nc;
+    hd_mesh->ns = hh_mesh_geom->ns;
+    hd_mesh->nw = timesteps;
+
+    // Copy raw vertex geometry directly to device
+    allocator.hd_memcpy(hd_mesh_geom->vertices, hh_mesh_geom->vertices, nb_vertices_wing*3*sizeof(f32));
+    allocator.hd_memcpy(hd_mesh->vertices, hh_mesh_geom->vertices, nb_vertices_wing*3*sizeof(f32));
+
+    // Copy host-device mesh ptr to device-device
+    allocator.hd_memcpy(dd_mesh_geom, hd_mesh_geom, sizeof(*hd_mesh_geom));
+    allocator.hd_memcpy(dd_mesh, hd_mesh, sizeof(*hd_mesh));
+}

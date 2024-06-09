@@ -9,7 +9,7 @@
 namespace vlm {
 
 // C interface
-struct MeshProxy {
+struct Mesh2 {
     f32* vertices = nullptr; // (nc+nw+1)*(ns+1)*3
     // TODO: evaluate if we really need those values or we can just compute on the fly in the kernels
     f32* normals = nullptr; // nc*ns*3
@@ -36,21 +36,10 @@ struct MeshGeom {
     u64 ns = 0;
 };
 
-struct System {
-    MeshProxy* meshes = nullptr; // meshes
-    // Data data; // unified (linearized) data for the whole system
-    u32 n_meshes = 0;
-};
-
 void mesh_read_file(const std::string& filename, MeshGeom* mesh_geom);
-void mesh_alloc(const Allocator* allocator, MeshProxy* mesh, u64 nc, u64 ns, u64 nw, u64 nwa);
-void mesh_free(const Allocator* allocator, MeshProxy* mesh);
-
-struct AllocatorCPU : Allocator {
-    void* malloc(u64 size) const override { return std::malloc(size); }
-    void free(void* ptr) const override { std::free(ptr); }
-};
-
+void mesh_alloc(const malloc_f malloc, Mesh2* mesh, u64 nc, u64 ns, u64 nw, u64 nwa);
+void mesh_free(const free_f free, Mesh2* mesh);
+void mesh_copy(const memcpy_f memcpy, Mesh2* dst, const Mesh2* src);
 
 // === STRUCTURED MESH ===
 // nc : number of panels chordwise
