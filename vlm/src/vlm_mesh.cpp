@@ -14,22 +14,29 @@ using namespace vlm;
 
 constexpr f32 EPS = std::numeric_limits<f32>::epsilon();
 
-void vlm::mesh_alloc(const Allocator* allocator, MeshProxy* mesh, u64 nc, u64 ns, u64 nw, u64 nwa) {
-    mesh->vertices = (f32*)allocator->malloc((nc+nw+1)*(ns+1)*3*sizeof(f32));
-    mesh->normals = (f32*)allocator->malloc(nc*ns*3*sizeof(f32));
-    mesh->colloc = (f32*)allocator->malloc(nc*ns*3*sizeof(f32));
-    mesh->area = (f32*)allocator->malloc(nc*ns*sizeof(f32));
+void vlm::mesh_alloc(const malloc_f malloc, Mesh2* mesh, u64 nc, u64 ns, u64 nw, u64 nwa) {
+    mesh->vertices = (f32*)malloc((nc+nw+1)*(ns+1)*3*sizeof(f32));
+    mesh->normals = (f32*)malloc(nc*ns*3*sizeof(f32));
+    mesh->colloc = (f32*)malloc(nc*ns*3*sizeof(f32));
+    mesh->area = (f32*)malloc(nc*ns*sizeof(f32));
     mesh->ns = nc;
     mesh->ns = ns;
     mesh->nw = nw;
     mesh->nwa = nwa;
 }
 
-void vlm::mesh_free(const Allocator* allocator, MeshProxy* mesh) {
-    allocator->free(mesh->vertices);
-    allocator->free(mesh->normals);
-    allocator->free(mesh->colloc);
-    allocator->free(mesh->area);
+void vlm::mesh_copy(const memcpy_f memcpy, Mesh2* dst, const Mesh2* src) {
+    memcpy(dst->vertices, src->vertices, (dst->nc+dst->nw+1)*(dst->ns+1)*3*sizeof(f32));
+    memcpy(dst->normals, src->normals, dst->nc*dst->ns*3*sizeof(f32));
+    memcpy(dst->colloc, src->colloc, dst->nc*dst->ns*3*sizeof(f32));
+    memcpy(dst->area, src->area, dst->nc*dst->ns*sizeof(f32));
+}
+
+void vlm::mesh_free(const free_f free, Mesh2* mesh) {
+    free(mesh->vertices);
+    free(mesh->normals);
+    free(mesh->colloc);
+    free(mesh->area);
 }
 
 // Reads the Plot3D Structured file, allocates vertex buffer and fills it with the file data
