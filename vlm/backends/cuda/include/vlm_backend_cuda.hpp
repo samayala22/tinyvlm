@@ -25,21 +25,9 @@ struct MeshProxy {
 
 class BackendCUDA : public Backend {
     public:
-        BackendCPU default_backend; // temporary
 
-        float* d_lhs = nullptr;
-        float* d_rhs = nullptr;
-        float* d_gamma = nullptr;
-        float* d_delta_gamma = nullptr;
 
-        int* d_solver_info = nullptr;
-        int* d_solver_ipiv = nullptr;
-        float* d_solver_buffer = nullptr;
-        
-        MeshProxy h_mesh;
-        MeshProxy* d_mesh;
-
-        BackendCUDA(Mesh& mesh);
+        BackendCUDA(MeshGeom* mesh, u64 timesteps);
         ~BackendCUDA();
 
         void reset() override;

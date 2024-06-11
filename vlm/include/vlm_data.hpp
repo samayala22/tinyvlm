@@ -2,25 +2,23 @@
 
 #include "vlm_types.hpp"
 #include "vlm_fwd.hpp"
+#include "vlm_allocator.hpp"
 #include "tinyinterpolate.hpp"
 
 namespace vlm {
 
 struct Data {
-    f32* lhs = nullptr;
-    f32* rhs = nullptr;
-    f32* gamma = nullptr;
-    f32* delta_gamma = nullptr;
-    f32* rollup_vertices = nullptr;
-    f32* local_velocities = nullptr;
-    f32* trefftz_buffer = nullptr;
-
-    i32* solver_info = nullptr;
-    i32* solver_ipiv = nullptr;
-    f32* solver_buffer = nullptr;
+    f32* lhs = nullptr; // (ns*nc)^2
+    f32* rhs = nullptr; // ns*nc
+    f32* gamma = nullptr; // (nc+nw)*nw
+    f32* delta_gamma = nullptr; // nc*ns
+    f32* rollup_vertices = nullptr; // (nc+nw+1)*(ns+1)*3
+    f32* local_velocities = nullptr; // ns*nc*3
+    f32* trefftz_buffer = nullptr; // ns TODO: can we get rid of this ??
 };
 
-void data_alloc(const Allocator* allocator, Data* data, u64 n, u64 m);
+void data_alloc(const malloc_f malloc, Data* data, u64 nc, u64 ns, u64 nw);
+void data_free(const free_f free, Data* data);
 
 // Flow characteristics
 class FlowData {

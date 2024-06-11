@@ -7,7 +7,7 @@ namespace vlm {
 
 class BackendCPU : public Backend {
     public:
-        BackendCPU();
+        BackendCPU(MeshGeom* mesh, u64 timesteps);
         ~BackendCPU();
         void reset() override;
         void lhs_assemble() override;
@@ -24,6 +24,9 @@ class BackendCPU : public Backend {
         void compute_delta_gamma() override;
         void set_velocities(const linalg::alias::float3& vel) override;
         void set_velocities(const SoA_3D_t<f32>& vels) override;
+    private:
+        f32 mesh_mac(u64 j, u64 n) override; // mean chord
+        f32 mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) override; // mean span
 };
 
 } // namespace vlm

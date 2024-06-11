@@ -2,10 +2,10 @@
 
 namespace vlm {
 
-typedef void* (*malloc_f)(unsigned long long size);
+typedef void* (*malloc_f)(size_t size);
 typedef void (*free_f)(void* ptr);
-typedef void* (*memcpy_f)(void* dst, const void* src, unsigned long long size);
-typedef void* (*memset_f)(void* dst, int value, unsigned long long size);
+typedef void* (*memcpy_f)(void* dst, const void* src, size_t size);
+typedef void* (*memset_f)(void* dst, int value, size_t size);
 
 struct Allocator {
     malloc_f h_malloc;
