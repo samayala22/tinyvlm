@@ -18,16 +18,21 @@ class Backend {
         MeshGeom* dd_mesh_geom; 
 
         // Mutable meshes (temporal state)
-        Mesh2* hh_mesh; // host ptr to host buffers for io
+        // Mesh2* hh_mesh; // host ptr to host buffers for io
         Mesh2* hd_mesh; // host ptr to device buffers
         Mesh2* dd_mesh; // device ptr to device buffers for kernels
 
         Data* hd_data;
         Data* dd_data;
 
+        i32* d_solver_info = nullptr;
+        i32* d_solver_ipiv = nullptr;
+        f32* d_solver_buffer = nullptr;
+
         f32 sigma_vatistas = 0.0f;
-        Backend(MeshGeom* mesh_geom);
-        void init(u64 timesteps);
+        Backend() = default;
+        ~Backend();
+        void init(MeshGeom* mesh_geom, u64 timesteps); // Acts as delayed constructor
         virtual void reset() = 0;
         virtual void lhs_assemble() = 0;
         virtual void compute_rhs() = 0;
@@ -46,7 +51,10 @@ class Backend {
         virtual void compute_delta_gamma() = 0;
         virtual void set_velocities(const linalg::alias::float3& vel) = 0;
         virtual void set_velocities(const SoA_3D_t<f32>& vels) = 0;
-        virtual ~Backend() = default;
+
+    private:
+        virtual f32 mesh_mac(u64 j, u64 n) = 0; // mean chord
+        virtual f32 mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) = 0; // mean span
 };
 
 std::unique_ptr<Backend> create_backend(const std::string& backend_name, const MeshGeom* mesh, int timesteps);

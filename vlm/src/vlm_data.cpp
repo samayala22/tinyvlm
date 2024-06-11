@@ -21,3 +21,27 @@ FlowData::FlowData(const linalg::alias::float3& freestream_, const f32 rho_):
     lift_axis(compute_lift_axis(freestream)),
     stream_axis(compute_stream_axis(freestream)) {
 }
+
+void vlm::data_alloc(const malloc_f malloc, Data* data, u64 nc, u64 ns, u64 nw) {
+    const u64 nb_panels_wing = nc * ns;
+    const u64 nb_panels_total = (nc+nw) * ns;
+    const u64 nb_vertices_wing = (nc+1) * (ns+1);
+    const u64 nb_vertices_total = (nc+nw+1) * (ns+1);
+    data->lhs = (f32*)malloc(nb_panels_wing * nb_panels_wing * sizeof(f32));
+    data->rhs = (f32*)malloc(nb_panels_wing * sizeof(f32));
+    data->gamma = (f32*)malloc(nb_panels_total * sizeof(f32));
+    data->delta_gamma = (f32*)malloc(nb_panels_wing * sizeof(f32));
+    data->rollup_vertices = (f32*)malloc(nb_vertices_total * 3 * sizeof(f32)); // TODO: this can be reduced to (nw+1)*(ns+1)*3
+    data->local_velocities = (f32*)malloc(nb_panels_wing * 3 * sizeof(f32));
+    data->trefftz_buffer = (f32*)malloc(ns * sizeof(f32));
+}
+
+void data_free(const free_f free, Data* data) {
+    free(data->lhs);
+    free(data->rhs);
+    free(data->gamma);
+    free(data->delta_gamma);
+    free(data->rollup_vertices);
+    free(data->local_velocities);
+    free(data->trefftz_buffer);    
+}

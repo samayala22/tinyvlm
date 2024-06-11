@@ -20,49 +20,42 @@
 #include <cblas.h>
 
 using namespace vlm;
-
-template<typename T>
-void print_buffer(const T* start, u64 size) {
-    std::cout << "[";
-    for (u64 i = 0; i < size; i++) {
-        std::cout << start[i] << ",";
-    }
-    std::cout << "]\n";
-}
-
 using namespace linalg::ostream_overloads;
 
 BackendCPU::~BackendCPU() = default; // Destructor definition
 
-// TODO: replace any kind of size arithmetic with methods
-BackendCPU::BackendCPU(Mesh& mesh) : Backend(mesh) {
-    lhs.resize(mesh.nb_panels_wing() * mesh.nb_panels_wing());
-
-    rollup_vertices.resize(mesh.nb_vertices_total()); // TODO: exclude the wing vertices
-    local_velocities.resize(mesh.nb_panels_wing());
-    rhs.resize(mesh.nb_panels_wing());
-    ipiv.resize(mesh.nb_panels_wing());
-    gamma.resize((mesh.nc + mesh.nw) * mesh.ns); // store wake gamma as well
-    gamma_prev.resize(mesh.nb_panels_wing());
-    delta_gamma.resize(mesh.nb_panels_wing());
-    trefftz_buffer.resize(mesh.ns);
+BackendCPU::BackendCPU(MeshGeom* mesh, u64 timesteps) {
+    allocator.h_malloc = std::malloc;
+    allocator.d_malloc = std::malloc;
+    allocator.h_free = std::free;
+    allocator.d_free = std::free;
+    allocator.hh_memcpy = std::memcpy;
+    allocator.hd_memcpy = std::memcpy;
+    allocator.dh_memcpy = std::memcpy;
+    allocator.dd_memcpy = std::memcpy;
+    allocator.h_memset = std::memset;
+    allocator.d_memset = std::memset;
+    init(mesh, timesteps);
 }
 
 void BackendCPU::reset() {
     // TODO: verify that these are needed
-    std::fill(gamma.begin(), gamma.end(), 0.0f);
-    std::fill(lhs.begin(), lhs.end(), 0.0f);
-    std::fill(rhs.begin(), rhs.end(), 0.0f);
+    // std::fill(gamma.begin(), gamma.end(), 0.0f);
+    // std::fill(lhs.begin(), lhs.end(), 0.0f);
+    // std::fill(rhs.begin(), rhs.end(), 0.0f);
 }
 
 void BackendCPU::compute_delta_gamma() {
+    const u64 nc = hd_mesh->nc;
+    const u64 ns = hd_mesh->ns;
+    const u64 nw = hd_mesh->nw;
     // const tiny::ScopedTimer timer("Delta Gamma");
-    std::copy(gamma.data(), gamma.data()+mesh.ns, delta_gamma.data());
+    std::copy(dd_data->gamma, dd_data->gamma+ns, dd_data->delta_gamma);
 
     // note: this is efficient as the memory is contiguous
-    for (u64 i = 1; i < mesh.nc; i++) {
-        for (u64 j = 0; j < mesh.ns; j++) {
-            delta_gamma[i*mesh.ns + j] = gamma[i*mesh.ns + j] - gamma[(i-1)*mesh.ns + j];
+    for (u64 i = 1; i < nc; i++) {
+        for (u64 j = 0; j < ns; j++) {
+            dd_data->delta_gamma[i*ns + j] = dd_data->gamma[i*ns + j] - dd_data->gamma[(i-1)*ns + j];
         }
     }
 }
@@ -114,10 +107,16 @@ void BackendCPU::lhs_assemble() {
 
 void BackendCPU::compute_rhs() {
     const tiny::ScopedTimer timer("RHS");
-    const Mesh& m = mesh;
+    const u64 nc = hd_mesh->nc;
+    const u64 ns = hd_mesh->ns;
+    const u64 nw = hd_mesh->nw;
+    const u64 nb_panels_wing = nc * ns;
 
-    for (u64 i = 0; i < m.nb_panels_wing(); i++) {
-        rhs[i] = - (local_velocities.x[i] * m.normal.x[i] + local_velocities.y[i] * m.normal.y[i] + local_velocities.z[i] * m.normal.z[i]);
+    for (u64 i = 0; i < nb_panels_wing(); i++) {
+        rhs[i] = - (
+            dd_data->local_velocities[i + 0 * nb_panels_wing] * dd_mesh->normal[i + 0 * nb_panels_wing] +
+            dd_data->local_velocities[i + 1 * nb_panels_wing] * dd_mesh->normal[i + 1 * nb_panels_wing] +
+            dd_data->local_velocities[i + 2 * nb_panels_wing] * dd_mesh->normal[i + 2 * nb_panels_wing]);
     }
 }
 
@@ -360,4 +359,85 @@ void BackendCPU::set_velocities(const SoA_3D_t<f32>& vels) {
     std::copy(vels.x.begin(), vels.x.end(), local_velocities.x.begin());
     std::copy(vels.y.begin(), vels.y.end(), local_velocities.y.begin());
     std::copy(vels.z.begin(), vels.z.end(), local_velocities.z.begin());
+}
+
+/// @brief Computes the chord length of a chordwise segment
+/// @details Since the mesh follows the camber line, the chord length is computed
+/// as the distance between the first and last vertex of a chordwise segment
+/// @param j chordwise segment index
+f32 Mesh::chord_length(const u64 j) const {
+    const f32 dx = v.x[j + nc * (ns+1)] - v.x[j];
+    const f32 dy = 0.0f; // chordwise segments are parallel to the x axis
+    const f32 dz = v.z[j + nc * (ns+1)] - v.z[j];
+
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+// i: chordwise index, j: spanwise index, k: x,y,z dim
+#define PTR_MESH_V(m, i,j,k) (m->vertices + j + i * (m->ns+1) + k * (m->nc+m->nw+1) * (m->ns+1))
+
+/// @brief Computes the mean chord of a set of panels
+/// @details
+/// Mean Aerodynamic Chord = \frac{2}{S} \int_{0}^{b/2} c(y)^{2} dy
+/// Integration using the Trapezoidal Rule
+/// Validated against empirical formulas for tapered wings
+/// @param j first panel index spanwise
+/// @param n number of panels spanwise
+/// @return mean chord of the set of panels
+f32 BackendCPU::mesh_mac(u64 j, u64 n) {
+    assert(j + n <= hd_mesh->ns); // spanwise range
+    assert(n > 0);
+    u64 nc = hd_mesh->nc;
+    u64 ns = hd_mesh->ns;
+    u64 nw = hd_mesh->nw;
+
+    // Leading edge vertex
+    f32* lvx = PTR_MESH_V(hd_mesh, 0,0,0);
+    f32* lvy = PTR_MESH_V(hd_mesh, 0,0,1);
+    f32* lvz = PTR_MESH_V(hd_mesh, 0,0,2);
+    // Trailing edge vertex
+    f32* tvx = PTR_MESH_V(hd_mesh, nc,0,0);
+    f32* tvy = PTR_MESH_V(hd_mesh, nc,0,1);
+    f32* tvz = PTR_MESH_V(hd_mesh, nc,0,2);
+
+    f32 mac = 0.0f;
+    // loop over panel chordwise sections in spanwise direction
+    // Note: can be done optimally with vertical fused simd
+    for (u64 v = j; v < j+n; v++) {
+        // left and right chord lengths
+        const f32 dx0 = tvx[v] - lvx[v];
+        const f32 dy0 = tvy[v] - lvy[v];
+        const f32 dz0 = tvz[v] - lvz[v];
+        const f32 dx1 = tvx[v + 1] - lvx[v + 1];
+        const f32 dy1 = tvy[v + 1] - lvy[v + 1];
+        const f32 dz1 = tvz[v + 1] - lvz[v + 1];
+        const f32 c0 = std::sqrt(dx0 * dx0 + dy0 * dy0 + dz0 * dz0);
+        const f32 c1 = std::sqrt(dx1 * dx1 + dy1 * dy1 + dz1 * dz1);
+        // Panel width
+        const f32 dx3 = lvx[v + 1] - lvx[v];
+        const f32 dy3 = lvy[v + 1] - lvy[v];
+        const f32 dz3 = lvz[v + 1] - lvz[v];
+        const f32 width = std::sqrt(dx3 * dx3 + dy3 * dy3 + dz3 * dz3);
+
+        mac += 0.5f * (c0 * c0 + c1 * c1) * width;
+    }
+    // Since we divide by half the total wing area (both sides) we dont need to multiply by 2
+    return mac / mesh_area(0, j, nc, n);
+}
+
+f32 BackendCPU::mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) {
+    assert(i + m <= nc);
+    assert(j + n <= ns);
+    u64 nc = hd_mesh->nc;
+    u64 ns = hd_mesh->ns;
+    u64 nw = hd_mesh->nw;
+
+    const f32* areas = hd_mesh->area + j + i * (m->ns);
+    f32 area_sum = 0.0f;
+    for (u64 u = 0; u < m; u++) {
+        for (u64 v = 0; v < n; v++) {
+            area_sum += areas[v + u * ns];
+        }
+    }
+    return area_sum;
 }

@@ -27,30 +27,29 @@ inline uniform float length2(const uniform float3& v) {return LENGTH2(v);}
 inline float length(const float3& v) {return LENGTH(v);}
 inline uniform float length(const uniform float3& v) {return LENGTH(v);}
 
-// Aggregate Structures
-export struct SoA3D {
-    uniform float* uniform x;
-    uniform float* uniform y;
-    uniform float* uniform z;
-};
+struct Mesh2 {
+    f32* vertices = nullptr; // (nc+nw+1)*(ns+1)*3
+    // TODO: evaluate if we really need those values or we can just compute on the fly in the kernels
+    f32* normals = nullptr; // nc*ns*3
+    f32* colloc = nullptr; // nc*ns*3
+    f32* area = nullptr; // nc*ns
 
-export struct MeshProxy {
-    uniform uint64 ns;
-    uniform uint64 nc;
-    uniform uint64 nb_panels;
-    uniform SoA3D v; // vertices
-    uniform SoA3D colloc; // collocation points
-    uniform SoA3D normal; // normals
-};
+    u64 nc = 0; // number of wing panels chordwise
+    u64 ns = 0; // number of wing panels spanwise
+    u64 nw = 0; // number of wake panels chordwise
+    u64 nwa = 0; // number of wake panels active chordwise
 
-export struct MeshView {
-    uniform uint64 ni; // wing chord panels
-    uniform uint64 nj; // wing span panels
-    uniform uint64 nw; // wake chord capacity
-    uniform uint64 cw; // number of active wake panels
-    uniform SoA3D v; // vertices
-    uniform SoA3D colloc; // collocation points
-    uniform SoA3D normal; // normals
+    f32 s_ref = 0.0f; // reference area
+    f32 c_ref = 0.0f; // reference chord
+    f32 frame[16] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    }; // Col major order (TODO: move this to kinematic tracker)
+
+    char* name = nullptr; // mesh name
+    bool lifting = true;
 };
 
 // Bio-savart Kernel
@@ -58,6 +57,7 @@ export struct MeshView {
 #define RCUT2 1e-5f
 
 #define PI_f 3.141593f
+#define PTR_MESH_V(m, i,j,k) (m->vertices + j + i * (m->ns+1) + k * (m->nc+m->nw+1) * (m->ns+1))
 
 template<typename C, typename V>
 inline float3 kernel_biosavart(C& colloc, const V& vertex1, const V& vertex2, const uniform float& sigma) {
@@ -95,7 +95,7 @@ inline void kernel_symmetry(float3& inf, C colloc, const V& vertex0, const V& ve
 }
 
 export void kernel_influence(
-    uniform const MeshProxy& m,
+    uniform const Mesh2* uniform m,
     uniform float* uniform lhs,
     uniform uint64 ia, uniform uint64 lidx, uniform float sigma
     ) {
@@ -105,12 +105,14 @@ export void kernel_influence(
     const uniform uint64 v3 = v0 + m.ns+1;
     const uniform uint64 v2 = v3 + 1;
 
-
     // Broadcast vertices
-    uniform float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
-    uniform float3 vertex1 = {m.v.x[v1], m.v.y[v1], m.v.z[v1]};
-    uniform float3 vertex2 = {m.v.x[v2], m.v.y[v2], m.v.z[v2]};
-    uniform float3 vertex3 = {m.v.x[v3], m.v.y[v3], m.v.z[v3]};
+    const uniform float* uniform vx = PTR_MESH_V(m, 0, 0, 0);
+    const uniform float* uniform vy = PTR_MESH_V(m, 0, 0, 1);
+    const uniform float* uniform vz = PTR_MESH_V(m, 0, 0, 2);
+    uniform float3 vertex0 = {vx[v0], vy[v0], vz[v0]};
+    uniform float3 vertex1 = {vx[v1], vy[v1], vz[v1]};
+    uniform float3 vertex2 = {vx[v2], vy[v2], vz[v2]};
+    uniform float3 vertex3 = {vx[v3], vy[v3], vz[v3]};
 
     // print("Influencer %: \n", lidx);
     // print("Vertex 0: % % %\n", vertex0.x, vertex0.y, vertex0.z);
