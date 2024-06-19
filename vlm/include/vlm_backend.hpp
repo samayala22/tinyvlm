@@ -52,6 +52,10 @@ class Backend {
         virtual void set_velocities(const linalg::alias::float3& vel) = 0;
         virtual void set_velocities(const SoA_3D_t<f32>& vels) = 0;
 
+        virtual void mesh_metrics() = 0;
+        virtual void mesh_update_wake(const linalg::alias::float3& freestream) = 0;
+        virtual void mesh_correction_high_aoa(const f32 alpha) = 0;
+
     private:
         virtual f32 mesh_mac(u64 j, u64 n) = 0; // mean chord
         virtual f32 mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) = 0; // mean span

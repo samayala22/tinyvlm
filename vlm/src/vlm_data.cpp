@@ -30,6 +30,7 @@ void vlm::data_alloc(const malloc_f malloc, Data* data, u64 nc, u64 ns, u64 nw) 
     data->lhs = (f32*)malloc(nb_panels_wing * nb_panels_wing * sizeof(f32));
     data->rhs = (f32*)malloc(nb_panels_wing * sizeof(f32));
     data->gamma = (f32*)malloc(nb_panels_total * sizeof(f32));
+    data->gamma_prev = (f32*)malloc(nb_panels_wing * sizeof(f32));
     data->delta_gamma = (f32*)malloc(nb_panels_wing * sizeof(f32));
     data->rollup_vertices = (f32*)malloc(nb_vertices_total * 3 * sizeof(f32)); // TODO: this can be reduced to (nw+1)*(ns+1)*3
     data->local_velocities = (f32*)malloc(nb_panels_wing * 3 * sizeof(f32));
@@ -40,6 +41,7 @@ void data_free(const free_f free, Data* data) {
     free(data->lhs);
     free(data->rhs);
     free(data->gamma);
+    free(data->gamma_prev);
     free(data->delta_gamma);
     free(data->rollup_vertices);
     free(data->local_velocities);
