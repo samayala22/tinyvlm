@@ -95,7 +95,7 @@ void mesh_io_read_file_plot3d(std::ifstream& f, MeshGeom* mesh_geom) {
     }
 }
 
-void mesh_io_read_file(const std::string& filename, MeshGeom* mesh_geom) {
+void vlm::mesh_io_read_file(const std::string& filename, MeshGeom* mesh_geom) {
     const std::filesystem::path path(filename);
     if (!std::filesystem::exists(path)) {
         throw std::runtime_error("Mesh file not found"); // TODO: consider not using exceptions anymore
@@ -114,7 +114,7 @@ void mesh_io_read_file(const std::string& filename, MeshGeom* mesh_geom) {
     }
 }
 
-void mesh_quaterchord(MeshGeom* mesh_geom) {
+void vlm::mesh_quarterchord(MeshGeom* mesh_geom) {
     const u64 nc = mesh_geom->nc;
     const u64 ns = mesh_geom->ns;
     f32* vx = mesh_geom->vertices + 0 * (nc+1) * (ns+1);

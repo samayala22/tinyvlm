@@ -106,7 +106,7 @@ float compute_analytical_gamma(float y, float a, float b, float alpha) {
 //     return 0;
 // }
 
-int main(int argc, char **argv) {
+int main(int  /*argc*/, char ** /*argv*/) {
     const float a = 1.0f; // wing chord root
     const float b = 5.0f; // half wing span
 
@@ -115,11 +115,13 @@ int main(int argc, char **argv) {
     std::vector<f32> test_alphas = {0, 1, 2, 3, 4, 5, 10, 15};
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);
 
+    MeshGeom mesh_geom{};
     auto solvers = tiny::make_combination(meshes, backends);
     for (const auto& [mesh_name, backend_name] : solvers) {
+        mesh_io_read_file(mesh_name, &mesh_geom);
+        mesh_quarterchord(&mesh_geom);
         LinearVLM solver{};
-        solver.mesh = create_mesh(mesh_name);
-        solver.backend = create_backend(backend_name, *solver.mesh);
+        solver.backend = create_backend(backend_name, &mesh_geom, 1);
 
         for (u64 i = 0; i < test_alphas.size(); i++) {
             const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
@@ -134,7 +136,9 @@ int main(int argc, char **argv) {
             std::printf(">>> Analytical CL: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cl, cl_aerr, cl_rerr*100.f);
             std::printf(">>> Analytical CD: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cd, cd_aerr, cd_rerr*100.f);
             if (cl_rerr > 0.03f || cd_rerr > 0.03f) return 1;
-        } 
+        }
+        
+        delete[] mesh_geom.vertices;
     }
     return 0;
 }
