@@ -23,7 +23,7 @@ struct MeshProxy {
     SoA3D normal; // normals
 };
 
-class BackendCUDA : public Backend {
+class BackendCUDA final : public Backend {
     public:
 
 

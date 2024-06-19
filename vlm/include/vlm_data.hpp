@@ -10,7 +10,8 @@ namespace vlm {
 struct Data {
     f32* lhs = nullptr; // (ns*nc)^2
     f32* rhs = nullptr; // ns*nc
-    f32* gamma = nullptr; // (nc+nw)*nw
+    f32* gamma = nullptr; // (nc+nw)*ns
+    f32* gamma_prev = nullptr; // nc*ns
     f32* delta_gamma = nullptr; // nc*ns
     f32* rollup_vertices = nullptr; // (nc+nw+1)*(ns+1)*3
     f32* local_velocities = nullptr; // ns*nc*3

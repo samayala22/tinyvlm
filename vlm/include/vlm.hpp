@@ -10,7 +10,6 @@ namespace vlm {
 
 class Solver {
     public:
-    std::unique_ptr<Mesh> mesh;
     std::unique_ptr<Backend> backend;
     Solver(const tiny::Config& cfg); // mesh filename & backend name
     Solver() = default;

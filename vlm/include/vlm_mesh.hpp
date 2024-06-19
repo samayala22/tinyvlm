@@ -6,6 +6,10 @@
 #include "tinyfwd.hpp"
 #include "tinyview.hpp"
 
+#define PTR_MESH_V(m, i,j,k) (m->vertices + j + i * (m->ns+1) + k * (m->nc+m->nw+1) * (m->ns+1))
+#define PTR_MESH_C(m, i,j,k) (m->colloc + j + i * (m->ns) + k * (m->nc) * (m->ns))
+#define PTR_MESH_N(m, i,j,k) (m->normals + j + i * (m->ns) + k * (m->nc) * (m->ns))
+
 namespace vlm {
 
 // C interface
@@ -41,7 +45,8 @@ struct MeshGeom {
     u64 ns = 0;
 };
 
-void mesh_read_file(const std::string& filename, MeshGeom* mesh_geom);
+void mesh_quarterchord(MeshGeom* mesh_geom);
+void mesh_io_read_file(const std::string& filename, MeshGeom* mesh_geom);
 void mesh_alloc(const malloc_f malloc, Mesh2* mesh, u64 nc, u64 ns, u64 nw, u64 nwa);
 void mesh_free(const free_f free, Mesh2* mesh);
 void mesh_copy(const memcpy_f memcpy, Mesh2* dst, const Mesh2* src);
