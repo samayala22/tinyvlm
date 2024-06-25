@@ -64,7 +64,7 @@ cycle_idx = int((1 - 1 / cycles) * nb_pts - 1)
 fig, axs = plt.subplot_mosaic(
     [["time"], ["heave"]],  # Disposition des graphiques
     constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-    figsize=(11, 6),  # Ajuster la taille de la figure (x,y)
+    figsize=(6, 10),  # Ajuster la taille de la figure (x,y)
 )
 
 files = [
@@ -85,16 +85,16 @@ for file in files:
     uvlm_cycle_idx = int((1 - 1 / cycles) * n - 1)
 
     # sudden acceleration
-    # def pitch(t): return np.radians(5)
-    # def heave(t): return 0
+    def pitch(t): return np.radians(5)
+    def heave(t): return 0
 
     # pure heaving
     # def pitch(t): return 0
     # def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    def pitch(t): return np.radians(np.sin(omega * t))
-    def heave(t): return 0
+    # def pitch(t): return np.radians(np.sin(omega * t))
+    # def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -128,14 +128,14 @@ for file in files:
     error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx)) 
     print(f"Freq: {k}, Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
-# axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
+axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
 
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')
 axs["time"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
 axs["time"].legend()
 
-axs["heave"].set_xlabel('h/c')
+axs["heave"].set_xlabel('alpha')
 axs["heave"].set_ylabel('CL')
 axs["heave"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
 axs["heave"].legend()

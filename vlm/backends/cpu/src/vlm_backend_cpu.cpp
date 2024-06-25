@@ -240,7 +240,6 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const linalg::alias::float3& fre
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
     const linalg::alias::float3 span_axis{mesh.frame.y[0], mesh.frame.y[1], mesh.frame.y[2]};
     const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
-
     for (u64 u = 0; u < mesh.nc; u++) {
         for (u64 v = j; v < j + n; v++) {
             const u64 li = u * mesh.ns + v; // linear index
@@ -259,6 +258,8 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const linalg::alias::float3& fre
             // Joukowski method
             force += rho * delta_gamma[li] * linalg::cross(V, v1 - v0);
             force += rho * gamma_dt * mesh.area[li] * normal;
+
+            // std::cout << "unsteady part: " << rho * gamma_dt * mesh.area[li] << "\n";
 
             // Katz Plotkin method
             // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
