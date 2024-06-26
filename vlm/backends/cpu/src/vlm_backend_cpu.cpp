@@ -327,7 +327,9 @@ f32 BackendCPU::compute_coefficient_cd(
         {m.colloc.x.data(), m.colloc.y.data(), m.colloc.z.data()},
         {m.normal.x.data(), m.normal.y.data(), m.normal.z.data()}
     };
-    f32 cd = ispc::kernel_trefftz_cd(mesh_proxy, gamma.data(), trefftz_buffer.data(), j, n, sigma_vatistas);
+    // f32 cd = ispc::kernel_trefftz_cd(mesh_proxy, gamma.data(), trefftz_buffer.data(), j, n, sigma_vatistas);
+    f32 cd = ispc::kernel_trefftz_cd2(mesh_proxy, gamma.data(), j, n, sigma_vatistas);
+
     cd /= linalg::length2(flow.freestream) * area;
     return cd;
 }

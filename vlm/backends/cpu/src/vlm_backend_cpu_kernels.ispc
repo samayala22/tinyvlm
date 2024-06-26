@@ -27,6 +27,23 @@ inline uniform float length2(const uniform float3& v) {return LENGTH2(v);}
 inline float length(const float3& v) {return LENGTH(v);}
 inline uniform float length(const uniform float3& v) {return LENGTH(v);}
 
+inline uniform float3 normalize(const uniform float3& v) {
+    uniform float l = length(v);
+    const uniform float3 res = {v.x/l, v.y/l, v.z/l};
+    return res;
+}
+
+inline float3 normalize(const float3& v) {
+    float l = length(v);
+    const varying float3 res = {v.x/l, v.y/l, v.z/l};
+    return res;
+}
+
+template<typename F3>
+inline F3 quad_normal(const F3& v0, const F3& v1, const F3& v2, const F3& v3) {
+    return normalize(cross(v3-v1, v2-v0));
+}
+
 // Aggregate Structures
 export struct SoA3D {
     uniform float* uniform x;
@@ -134,6 +151,34 @@ export void kernel_influence(
         kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
         lhs[ia * m.nb_panels + ia2] += dot(inf, normal); // store
     }
+
+    // for (uniform uint64 i = 0; i < m.nc; i++) {
+    //     foreach(j = 0 ... m.ns) {
+    //         uint64 ia2 = i * m.ns + j;
+
+    //         uint64 vv0 = (i+0) * (m.ns+1) + j;
+    //         uint64 vv1 = (i+0) * (m.ns+1) + j + 1;
+    //         uint64 vv2 = (i+1) * (m.ns+1) + j + 1;
+    //         uint64 vv3 = (i+1) * (m.ns+1) + j;
+
+    //         // Loads
+    //         const float3 vvertex0 = {m.v.x[vv0], m.v.y[vv0], m.v.z[vv0]};
+    //         const float3 vvertex1 = {m.v.x[vv1], m.v.y[vv1], m.v.z[vv1]};
+    //         const float3 vvertex2 = {m.v.x[vv2], m.v.y[vv2], m.v.z[vv2]};
+    //         const float3 vvertex3 = {m.v.x[vv3], m.v.y[vv3], m.v.z[vv3]};
+
+    //         const float3 colloc = 0.25f * (vvertex0 + vvertex1 + vvertex2 + vvertex3);
+    //         //const float3 colloc = {m.colloc.x[ia2], m.colloc.y[ia2], m.colloc.z[ia2]};
+    //         const float3 normal = quad_normal(vvertex0, vvertex1, vvertex2, vvertex3);
+
+    //         float3 inf = {0.0f, 0.0f, 0.0f};
+    //         kernel_symmetry(inf, colloc, vertex0, vertex1, sigma);
+    //         kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
+    //         kernel_symmetry(inf, colloc, vertex2, vertex3, sigma);
+    //         kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
+    //         lhs[ia * m.nb_panels + ia2] += dot(inf, normal); // store
+    //     }
+    // }
 }
 
 export void kernel_wake_influence(
@@ -237,49 +282,102 @@ export void kernel_rollup(
     rollup_vz[vidx] = m.v.z[vidx] + reduce_add(induced_vel.z) * dt;
 }
 
-export uniform float kernel_trefftz_cd(
+// export uniform float kernel_trefftz_cd(
+//     uniform const MeshProxy& m,
+//     uniform float* uniform gamma,
+//     uniform float* uniform trefftz_buffer,
+//     uniform uint64 j, uniform uint64 n, uniform float sigma
+//     ) {
+//     uniform uint64 begin = m.nb_panels + j;
+//     uniform uint64 end = begin + n;
+//     float cd = 0.0f;
+    
+//     // Compute the induced velocity of the streamwise wake vortex segments
+//     for (uniform uint64 ia = m.nb_panels; ia < m.nb_panels + m.ns; ia++) {
+//         const uniform uint64 v0 = ia + ia / m.ns;
+//         const uniform uint64 v1 = v0 + 1;
+//         const uniform uint64 v3 = v0 + m.ns+1;
+//         const uniform uint64 v2 = v3 + 1;
+
+//         // Broadcast vertices
+//         const uniform float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
+//         const uniform float3 vertex1 = {m.v.x[v1], m.v.y[v1], m.v.z[v1]};
+//         const uniform float3 vertex2 = {m.v.x[v2], m.v.y[v2], m.v.z[v2]};
+//         const uniform float3 vertex3 = {m.v.x[v3], m.v.y[v3], m.v.z[v3]};
+
+//         uniform float gammaw = gamma[ia - m.ns];
+//         foreach(ia2 = begin ... end) {
+//             const float3 colloc = {m.colloc.x[ia2], m.colloc.y[ia2], m.colloc.z[ia2]};
+//             const float3 normal = {m.normal.x[ia2], m.normal.y[ia2], m.normal.z[ia2]};
+//             float3 inf = {0.0f, 0.0f, 0.0f};
+
+//             kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
+//             kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
+//             trefftz_buffer[ia2 - begin + j] += gammaw * dot(inf, normal); // store
+//         }
+//     }
+//     // Perform the integration (Katz Plotkin, Low speed Aero | Eq 8.146)
+//     foreach(i = j ... j + n) {
+//         uint64 li = (m.nc-1) * m.ns + i;
+//         float3 v0 = {m.v.x[i], m.v.y[i], m.v.z[i]};
+//         float3 v1 = {m.v.x[i+1], m.v.y[i+1], m.v.z[i+1]};
+//         float dl = length(v1 - v0);
+//         cd -= gamma[li] * trefftz_buffer[i] * dl; // used to have 0.5f * flow.rho
+//     }
+//     return reduce_add(cd);
+// }
+
+export uniform float kernel_trefftz_cd2(
     uniform const MeshProxy& m,
     uniform float* uniform gamma,
-    uniform float* uniform trefftz_buffer,
-    uniform uint64 j, uniform uint64 n, uniform float sigma
+    uniform uint32 jp, uniform uint32 n, uniform float sigma
     ) {
-    uniform uint64 begin = m.nb_panels + j;
-    uniform uint64 end = begin + n;
-    float cd = 0.0f;
-    
-    // Compute the induced velocity of the streamwise wake vortex segments
-    for (uniform uint64 ia = m.nb_panels; ia < m.nb_panels + m.ns; ia++) {
-        const uniform uint64 v0 = ia + ia / m.ns;
-        const uniform uint64 v1 = v0 + 1;
-        const uniform uint64 v3 = v0 + m.ns+1;
-        const uniform uint64 v2 = v3 + 1;
+    varying float cd = 0.0f;
 
-        // Broadcast vertices
+    // Loop over first wake panel spanwise section
+    const uniform uint32 i = m.nc;
+    // parallel for
+    for (uniform uint32 j = jp; j < jp+n; j++) {
+        uniform uint32 v0 = (i+0) * (m.ns+1) + j;
+        uniform uint32 v1 = (i+0) * (m.ns+1) + j + 1;
+        uniform uint32 v2 = (i+1) * (m.ns+1) + j + 1;
+        uniform uint32 v3 = (i+1) * (m.ns+1) + j;
+ 
+        // Loads
         const uniform float3 vertex0 = {m.v.x[v0], m.v.y[v0], m.v.z[v0]};
         const uniform float3 vertex1 = {m.v.x[v1], m.v.y[v1], m.v.z[v1]};
         const uniform float3 vertex2 = {m.v.x[v2], m.v.y[v2], m.v.z[v2]};
         const uniform float3 vertex3 = {m.v.x[v3], m.v.y[v3], m.v.z[v3]};
 
-        uniform float gammaw = gamma[ia - m.ns];
-        foreach(ia2 = begin ... end) {
-            const float3 colloc = {m.colloc.x[ia2], m.colloc.y[ia2], m.colloc.z[ia2]};
-            const float3 normal = {m.normal.x[ia2], m.normal.y[ia2], m.normal.z[ia2]};
-            float3 inf = {0.0f, 0.0f, 0.0f};
+        const uniform float3 colloc = 0.25f * (vertex0 + vertex1 + vertex2 + vertex3); // 3*(3 add + 1 mul)
 
-            kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
-            kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
-            trefftz_buffer[ia2 - begin + j] += gammaw * dot(inf, normal); // store
+        varying float3 inf = {0.0f, 0.0f, 0.0f};
+
+        foreach(jj = jp ... jp+n) {
+            varying uint32 vv0 = (i+0) * (m.ns+1) + jj;
+            varying uint32 vv1 = (i+0) * (m.ns+1) + jj + 1;
+            varying uint32 vv2 = (i+1) * (m.ns+1) + jj + 1;
+            varying uint32 vv3 = (i+1) * (m.ns+1) + jj;
+
+            // Loads
+            const varying float3 vvertex0 = {m.v.x[vv0], m.v.y[vv0], m.v.z[vv0]};
+            const varying float3 vvertex1 = {m.v.x[vv1], m.v.y[vv1], m.v.z[vv1]};
+            const varying float3 vvertex2 = {m.v.x[vv2], m.v.y[vv2], m.v.z[vv2]};
+            const varying float3 vvertex3 = {m.v.x[vv3], m.v.y[vv3], m.v.z[vv3]};
+            varying float3 inf2 = {0.0f, 0.0f, 0.0f};
+
+            kernel_symmetry(inf2, colloc, vvertex1, vvertex2, sigma);
+            kernel_symmetry(inf2, colloc, vvertex3, vvertex0, sigma);
+
+            varying float gammaw = gamma[(m.nc-1)*m.ns + jj];
+            inf += gammaw * inf2;
         }
+
+        const uniform float3 normal = quad_normal(vertex0, vertex1, vertex2, vertex3);
+        const varying float induced_vel = dot(inf, normal);
+        cd -= gamma[(m.nc-1)*m.ns + j] * induced_vel * length(vertex1 - vertex0);
     }
-    // Perform the integration (Katz Plotkin, Low speed Aero | Eq 8.146)
-    foreach(i = j ... j + n) {
-        uint64 li = (m.nc-1) * m.ns + i;
-        float3 v0 = {m.v.x[i], m.v.y[i], m.v.z[i]};
-        float3 v1 = {m.v.x[i+1], m.v.y[i+1], m.v.z[i+1]};
-        float dl = length(v1 - v0);
-        cd -= gamma[li] * trefftz_buffer[i] * dl; // used to have 0.5f * flow.rho
-    }
-    return reduce_add(cd);
+    return reduce_add(cd); // hadd, hadd, extract
 }
 
 export uniform float kernel_trefftz_cl(
