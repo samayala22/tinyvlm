@@ -27,7 +27,7 @@ f32 Backend::compute_coefficient_cd(const FlowData& flow) {
     return compute_coefficient_cd(flow, mesh_area(0,0,hd_mesh->nc, hd_mesh->ns), 0, hd_mesh->ns);
 }
 
-std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name, MeshGeom* mesh, u64 timesteps) {
+std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name, MeshGeom* mesh, int timesteps) {
     //tiny::CPUID cpuid;
     //cpuid.print_info();
 
