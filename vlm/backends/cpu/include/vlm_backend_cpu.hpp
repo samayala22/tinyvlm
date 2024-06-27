@@ -25,9 +25,8 @@ class BackendCPU final : public Backend {
         void set_velocities(const linalg::alias::float3& vel) override;
         void set_velocities(const SoA_3D_t<f32>& vels) override;
 
-        void mesh_metrics() override;
-        void mesh_update_wake(const linalg::alias::float3& freestream) override;
-        void mesh_correction_high_aoa(const f32 alpha) override;
+        void mesh_metrics(const f32 alpha) override;
+        void mesh_move(const linalg::alias::float4x4& transform) override;
     private:
         f32 mesh_mac(u64 j, u64 n) override; // mean chord
         f32 mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) override; // mean span

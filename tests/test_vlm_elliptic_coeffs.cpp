@@ -118,6 +118,7 @@ int main(int  /*argc*/, char ** /*argv*/) {
     MeshGeom mesh_geom{};
     auto solvers = tiny::make_combination(meshes, backends);
     for (const auto& [mesh_name, backend_name] : solvers) {
+        std::printf(">>> MESH: %s | BACKEND: %s\n", mesh_name.get().c_str(), backend_name.get().c_str());
         mesh_io_read_file(mesh_name, &mesh_geom);
         mesh_quarterchord(&mesh_geom);
         LinearVLM solver{};

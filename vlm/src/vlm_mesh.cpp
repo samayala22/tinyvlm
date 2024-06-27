@@ -12,14 +12,12 @@
 
 using namespace vlm;
 
-constexpr f32 EPS = std::numeric_limits<f32>::epsilon();
-
 void vlm::mesh_alloc(const malloc_f malloc, Mesh2* mesh, u64 nc, u64 ns, u64 nw, u64 nwa) {
     mesh->vertices = (f32*)malloc((nc+nw+1)*(ns+1)*3*sizeof(f32));
     mesh->normals = (f32*)malloc(nc*ns*3*sizeof(f32));
     mesh->colloc = (f32*)malloc(nc*ns*3*sizeof(f32));
     mesh->area = (f32*)malloc(nc*ns*sizeof(f32));
-    mesh->ns = nc;
+    mesh->nc = nc;
     mesh->ns = ns;
     mesh->nw = nw;
     mesh->nwa = nwa;
@@ -42,7 +40,7 @@ void vlm::mesh_free(const free_f free, Mesh2* mesh) {
 // Reads the Plot3D Structured file, allocates vertex buffer and fills it with the file data
 void mesh_io_read_file_plot3d(std::ifstream& f, MeshGeom* mesh_geom) {
     std::cout << "reading plot3d mesh" << std::endl;
-    u64 ni, nj, nk, blocks, nb_panels;
+    u64 ni, nj, nk, blocks;
     f32 x, y, z;
     f >> blocks;
     if (blocks != 1) {
@@ -56,7 +54,8 @@ void mesh_io_read_file_plot3d(std::ifstream& f, MeshGeom* mesh_geom) {
     mesh_geom->ns = nj - 1;
     mesh_geom->nc = ni - 1;
     mesh_geom->vertices = new f32[ni*nj*3];
-    nb_panels = mesh_geom->ns * mesh_geom->nc;
+    const u64 nb_panels = mesh_geom->ns * mesh_geom->nc;
+    const u64 nb_vertices = ni * nj;
 
     std::cout << "number of panels: " << nb_panels << std::endl;
     std::cout << "ns: " << mesh_geom->ns << std::endl;
@@ -65,19 +64,19 @@ void mesh_io_read_file_plot3d(std::ifstream& f, MeshGeom* mesh_geom) {
     for (u64 j = 0; j < nj; j++) {
         for (u64 i = 0; i < ni; i++) {
             f >> x;
-            mesh_geom->vertices[nb_panels * 0 + nj*i + j] = x;
+            mesh_geom->vertices[nb_vertices * 0 + nj*i + j] = x;
         }
     }
     for (u64 j = 0; j < nj; j++) {
         for (u64 i = 0; i < ni; i++) {
             f >> y;
-            mesh_geom->vertices[nb_panels * 1 + nj*i + j] = y;
+            mesh_geom->vertices[nb_vertices * 1 + nj*i + j] = y;
         }
     }
     for (u64 j = 0; j < nj; j++) {
         for (u64 i = 0; i < ni; i++) {
             f >> z;
-            mesh_geom->vertices[nb_panels * 2 + nj*i + j] = z;
+            mesh_geom->vertices[nb_vertices * 2 + nj*i + j] = z;
         }
     }
 
@@ -87,9 +86,9 @@ void mesh_io_read_file_plot3d(std::ifstream& f, MeshGeom* mesh_geom) {
     // if (std::abs(m.v.x[0]) != eps || std::abs(m.v.y[0]) != eps) {
     //     throw std::runtime_error("First vertex of plot3d mesh must be at origin");
     // }
-    const f32 first_y = mesh_geom->vertices[nb_panels * 1 + 0];
+    const f32 first_y = mesh_geom->vertices[nb_vertices * 1 + 0];
     for (u64 i = 1; i < ni; i++) {
-        if ( mesh_geom->vertices[nb_panels * 1 + i*nj] != first_y) {
+        if ( mesh_geom->vertices[nb_vertices * 1 + i*nj] != first_y) {
             throw std::runtime_error("Mesh vertices should be ordered in chordwise direction");
         }
     }
@@ -102,15 +101,19 @@ void vlm::mesh_io_read_file(const std::string& filename, MeshGeom* mesh_geom) {
     }
 
     std::ifstream f(path);
-    if (f.is_open()) {
-        if (path.extension() == ".x") {
-            mesh_io_read_file_plot3d(f, mesh_geom);
+    try {
+        if (f.is_open()) {
+            if (path.extension() == ".x") {
+                mesh_io_read_file_plot3d(f, mesh_geom);
+            } else {
+                throw std::runtime_error("Only structured gridpro mesh format is supported");
+            }
+            f.close();
         } else {
-            throw std::runtime_error("Only structured gridpro mesh format is supported");
+            throw std::runtime_error("Failed to open mesh file");
         }
-        f.close();
-    } else {
-        throw std::runtime_error("Failed to open mesh file");
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
     }
 }
 
@@ -133,7 +136,7 @@ void vlm::mesh_quarterchord(MeshGeom* mesh_geom) {
     }
 
     // Trailing edge vertices
-    const u64 i = nc;
+    const u64 i = nc-1;
     for (u64 j = 0; j < ns+1; j++) {
         const u64 v0 = (i+0) * (ns+1) + j;
         const u64 v3 = (i+1) * (ns+1) + j;

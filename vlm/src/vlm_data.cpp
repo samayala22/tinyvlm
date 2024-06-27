@@ -37,7 +37,7 @@ void vlm::data_alloc(const malloc_f malloc, Data* data, u64 nc, u64 ns, u64 nw) 
     data->trefftz_buffer = (f32*)malloc(ns * sizeof(f32));
 }
 
-void data_free(const free_f free, Data* data) {
+void vlm::data_free(const free_f free, Data* data) {
     free(data->lhs);
     free(data->rhs);
     free(data->gamma);

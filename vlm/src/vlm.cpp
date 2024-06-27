@@ -8,7 +8,7 @@
 #include "vlm_mesh.hpp"
 #include "vlm_types.hpp"
 #include "vlm_utils.hpp"
-#include <utility>
+#include "vlm_kinematics.hpp"
 
 #include <iostream>
 #include <cstdio>
@@ -24,11 +24,16 @@ using namespace vlm;
 // }
 
 AeroCoefficients LinearVLM::solve(const FlowData& flow) {
+    auto init_pos = translation_matrix<f32>({
+        -100.0f * flow.u_inf*std::cos(flow.alpha),
+        0.0f,
+        -100.0f * flow.u_inf*std::sin(flow.alpha)
+    });
+
     backend->reset();
     backend->set_velocities(flow.freestream);
-    backend->mesh_metrics();
-    backend->mesh_update_wake(flow.freestream);
-    backend->mesh_correction_high_aoa(flow.alpha); // must be after update_wake
+    backend->mesh_move(init_pos);
+    backend->mesh_metrics(flow.alpha);
     backend->lhs_assemble();
     backend->compute_rhs();
     backend->lu_factor();
