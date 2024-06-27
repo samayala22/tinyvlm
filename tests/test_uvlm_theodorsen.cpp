@@ -157,7 +157,7 @@ int main() {
     // Sudden acceleration
     const f32 alpha = to_radians(5.0f);
     kinematics.add([=](const fwd::Float& t) {
-        return translation_matrix<fwd::Float>({-u_inf*cos(alpha)*t, 0.f, -u_inf*sin(alpha)*t});
+        return translation_matrix<fwd::Float>({-u_inf*std::cos(alpha)*t, 0.f, -u_inf*std::sin(alpha)*t});
     });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
