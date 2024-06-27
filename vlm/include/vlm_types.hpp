@@ -7,6 +7,7 @@
 #include <string>
 #include <cmath>
 #include <memory>
+#include <functional>
 
 #include "linalg.h"
 

@@ -6,9 +6,11 @@
 #include "tinyfwd.hpp"
 #include "tinyview.hpp"
 
-#define PTR_MESH_V(m, i,j,k) (m->vertices + j + i * (m->ns+1) + k * (m->nc+m->nw+1) * (m->ns+1))
-#define PTR_MESH_C(m, i,j,k) (m->colloc + j + i * (m->ns) + k * (m->nc) * (m->ns))
-#define PTR_MESH_N(m, i,j,k) (m->normals + j + i * (m->ns) + k * (m->nc) * (m->ns))
+
+#define PTR_MESHGEOM_V(m, i,j,k) (m->vertices + (j) + (i) * (m->ns+1) + (k) * (m->nc+1) * (m->ns+1))
+#define PTR_MESH_V(m, i,j,k) (m->vertices + (j) + (i) * (m->ns+1) + (k) * (m->nc+m->nw+1) * (m->ns+1))
+#define PTR_MESH_C(m, i,j,k) (m->colloc + (j) + (i) * (m->ns) + (k) * (m->nc) * (m->ns))
+#define PTR_MESH_N(m, i,j,k) (m->normals + (j) + (i) * (m->ns) + (k) * (m->nc) * (m->ns))
 
 namespace vlm {
 

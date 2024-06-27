@@ -15,12 +15,12 @@ target("libvlm")
     add_files("src/*.cpp")
     add_includedirs("include", {public = true})
     
-target("vlm")
-    set_kind("binary")
-    set_default(true)
-    add_rpathdirs("$ORIGIN")
-    add_deps("libvlm") -- core library
-    set_runargs({"-i"}, {"../../../../config/elliptic.vlm"}, {"-m"}, {"../../../../mesh/elliptic_64x64.x"}, {"-o"}, {"../../../../results/elliptic.vtu"})
-    add_files("dev/main.cpp")
+-- target("vlm")
+--     set_kind("binary")
+--     set_default(true)
+--     add_rpathdirs("$ORIGIN")
+--     add_deps("libvlm") -- core library
+--     set_runargs({"-i"}, {"../../../../config/elliptic.vlm"}, {"-m"}, {"../../../../mesh/elliptic_64x64.x"}, {"-o"}, {"../../../../results/elliptic.vtu"})
+--     add_files("dev/main.cpp")
 
 -- xmake run vlm -i ../../../../config/elliptic.vlm -m ../../../../mesh/elliptic_128x128.x -o ../../../../results/rec.vtu
