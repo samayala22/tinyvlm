@@ -56,10 +56,16 @@ BackendCPU::BackendCPU(MeshGeom* mesh, u64 timesteps) {
 
 void BackendCPU::reset() {
     const u64 nb_panels_wing = hd_mesh->nc * hd_mesh->ns;
+    const u64 nb_vertices_wing = (hd_mesh->nc+1)*(hd_mesh->ns+1);
+
 
     // std::fill(gamma.begin(), gamma.end(), 0.0f);
     std::fill(hd_data->lhs, hd_data->lhs + nb_panels_wing*nb_panels_wing, 0.0f); // influence kernel is +=
     // std::fill(rhs.begin(), rhs.end(), 0.0f);
+    allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 0), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 0), nb_vertices_wing*sizeof(f32));
+    allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 1), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 1), nb_vertices_wing*sizeof(f32));
+    allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 2), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 2), nb_vertices_wing*sizeof(f32));
+
     dd_mesh->nwa = 0;
 }
 
@@ -438,7 +444,7 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad) {
             
             // High AoA correction (Aerodynamic Optimization of Aircraft Wings Using a Coupled VLM2.5D RANS Approach) Eq 3.4 p21
             // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf
-            const f32 factor = 0.5f * alpha_rad / (std::sin(alpha_rad) + EPS_f);
+            const f32 factor = (alpha_rad < EPS_f) ? 0.5f : 0.5f * (alpha_rad / (std::sin(alpha_rad) + EPS_f));
             const linalg::alias::float3 chord_vec = 0.5f * (vertex2 + vertex3 - vertex0 - vertex1);
             const linalg::alias::float3 colloc_pt = 0.5f * (vertex0 + vertex1) + factor * chord_vec;
             
@@ -546,4 +552,23 @@ void BackendCPU::mesh_move(const linalg::alias::float4x4& transform) {
     std::copy(PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 2), PTR_MESH_V(dd_mesh, dd_mesh->nc+1, 0, 2), PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa - 1, 0, 2));
     
     dd_mesh->nwa++;
+}
+
+// Temporary
+void BackendCPU::update_wake(const linalg::alias::float3& freestream) {
+    const f32 chord_root = 1.0f;
+    const f32 off_x = freestream.x * 100.0f * chord_root;
+    const f32 off_y = freestream.y * 100.0f * chord_root;
+    const f32 off_z = freestream.z * 100.0f * chord_root;
+
+    f32* vx = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,0);
+    f32* vy = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,1);
+    f32* vz = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,2);
+
+    for (u64 i = 0; i < dd_mesh->ns+1; ++i) {
+        vx[i + dd_mesh->ns+1] = vx[i] + off_x;
+        vy[i + dd_mesh->ns+1] = vy[i] + off_y;
+        vz[i + dd_mesh->ns+1] = vz[i] + off_z;
+    }
+    dd_mesh->nwa = 1;
 }
