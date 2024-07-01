@@ -133,9 +133,9 @@ int main(int  /*argc*/, char ** /*argv*/) {
             const f32 cl_rerr = analytical_cl < EPS_f ? 0.f : cl_aerr / analytical_cl;
             const f32 cd_aerr = std::abs(coeffs.cd - analytical_cd);
             const f32 cd_rerr = analytical_cd < EPS_f ? 0.f : cd_aerr / analytical_cd;
-            std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", to_degrees(flow.alpha), coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
-            std::printf(">>> Analytical CL: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cl, cl_aerr, cl_rerr*100.f);
-            std::printf(">>> Analytical CD: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cd, cd_aerr, cd_rerr*100.f);
+            std::printf(">>> Alpha: %.1f | CL = %.7f CD = %.7f CMx = %.6f CMy = %.6f CMz = %.6f\n", to_degrees(flow.alpha), coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
+            std::printf(">>> Analytical CL: %.7f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cl, cl_aerr, cl_rerr*100.f);
+            std::printf(">>> Analytical CD: %.7f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cd, cd_aerr, cd_rerr*100.f);
             if (cl_rerr > 0.03f || cd_rerr > 0.03f) return 1;
         }
         

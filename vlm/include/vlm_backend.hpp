@@ -54,6 +54,7 @@ class Backend {
 
         virtual void mesh_metrics(const f32 alpha) = 0;
         virtual void mesh_move(const linalg::alias::float4x4& transform) = 0;
+        virtual void update_wake(const linalg::alias::float3& freestream) = 0; // TEMPORARY
     private:
         virtual f32 mesh_mac(u64 j, u64 n) = 0; // mean chord
         virtual f32 mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) = 0; // mean span

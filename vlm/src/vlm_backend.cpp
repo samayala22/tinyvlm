@@ -80,7 +80,6 @@ void Backend::init(MeshGeom* mesh_geom, u64 timesteps) {
 
     // Copy raw vertex geometry directly to device
     allocator.hd_memcpy(hd_mesh_geom->vertices, hh_mesh_geom->vertices, nb_vertices_wing*3*sizeof(f32));
-    allocator.hd_memcpy(hd_mesh->vertices, hh_mesh_geom->vertices, nb_vertices_wing*3*sizeof(f32));
 
     // Copy host-device mesh ptr to device-device
     allocator.hd_memcpy(dd_mesh_geom, hd_mesh_geom, sizeof(*hd_mesh_geom));
