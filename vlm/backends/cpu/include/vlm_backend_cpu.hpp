@@ -27,6 +27,7 @@ class BackendCPU final : public Backend {
 
         void mesh_metrics(const f32 alpha) override;
         void mesh_move(const linalg::alias::float4x4& transform) override;
+        void update_wake(const linalg::alias::float3& freestream) override;
     private:
         f32 mesh_mac(u64 j, u64 n) override; // mean chord
         f32 mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) override; // mean span

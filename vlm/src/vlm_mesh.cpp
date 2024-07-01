@@ -141,9 +141,9 @@ void vlm::mesh_quarterchord(MeshGeom* mesh_geom) {
         const u64 v0 = (i+0) * (ns+1) + j;
         const u64 v3 = (i+1) * (ns+1) + j;
         
-        vx[v3] = 1.25f * vx[v3] - 0.25f * vx[v0];
-        vy[v3] = 1.25f * vy[v3] - 0.25f * vy[v0];
-        vz[v3] = 1.25f * vz[v3] - 0.25f * vz[v0];
+        vx[v3] = (4.f/3.f) * vx[v3] - (1.f/3.f) * vx[v0];
+        vy[v3] = (4.f/3.f) * vy[v3] - (1.f/3.f) * vy[v0];
+        vz[v3] = (4.f/3.f) * vz[v3] - (1.f/3.f) * vz[v0];
     }
 }
 

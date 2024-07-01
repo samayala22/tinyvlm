@@ -32,7 +32,12 @@ AeroCoefficients LinearVLM::solve(const FlowData& flow) {
 
     backend->reset();
     backend->set_velocities(flow.freestream);
+    //backend->update_wake(flow.freestream);
     backend->mesh_move(init_pos);
+
+    // for (u64 i = 0; i < 30; i++) {
+    //     std::printf("%lld: %f %f %f \n", i, backend->dd_mesh->vertices[i + 0], backend->dd_mesh->vertices[i + 30], backend->dd_mesh->vertices[i + 60]);
+    // }
     backend->mesh_metrics(flow.alpha);
     backend->lhs_assemble();
     backend->compute_rhs();
