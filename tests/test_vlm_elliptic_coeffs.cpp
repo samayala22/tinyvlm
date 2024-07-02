@@ -121,8 +121,7 @@ int main(int  /*argc*/, char ** /*argv*/) {
         std::printf(">>> MESH: %s | BACKEND: %s\n", mesh_name.get().c_str(), backend_name.get().c_str());
         mesh_io_read_file(mesh_name, &mesh_geom);
         mesh_quarterchord(&mesh_geom);
-        LinearVLM solver{};
-        solver.backend = create_backend(backend_name, &mesh_geom, 1);
+        LinearVLM solver{create_backend(backend_name, &mesh_geom, 1)};
 
         for (u64 i = 0; i < test_alphas.size(); i++) {
             const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};

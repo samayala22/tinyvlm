@@ -17,6 +17,7 @@ namespace vlm {
 // C interface
 struct Mesh2 {
     f32* vertices = nullptr; // (nc+nw+1)*(ns+1)*3
+    //f32* verts_wake = nullptr; // (nw+1)*(ns+1)*3
     // TODO: evaluate if we really need those values or we can just compute on the fly in the kernels
     f32* normals = nullptr; // nc*ns*3
     f32* colloc = nullptr; // nc*ns*3
@@ -39,6 +40,11 @@ struct Mesh2 {
     char* name = nullptr; // mesh name
     bool lifting = true;
 };
+
+inline u64 mesh_nb_panels_wing(const Mesh2* m) {return m->nc * m->ns;}
+inline u64 mesh_nb_panels_total(const Mesh2* m) {return (m->nc+m->nw) * m->ns;}
+inline u64 mesh_nb_vertices_wing(const Mesh2* m) {return (m->nc+1) * (m->ns+1);}
+inline u64 mesh_nb_vertices_total(const Mesh2* m) {return (m->nc+m->nw+1) * (m->ns+1);}
 
 // Contains only the raw geometry 
 struct MeshGeom {
