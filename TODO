@@ -1,12 +1,8 @@
-- [ ] Get rid of 3D vectors and use homogeneous coordinates everywhere (4d vector).
-- [ ] Move some of the logic from theodorsen test case to its own class
-- [X] Create additional SolverData struct for vatistas parameter (ideally find another paramater too) -> removed and directly put it as member of backend base class
-- [ ] Rename many functions and harmonize the API
-- [ ] Decide what to do with SoA3D and evaluate the fusion of the 3 buffers into one 
-- [ ] using a view for multidimensional indexing.
-- [ ] Instead of view, use a function that returns a tuple of the panel's vertex indices that takes in arg i, j values for chordwise and spanwise location
+- Get rid of 3D vectors and use homogeneous coordinates everywhere (4d vector).
+- Move some of the logic from theodorsen test case to its own class
+- Rename many functions and harmonize the API
+- Consider calling delta_gamma directly from lu_solve
 
-// store mesh in the backend ??
 // store kinematics in the backend ??
 // store flow properties in the backend ??
 

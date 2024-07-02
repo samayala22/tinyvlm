@@ -231,7 +231,7 @@ void BackendCPU::lu_solve() {
 }
 
 f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) {
-    const tiny::ScopedTimer timer("Compute CL");
+    // const tiny::ScopedTimer timer("Compute CL");
 
     const u64 nc = dd_mesh->nc;
     const u64 ns = dd_mesh->ns;
@@ -394,11 +394,9 @@ void BackendCPU::set_velocities(const linalg::alias::float3& vel) {
     std::fill(dd_data->local_velocities + 2 * nb_panels_wing, dd_data->local_velocities + 3 * nb_panels_wing, vel.z);
 }
 
-void BackendCPU::set_velocities(const SoA_3D_t<f32>& vels) {
-    const u64 nb_panels_wing = hd_mesh->nc * hd_mesh->ns;
-    std::copy(vels.x.begin(), vels.x.end(), dd_data->local_velocities + 0 * nb_panels_wing);
-    std::copy(vels.y.begin(), vels.y.end(), dd_data->local_velocities + 1 * nb_panels_wing);
-    std::copy(vels.z.begin(), vels.z.end(), dd_data->local_velocities + 2 * nb_panels_wing);
+void BackendCPU::set_velocities(const f32* vels) {
+    const u64 nb_panels_wing = mesh_nb_panels_wing(hd_mesh);
+    allocator.hd_memcpy(dd_data->local_velocities, vels, 3 * nb_panels_wing * sizeof(f32));
 }
 
 // TODO: change this to use the per panel local alpha (in global frame)
@@ -546,7 +544,7 @@ void BackendCPU::mesh_move(const linalg::alias::float4x4& transform) {
         vz[i] = transformed_pt.z;
     }
 
-    // Copy new trailing edge vertices on the wake buffer
+    // Copy new trailing edge vertices on the wake buffer // CAREFUL OVERLAP
     std::copy(PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 0), PTR_MESH_V(dd_mesh, dd_mesh->nc+1, 0, 0), PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa - 1, 0, 0));
     std::copy(PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 1), PTR_MESH_V(dd_mesh, dd_mesh->nc+1, 0, 1), PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa - 1, 0, 1));
     std::copy(PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 2), PTR_MESH_V(dd_mesh, dd_mesh->nc+1, 0, 2), PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa - 1, 0, 2));

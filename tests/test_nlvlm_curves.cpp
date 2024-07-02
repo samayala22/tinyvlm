@@ -81,11 +81,11 @@ int main(int  /*argc*/, char** /*argv*/) {
     std::vector<f32> db_cl(db_alphas.size()); // modified by lift function
 
     auto solvers = tiny::make_combination(meshes, backends);
-
+    MeshGeom mesh_geom{};
     for (const auto& [mesh_name, backend_name] : solvers) {
-        NonLinearVLM solver{1e-5f, 100};
-        solver.mesh = create_mesh(mesh_name);
-        solver.backend = create_backend(backend_name, *solver.mesh);
+        mesh_io_read_file(mesh_name, &mesh_geom);
+        mesh_quarterchord(&mesh_geom);
+        NonLinearVLM solver{create_backend(backend_name, &mesh_geom, 1)};
 
         for (const auto& lift_curve : lift_curves) {
             std::transform(db_alphas.begin(), db_alphas.end(), db_cl.begin(), [&lift_curve](float alpha){ return (*lift_curve.second)(alpha); });
@@ -117,6 +117,7 @@ int main(int  /*argc*/, char** /*argv*/) {
             }
             write_vector_pair(lift_curve.first + "_nonlinear_cl", test_alphas, test_cl);
         }
+        delete[] mesh_geom.vertices;
     }
 
     return 0; // Success
