@@ -22,67 +22,75 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
-ispc::Mesh2 mesh_to_ispc(Mesh2* mesh) {
-    ispc::Mesh2 mesh_ispc;
-    mesh_ispc.nc = mesh->nc;
-    mesh_ispc.ns = mesh->ns;
-    mesh_ispc.nw = mesh->nw;
-    mesh_ispc.nwa = mesh->nwa;
-    mesh_ispc.vertices = mesh->vertices;
-    mesh_ispc.normals = mesh->normals;
-    mesh_ispc.colloc = mesh->colloc;
-    mesh_ispc.area = mesh->area;
-    return mesh_ispc;
-}
+const Allocator allocator_cpu{
+    std::malloc,
+    std::malloc,
+	std::free,
+    std::free,
+	std::memcpy,
+    std::memcpy,
+ 	std::memcpy,
+    std::memcpy,
+  	std::memset,
+    std::memset
+};
 
-BackendCPU::~BackendCPU() = default; // Destructor definition
+BackendCPU::BackendCPU() : Backend(allocator_cpu) {}
+BackendCPU::~BackendCPU() = default;
 
-BackendCPU::BackendCPU(MeshGeom* mesh, u64 timesteps) {
-    allocator.h_malloc = std::malloc;
-    allocator.d_malloc = std::malloc;
-    allocator.h_free = std::free;
-    allocator.d_free = std::free;
-    allocator.hh_memcpy = std::memcpy;
-    allocator.hd_memcpy = std::memcpy;
-    allocator.dh_memcpy = std::memcpy;
-    allocator.dd_memcpy = std::memcpy;
-    allocator.h_memset = std::memset;
-    allocator.d_memset = std::memset;
-    init(mesh, timesteps);
-
-    d_solver_info = (i32*)allocator.d_malloc(sizeof(i32));
-    d_solver_ipiv = (i32*)allocator.d_malloc(hd_mesh->nc*hd_mesh->ns*sizeof(i32));
-}
-
-void BackendCPU::reset() {
-    const u64 nb_panels_wing = hd_mesh->nc * hd_mesh->ns;
-    const u64 nb_vertices_wing = (hd_mesh->nc+1)*(hd_mesh->ns+1);
+// void BackendCPU::reset() {
+//     const u64 nb_panels_wing = hd_mesh->nc * hd_mesh->ns;
+//     const u64 nb_vertices_wing = (hd_mesh->nc+1)*(hd_mesh->ns+1);
 
 
-    // std::fill(gamma.begin(), gamma.end(), 0.0f);
-    std::fill(hd_data->lhs, hd_data->lhs + nb_panels_wing*nb_panels_wing, 0.0f); // influence kernel is +=
-    // std::fill(rhs.begin(), rhs.end(), 0.0f);
-    allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 0), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 0), nb_vertices_wing*sizeof(f32));
-    allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 1), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 1), nb_vertices_wing*sizeof(f32));
-    allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 2), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 2), nb_vertices_wing*sizeof(f32));
+//     // std::fill(gamma.begin(), gamma.end(), 0.0f);
+//     std::fill(hd_data->lhs, hd_data->lhs + nb_panels_wing*nb_panels_wing, 0.0f); // influence kernel is +=
+//     // std::fill(rhs.begin(), rhs.end(), 0.0f);
+//     allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 0), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 0), nb_vertices_wing*sizeof(f32));
+//     allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 1), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 1), nb_vertices_wing*sizeof(f32));
+//     allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 2), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 2), nb_vertices_wing*sizeof(f32));
 
-    dd_mesh->nwa = 0;
-}
+//     dd_mesh->nwa = 0;
+// }
 
-void BackendCPU::compute_delta_gamma() {
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-    const u64 nwa = dd_mesh->nwa;
+void BackendCPU::gamma_delta(f32* gamma_delta, const f32* gamma) {
     // const tiny::ScopedTimer timer("Delta Gamma");
-    std::copy(dd_data->gamma, dd_data->gamma+ns, dd_data->delta_gamma);
 
-    // note: this is efficient as the memory is contiguous
-    for (u64 i = 1; i < nc; i++) {
-        for (u64 j = 0; j < ns; j++) {
-            dd_data->delta_gamma[i*ns + j] = dd_data->gamma[i*ns + j] - dd_data->gamma[(i-1)*ns + j];
-        }
-    }
+    tf::Taskflow graph;
+
+    auto begin = graph.placeholder();
+    auto end = graph.placeholder();
+
+    for (const auto& p : prm)  {
+        f32* p_gamma_delta = gamma_delta + p.poff;
+        const f32* p_gamma = gamma + p.poff;
+        tf::Task first_row = graph.emplace([&]{
+            allocator.dd_memcpy(p_gamma_delta, p_gamma, p.ns * sizeof(f32));
+        });
+        tf::Task remaining_rows = graph.for_each_index((u64)1,p.nc, [&] (u64 b, u64 e) {
+            for (u64 i = b; i < e; i++) {
+                for (u64 j = 0; j < p.ns; j++) {
+                    p_gamma_delta[i*p.ns + j] = p_gamma[i*p.ns + j] - p_gamma[(i-1)*p.ns + j];
+                }
+            }
+        });
+
+        begin.precede(first_row);
+        begin.precede(remaining_rows);
+        first_row.precede(end);
+        remaining_rows.precede(end);
+    };
+
+    Executor::get().run(graph).wait();
+
+    // std::copy(gamma,gamma+ns, delta_gamma);
+
+    // // note: this is efficient as the memory is contiguous
+    // for (u64 i = 1; i < nc; i++) {
+    //     for (u64 j = 0; j < ns; j++) {
+    //         delta_gamma[i*ns + j] = gamma[i*ns + j] - gamma[(i-1)*ns + j];
+    //     }
+    // }
 }
 
 void BackendCPU::lhs_assemble() {
@@ -95,7 +103,7 @@ void BackendCPU::lhs_assemble() {
     const u64 zero = 0;
     const u64 end_wing = (nc - 1) * ns;
 
-    ispc::Mesh2 mesh = mesh_to_ispc(dd_mesh);
+    ispc::Mesh mesh = mesh_to_ispc(dd_mesh);
 
     tf::Taskflow taskflow;
 
@@ -128,7 +136,7 @@ void BackendCPU::lhs_assemble() {
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::compute_rhs() {
+void BackendCPU::rhs_assemble_velocities() {
     const tiny::ScopedTimer timer("RHS");
     const u64 nc = dd_mesh->nc;
     const u64 ns = dd_mesh->ns;
@@ -143,13 +151,13 @@ void BackendCPU::compute_rhs() {
     }
 }
 
-void BackendCPU::add_wake_influence() {
+void BackendCPU::rhs_assemble_wake_influence() {
     // const tiny::ScopedTimer timer("Wake Influence");
     const u64 nc = dd_mesh->nc;
     const u64 ns = dd_mesh->ns;
     const u64 nw = dd_mesh->nw;
 
-    ispc::Mesh2 mesh = mesh_to_ispc(dd_mesh);
+    ispc::Mesh mesh = mesh_to_ispc(dd_mesh);
 
     tf::Taskflow taskflow;
 
@@ -165,7 +173,7 @@ void BackendCPU::add_wake_influence() {
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::wake_rollup(float dt) {
+void BackendCPU::displace_wake_rollup(float dt) {
     const tiny::ScopedTimer timer("Wake Rollup");
 
     const u64 nc = dd_mesh->nc;
@@ -180,7 +188,7 @@ void BackendCPU::wake_rollup(float dt) {
     const f32* ry = dd_data->rollup_vertices + (nc+nw+1)*(ns+1)*1;
     const f32* rz = dd_data->rollup_vertices + (nc+nw+1)*(ns+1)*2;
 
-    ispc::Mesh2 mesh = mesh_to_ispc(dd_mesh);
+    ispc::Mesh mesh = mesh_to_ispc(dd_mesh);
 
     tf::Taskflow taskflow;
 
@@ -201,7 +209,7 @@ void BackendCPU::wake_rollup(float dt) {
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::shed_gamma() {
+void BackendCPU::gamma_shed() {
     // const tiny::ScopedTimer timer("Shed Gamma");
     const u64 nc = dd_mesh->nc;
     const u64 ns = dd_mesh->ns;
@@ -230,7 +238,7 @@ void BackendCPU::lu_solve() {
     LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, dd_data->lhs, n, d_solver_ipiv, dd_data->gamma, n);
 }
 
-f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) {
+f32 BackendCPU::coeff_steady_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) {
     // const tiny::ScopedTimer timer("Compute CL");
 
     const u64 nc = dd_mesh->nc;
@@ -264,7 +272,7 @@ f32 BackendCPU::compute_coefficient_cl(const FlowData& flow, const f32 area, con
     return cl;
 }
 
-f32 BackendCPU::compute_coefficient_unsteady_cl(const linalg::alias::float3& freestream, const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) {
+f32 BackendCPU::coeff_unsteady_cl(const linalg::alias::float3& freestream, const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) {
     assert(n > 0);
     assert(j >= 0 && j+n <= dd_mesh->ns);
 
@@ -315,7 +323,7 @@ f32 BackendCPU::compute_coefficient_unsteady_cl(const linalg::alias::float3& fre
     return cl;
 }
 
-linalg::alias::float3 BackendCPU::compute_coefficient_cm(
+linalg::alias::float3 BackendCPU::coeff_steady_cm(
     const FlowData& flow,
     const f32 area,
     const f32 chord,
@@ -352,7 +360,7 @@ linalg::alias::float3 BackendCPU::compute_coefficient_cm(
     return cm;
 }
 
-f32 BackendCPU::compute_coefficient_cd(
+f32 BackendCPU::coeff_steady_cd(
     const FlowData& flow,
     const f32 area,
     const u64 j,
@@ -362,7 +370,7 @@ f32 BackendCPU::compute_coefficient_cd(
     assert(n > 0);
     assert(j >= 0 && j+n <= dd_mesh->ns);
     // std::fill(dd_data->trefftz_buffer, dd_data->trefftz_buffer + hd_mesh->ns, 0.0f);
-    ispc::Mesh2 mesh = mesh_to_ispc(dd_mesh);
+    ispc::Mesh mesh = mesh_to_ispc(dd_mesh);
     f32 cd = ispc::kernel_trefftz_cd2(&mesh, dd_data->gamma, j, n, sigma_vatistas);
     cd /= linalg::length2(flow.freestream) * area;
     return cd;
@@ -519,7 +527,7 @@ f32 BackendCPU::mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) {
     return area_sum;
 }
 
-void BackendCPU::mesh_move(const linalg::alias::float4x4& transform) {
+void BackendCPU::displace_wing_and_shed(const linalg::alias::float4x4& transform) {
     // const tiny::ScopedTimer t("Mesh::move");
     assert(dd_mesh->nwa < dd_mesh->nw); // check if we have capacity
     
