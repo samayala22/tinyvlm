@@ -44,7 +44,7 @@ inline F3 quad_normal(const F3& v0, const F3& v1, const F3& v2, const F3& v3) {
     return normalize(cross(v3-v1, v2-v0));
 }
 
-export struct Mesh2 {
+export struct Mesh {
     float* vertices; // (nc+nw+1)*(ns+1)*3
     // TODO: evaluate if we really need those values or we can just compute on the fly in the kernels
     float* normals; // nc*ns*3
@@ -109,7 +109,7 @@ inline void kernel_symmetry(float3& inf, C colloc, const V& vertex0, const V& ve
 }
 
 export void kernel_influence(
-    uniform const Mesh2* uniform m,
+    uniform const Mesh* uniform m,
     uniform float* uniform lhs,
     uniform uint64 ia, uniform uint64 lidx, uniform float sigma
     ) {
@@ -153,7 +153,7 @@ export void kernel_influence(
 }
 
 export void kernel_wake_influence(
-    uniform const Mesh2* uniform m,
+    uniform const Mesh* uniform m,
     uniform uint64 lidx, uniform float* uniform gamma, uniform float* uniform rhs, uniform float sigma
     ) {
     const uniform uint64 nb_panels = m->ns * m->nc;
@@ -199,7 +199,7 @@ export void kernel_wake_influence(
 }
 
 export void kernel_rollup(
-    uniform const Mesh2* uniform m, uniform float dt, 
+    uniform const Mesh* uniform m, uniform float dt, 
     uniform float* uniform rollup,
     uniform uint64 vidx, uniform float* uniform gamma, uniform float sigma
     ) {
@@ -269,7 +269,7 @@ export void kernel_rollup(
 }
 
 // export uniform float kernel_trefftz_cd(
-//     uniform const Mesh2* uniform m,
+//     uniform const Mesh* uniform m,
 //     uniform float* uniform gamma,
 //     uniform float* uniform trefftz_buffer,
 //     uniform uint64 j, uniform uint64 n, uniform float sigma
@@ -325,7 +325,7 @@ export void kernel_rollup(
 // }
 
 export uniform float kernel_trefftz_cd2(
-    uniform const Mesh2* uniform m,
+    uniform const Mesh* uniform m,
     uniform float* uniform gamma,
     uniform uint64 jp, uniform uint64 n, uniform float sigma
     ) {
@@ -382,7 +382,7 @@ export uniform float kernel_trefftz_cd2(
 }
 
 export uniform float kernel_trefftz_cl(
-    uniform const Mesh2* uniform m,
+    uniform const Mesh* uniform m,
     uniform float* uniform gamma,
     uniform uint64 j, uniform uint64 n
     ) {

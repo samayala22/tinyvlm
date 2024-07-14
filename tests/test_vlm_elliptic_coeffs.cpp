@@ -114,13 +114,18 @@ int main(int  /*argc*/, char ** /*argv*/) {
     const std::vector<std::string> backends = get_available_backends();
     std::vector<f32> test_alphas = {0, 1, 2, 3, 4, 5, 10, 15};
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);
-
-    MeshGeom mesh_geom{};
+    
+    const MeshIO mesh_io{"plot3d"};
+    MeshGeom mesh_geom{}; // DEPRECATE
     auto solvers = tiny::make_combination(meshes, backends);
     for (const auto& [mesh_name, backend_name] : solvers) {
         std::printf(">>> MESH: %s | BACKEND: %s\n", mesh_name.get().c_str(), backend_name.get().c_str());
-        mesh_io_read_file(mesh_name, &mesh_geom);
-        mesh_quarterchord(&mesh_geom);
+
+        auto dims = mesh_io.get_dims(mesh_name);
+        // LinearVLM solver{backend_name, }
+
+        mesh_io_read_file(mesh_name, &mesh_geom); // DEPRECATE
+        mesh_quarterchord(&mesh_geom); // DEPRECATE
         LinearVLM solver{create_backend(backend_name, &mesh_geom, 1)};
 
         for (u64 i = 0; i < test_alphas.size(); i++) {
