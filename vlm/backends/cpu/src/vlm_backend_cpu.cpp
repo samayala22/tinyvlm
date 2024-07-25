@@ -11,6 +11,7 @@
 #include "vlm_executor.hpp" // includes taskflow/taskflow.hpp
 
 #include <algorithm> // std::fill
+#include <iostream> // std::cout
 #include <cstdio> // std::printf
 
 #include <stdint.h>
@@ -22,20 +23,17 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
-const Allocator allocator_cpu{
-    std::malloc,
-    std::malloc,
-	std::free,
-    std::free,
-	std::memcpy,
-    std::memcpy,
- 	std::memcpy,
-    std::memcpy,
-  	std::memset,
-    std::memset
+class MemoryCPU final : public Memory {
+    public:
+        MemoryCPU() : Memory(true) {}
+        ~MemoryCPU() = default;
+        void* alloc(MemoryLocation location, std::size_t size) const override {return std::malloc(size);}
+        void free(MemoryLocation location, void* ptr) const override {std::free(ptr);}
+        void copy(MemoryTransfer transfer, void* dst, const void* src, std::size_t size) const override {std::memcpy(dst, src, size);}
+        void fill_f32(MemoryLocation location, float* ptr, float value, std::size_t size) const override {std::fill(ptr, ptr + size, value);}
 };
 
-BackendCPU::BackendCPU() : Backend(allocator_cpu) {}
+BackendCPU::BackendCPU() : Backend(std::make_unique<MemoryCPU>()) {}
 BackendCPU::~BackendCPU() = default;
 
 // void BackendCPU::reset() {
@@ -46,26 +44,24 @@ BackendCPU::~BackendCPU() = default;
 //     // std::fill(gamma.begin(), gamma.end(), 0.0f);
 //     std::fill(hd_data->lhs, hd_data->lhs + nb_panels_wing*nb_panels_wing, 0.0f); // influence kernel is +=
 //     // std::fill(rhs.begin(), rhs.end(), 0.0f);
-//     allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 0), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 0), nb_vertices_wing*sizeof(f32));
-//     allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 1), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 1), nb_vertices_wing*sizeof(f32));
-//     allocator.dd_memcpy(PTR_MESH_V(hd_mesh, 0, 0, 2), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 2), nb_vertices_wing*sizeof(f32));
+//     memory->dd_copy(PTR_MESH_V(hd_mesh, 0, 0, 0), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 0), nb_vertices_wing*sizeof(f32));
+//     memory->dd_copy(PTR_MESH_V(hd_mesh, 0, 0, 1), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 1), nb_vertices_wing*sizeof(f32));
+//     memory->dd_copy(PTR_MESH_V(hd_mesh, 0, 0, 2), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 2), nb_vertices_wing*sizeof(f32));
 
 //     dd_mesh->nwa = 0;
 // }
 
 void BackendCPU::gamma_delta(f32* gamma_delta, const f32* gamma) {
-    // const tiny::ScopedTimer timer("Delta Gamma");
-
     tf::Taskflow graph;
 
     auto begin = graph.placeholder();
     auto end = graph.placeholder();
 
     for (const auto& p : prm)  {
-        f32* p_gamma_delta = gamma_delta + p.poff;
-        const f32* p_gamma = gamma + p.poff;
+        f32* p_gamma_delta = gamma_delta + p.off_wing_p;
+        const f32* p_gamma = gamma + p.off_wing_p;
         tf::Task first_row = graph.emplace([&]{
-            allocator.dd_memcpy(p_gamma_delta, p_gamma, p.ns * sizeof(f32));
+            memory->copy(MemoryTransfer::DeviceToDevice, p_gamma_delta, p_gamma, p.ns * sizeof(f32));
         });
         tf::Task remaining_rows = graph.for_each_index((u64)1,p.nc, [&] (u64 b, u64 e) {
             for (u64 i = b; i < e; i++) {
@@ -82,6 +78,7 @@ void BackendCPU::gamma_delta(f32* gamma_delta, const f32* gamma) {
     };
 
     Executor::get().run(graph).wait();
+    graph.dump(std::cout); 
 
     // std::copy(gamma,gamma+ns, delta_gamma);
 
@@ -93,72 +90,80 @@ void BackendCPU::gamma_delta(f32* gamma_delta, const f32* gamma) {
     // }
 }
 
-void BackendCPU::lhs_assemble() {
-    tiny::ScopedTimer timer("LHS");
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-    const u64 nwa = dd_mesh->nwa;
+void kernel_inf(u64 m, f32* lhs, f32* influenced, u64 influenced_ld, f32* influencer, u64 influencer_ld, u64 influencer_rld, f32* normals, u64 normals_ld);
 
-    const u64 zero = 0;
-    const u64 end_wing = (nc - 1) * ns;
+void BackendCPU::lhs_assemble(f32* lhs, const f32* colloc, const f32* normals, const f32* verts_wing, const f32* verts_wake) {
+    // tiny::ScopedTimer timer("LHS");
 
-    ispc::Mesh mesh = mesh_to_ispc(dd_mesh);
+    const u64 total_nb_panels_wing = prm.back().off_wing_p + prm.back().nb_panels_wing();
+    const u64 total_nb_vertices_wing = prm.back().off_wing_v + prm.back().nb_vertices_wing();
+    
+    tf::Taskflow graph;
 
-    tf::Taskflow taskflow;
+    auto begin = graph.placeholder();
+    auto end = graph.placeholder();
 
-    auto init = taskflow.placeholder();
-    auto wing_pass = taskflow.for_each_index(zero, end_wing, [&] (u64 i) {
-        ispc::kernel_influence(&mesh, dd_data->lhs, i, i, sigma_vatistas);
-    });
+    for (const auto& m_col : prm)  {
+        f32* lhs_section = lhs + m_col.off_wing_p * total_nb_panels_wing;
+        const f32* vwing_section = verts_wing + m_col.off_wing_v;
+        const f32* vwake_section = verts_wake + m_col.off_wake_v;
+        const u64 zero = 0;
+        const u64 end_wing = (m_col.nc - 1) * m_col.ns;
+        const u64 m = total_nb_panels_wing; // sections span the whole rows of lhs matrix
+        u64 w = 0; // wake row index (0 to nwa)
 
-    u64 idx = nc - 1;
-    auto cond = taskflow.emplace([&]{
-        return idx < nc + nwa ? 0 : 1; // 0 means continue, 1 means break
-    });
-    auto wake_pass = taskflow.for_each_index(zero, ns, [&] (u64 j) {
-        const u64 ia = (nc - 1) * ns + j;
-        const u64 lidx = idx * ns + j;
-        ispc::kernel_influence(&mesh, dd_data->lhs, ia, lidx, sigma_vatistas);
-    });
-    auto back = taskflow.emplace([&]{
-        idx++;
-        return 0; // 0 means continue
-    });
-    auto sync = taskflow.placeholder();
+        auto wing_pass = graph.for_each_index(zero, end_wing, [&] (u64 lidx) {
+            f32* lhs_slice = lhs_section + lidx * total_nb_panels_wing;
+            const f32* vwing_slice = vwing_section + lidx + lidx / m_col.ns;
+            ispc::kernel_influence(m, lhs_slice, colloc, total_nb_panels_wing, vwing_slice, total_nb_vertices_wing, m_col.ns+1, normals, total_nb_panels_wing);
+        });
 
-    init.precede(wing_pass, cond);
-    wing_pass.precede(sync);
-    cond.precede(wake_pass, sync); // 0 and 1
-    wake_pass.precede(back);
-    back.precede(cond);
+        auto last_row = graph.for_each_index(end_wing, m_col.nb_panels_wing(), [&] (u64 lidx) {
+            f32* lhs_slice = lhs_section + lidx * total_nb_panels_wing;
+            const f32* vwing_slice = vwing_section + lidx + lidx / m_col.ns;
+            ispc::kernel_influence(m, lhs_slice, colloc, total_nb_panels_wing, vwing_slice, total_nb_vertices_wing, m_col.ns+1, normals, total_nb_panels_wing);
+        });
 
-    Executor::get().run(taskflow).wait();
+        auto cond = graph.emplace([&]{
+            return w < m_col.nwa ? 0 : 1; // 0 means continue, 1 means break
+        });
+        auto wake_pass = graph.for_each_index(zero, m_col.ns, [&] (u64 j) {
+            f32* lhs_slice = lhs_section + (j+end_wing) * total_nb_panels_wing;
+            const f32* vwake_slice = vwake_section + (m_col.nw - w - 1) * (m_col.ns+1) + j;
+            ispc::kernel_influence(m, lhs_slice, colloc, total_nb_panels_wing, vwake_slice, total_nb_vertices_wing, m_col.ns+1, normals, total_nb_panels_wing);
+        });
+        auto back = graph.emplace([&]{
+            w++;
+            return 0; // 0 means continue
+        });
+
+        begin.precede(wing_pass, last_row);
+        wing_pass.precede(end);
+        last_row.precede(cond);
+        cond.precede(wake_pass, end); // 0 and 1
+        wake_pass.precede(back);
+        back.precede(cond);
+    }
+
+    Executor::get().run(graph).wait();
 }
 
-void BackendCPU::rhs_assemble_velocities() {
+void BackendCPU::rhs_assemble_velocities(f32* rhs, const f32* normals, const f32* velocities) {
     const tiny::ScopedTimer timer("RHS");
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-    const u64 nb_panels_wing = nc * ns;
 
-    for (u64 i = 0; i < nb_panels_wing; i++) {
-        dd_data->rhs[i] = - (
-            dd_data->local_velocities[i + 0 * nb_panels_wing] * dd_mesh->normals[i + 0 * nb_panels_wing] +
-            dd_data->local_velocities[i + 1 * nb_panels_wing] * dd_mesh->normals[i + 1 * nb_panels_wing] +
-            dd_data->local_velocities[i + 2 * nb_panels_wing] * dd_mesh->normals[i + 2 * nb_panels_wing]);
+    const u64 total_nb_panels_wing = prm.back().off_wing_p + prm.back().nb_panels_wing(); // todo replace raw ptr to views ? 
+
+    // todo: parallelize
+    for (u64 i = 0; i < total_nb_panels_wing; i++) {
+        rhs[i] = - (
+            velocities[i + 0 * total_nb_panels_wing] * normals[i + 0 * total_nb_panels_wing] +
+            velocities[i + 1 * total_nb_panels_wing] * normals[i + 1 * total_nb_panels_wing] +
+            velocities[i + 2 * total_nb_panels_wing] * normals[i + 2 * total_nb_panels_wing]);
     }
 }
 
 void BackendCPU::rhs_assemble_wake_influence() {
     // const tiny::ScopedTimer timer("Wake Influence");
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-
-    ispc::Mesh mesh = mesh_to_ispc(dd_mesh);
-
     tf::Taskflow taskflow;
 
     auto init = taskflow.placeholder();
@@ -222,20 +227,21 @@ void BackendCPU::gamma_shed() {
     std::copy(dd_data->gamma + ns * (nc-1), dd_data->gamma + nb_panels_wing, dd_data->gamma + wake_row_start);
 }
 
-void BackendCPU::lu_factor() {
-    const tiny::ScopedTimer timer("Factor");
-    const u64 nb_panels_wing = hd_mesh->nc * hd_mesh->ns;
-    const int32_t n = static_cast<int32_t>(nb_panels_wing);
-    LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, dd_data->lhs, n, d_solver_ipiv);
+void BackendCPU::lu_factor(f32* lhs) {
+    // const tiny::ScopedTimer timer("Factor");
+    const u64 total_nb_panels_wing = prm.back().off_wing_p + prm.back().nb_panels_wing();
+    const int32_t n = static_cast<int32_t>(total_nb_panels_wing);
+    LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs, n, d_solver_ipiv);
 }
 
-void BackendCPU::lu_solve() {
+void BackendCPU::lu_solve(f32* lhs, f32* rhs, f32* gamma) {
     // const tiny::ScopedTimer timer("Solve");
-    const u64 nb_panels_wing = hd_mesh->nc * hd_mesh->ns;
-    const int32_t n = static_cast<int32_t>(nb_panels_wing);
-    std::copy(dd_data->rhs, dd_data->rhs+nb_panels_wing, dd_data->gamma);
+    const u64 total_nb_panels_wing = prm.back().off_wing_p + prm.back().nb_panels_wing();
+    const int32_t n = static_cast<int32_t>(total_nb_panels_wing);
 
-    LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, dd_data->lhs, n, d_solver_ipiv, dd_data->gamma, n);
+    memory->copy(MemoryTransfer::DeviceToDevice, gamma, lhs, total_nb_panels_wing * sizeof(f32));
+
+    LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs, n, d_solver_ipiv, gamma, n);
 }
 
 f32 BackendCPU::coeff_steady_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) {
@@ -404,59 +410,63 @@ void BackendCPU::set_velocities(const linalg::alias::float3& vel) {
 
 void BackendCPU::set_velocities(const f32* vels) {
     const u64 nb_panels_wing = mesh_nb_panels_wing(hd_mesh);
-    allocator.hd_memcpy(dd_data->local_velocities, vels, 3 * nb_panels_wing * sizeof(f32));
+    memory->hd_copy(dd_data->local_velocities, vels, 3 * nb_panels_wing * sizeof(f32));
 }
 
 // TODO: change this to use the per panel local alpha (in global frame)
-void BackendCPU::mesh_metrics(const f32 alpha_rad) {
-    const f32* vx = PTR_MESH_V(dd_mesh, 0,0,0);
-    const f32* vy = PTR_MESH_V(dd_mesh, 0,0,1);
-    const f32* vz = PTR_MESH_V(dd_mesh, 0,0,2);
-    f32* nx = PTR_MESH_N(dd_mesh, 0,0,0);
-    f32* ny = PTR_MESH_N(dd_mesh, 0,0,1);
-    f32* nz = PTR_MESH_N(dd_mesh, 0,0,2);
-    f32* cx = PTR_MESH_C(dd_mesh, 0,0,0);
-    f32* cy = PTR_MESH_C(dd_mesh, 0,0,1);
-    f32* cz = PTR_MESH_C(dd_mesh, 0,0,2);
-
+void BackendCPU::mesh_metrics(const f32 alpha_rad, const f32* verts_wing, f32* colloc, f32* normals, f32* areas) {
     // parallel for
-    for (u64 i = 0; i < dd_mesh->nc; i++) {
-        // inner vectorized loop
-        for (u64 j = 0; j < hd_mesh->ns; j++) {
-            const u64 lidx = i * (dd_mesh->ns) + j;
-            const u64 v0 = (i+0) * (dd_mesh->ns+1) + j;
-            const u64 v1 = (i+0) * (dd_mesh->ns+1) + j + 1;
-            const u64 v2 = (i+1) * (dd_mesh->ns+1) + j + 1;
-            const u64 v3 = (i+1) * (dd_mesh->ns+1) + j;
+    for (const auto& p : prm) {
 
-            const linalg::alias::float3 vertex0{vx[v0], vy[v0], vz[v0]};
-            const linalg::alias::float3 vertex1{vx[v1], vy[v1], vz[v1]};
-            const linalg::alias::float3 vertex2{vx[v2], vy[v2], vz[v2]};
-            const linalg::alias::float3 vertex3{vx[v3], vy[v3], vz[v3]};
+        const f32* vx = PTR_V(verts_wing + p.off_wing_v, p.nc, p.ns, 0,0,0);
+        const f32* vy = PTR_V(verts_wing + p.off_wing_v, p.nc, p.ns, 0,0,1);
+        const f32* vz = PTR_V(verts_wing + p.off_wing_v, p.nc, p.ns, 0,0,2);
+        f32* nx = PTR_P(normals + p.off_wing_p, p.nc, p.ns, 0,0,0);
+        f32* ny = PTR_P(normals + p.off_wing_p, p.nc, p.ns, 0,0,1);
+        f32* nz = PTR_P(normals + p.off_wing_p, p.nc, p.ns, 0,0,2);
+        f32* cx = PTR_P(colloc + p.off_wing_p, p.nc, p.ns, 0,0,0);
+        f32* cy = PTR_P(colloc + p.off_wing_p, p.nc, p.ns, 0,0,1);
+        f32* cz = PTR_P(colloc + p.off_wing_p, p.nc, p.ns, 0,0,2);
 
-            const linalg::alias::float3 normal_vec = linalg::normalize(linalg::cross(vertex3 - vertex1, vertex2 - vertex0));
-            nx[lidx] = normal_vec.x;
-            ny[lidx] = normal_vec.y;
-            nz[lidx] = normal_vec.z;
+        // parallel for
+        for (u64 i = 0; i < p.nc; i++) {
+            // inner vectorized loop
+            for (u64 j = 0; j < p.ns; j++) {
+                const u64 lidx = i * (p.ns) + j;
+                const u64 v0 = (i+0) * (p.ns+1) + j;
+                const u64 v1 = (i+0) * (p.ns+1) + j + 1;
+                const u64 v2 = (i+1) * (p.ns+1) + j + 1;
+                const u64 v3 = (i+1) * (p.ns+1) + j;
 
-            // 3 vectors f (P0P3), b (P0P2), e (P0P1) to compute the area:
-            // area = 0.5 * (||f x b|| + ||b x e||)
-            // this formula might also work: area = || 0.5 * ( f x b + b x e ) ||
-            const linalg::alias::float3 vec_f = vertex3 - vertex0;
-            const linalg::alias::float3 vec_b = vertex2 - vertex0;
-            const linalg::alias::float3 vec_e = vertex1 - vertex0;
+                const linalg::alias::float3 vertex0{vx[v0], vy[v0], vz[v0]};
+                const linalg::alias::float3 vertex1{vx[v1], vy[v1], vz[v1]};
+                const linalg::alias::float3 vertex2{vx[v2], vy[v2], vz[v2]};
+                const linalg::alias::float3 vertex3{vx[v3], vy[v3], vz[v3]};
 
-            dd_mesh->area[lidx] = 0.5f * (linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e)));
-            
-            // High AoA correction (Aerodynamic Optimization of Aircraft Wings Using a Coupled VLM2.5D RANS Approach) Eq 3.4 p21
-            // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf
-            const f32 factor = (alpha_rad < EPS_f) ? 0.5f : 0.5f * (alpha_rad / (std::sin(alpha_rad) + EPS_f));
-            const linalg::alias::float3 chord_vec = 0.5f * (vertex2 + vertex3 - vertex0 - vertex1);
-            const linalg::alias::float3 colloc_pt = 0.5f * (vertex0 + vertex1) + factor * chord_vec;
-            
-            cx[lidx] = colloc_pt.x;
-            cy[lidx] = colloc_pt.y;
-            cz[lidx] = colloc_pt.z;
+                const linalg::alias::float3 normal_vec = linalg::normalize(linalg::cross(vertex3 - vertex1, vertex2 - vertex0));
+                nx[lidx] = normal_vec.x;
+                ny[lidx] = normal_vec.y;
+                nz[lidx] = normal_vec.z;
+
+                // 3 vectors f (P0P3), b (P0P2), e (P0P1) to compute the area:
+                // area = 0.5 * (||f x b|| + ||b x e||)
+                // this formula might also work: area = || 0.5 * ( f x b + b x e ) ||
+                const linalg::alias::float3 vec_f = vertex3 - vertex0;
+                const linalg::alias::float3 vec_b = vertex2 - vertex0;
+                const linalg::alias::float3 vec_e = vertex1 - vertex0;
+
+                (areas + p.off_wing_p)[lidx] = 0.5f * (linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e)));
+                
+                // High AoA correction (Aerodynamic Optimization of Aircraft Wings Using a Coupled VLM2.5D RANS Approach) Eq 3.4 p21
+                // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf
+                const f32 factor = (alpha_rad < EPS_f) ? 0.5f : 0.5f * (alpha_rad / (std::sin(alpha_rad) + EPS_f));
+                const linalg::alias::float3 chord_vec = 0.5f * (vertex2 + vertex3 - vertex0 - vertex1);
+                const linalg::alias::float3 colloc_pt = 0.5f * (vertex0 + vertex1) + factor * chord_vec;
+                
+                cx[lidx] = colloc_pt.x;
+                cy[lidx] = colloc_pt.y;
+                cz[lidx] = colloc_pt.z;
+            }
         }
     }
 }
@@ -527,37 +537,55 @@ f32 BackendCPU::mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) {
     return area_sum;
 }
 
-void BackendCPU::displace_wing_and_shed(const linalg::alias::float4x4& transform) {
-    // const tiny::ScopedTimer t("Mesh::move");
-    assert(dd_mesh->nwa < dd_mesh->nw); // check if we have capacity
-    
-    // Shed wake before moving
-    allocator.dd_memcpy((void*)PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa,0,0), (void*)PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 0), (dd_mesh->ns+1)*sizeof(f32));
-    allocator.dd_memcpy((void*)PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa,0,1), (void*)PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 1), (dd_mesh->ns+1)*sizeof(f32));
-    allocator.dd_memcpy((void*)PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa,0,2), (void*)PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 2), (dd_mesh->ns+1)*sizeof(f32));
-    
-    f32* vx = PTR_MESH_V(dd_mesh, 0,0,0);
-    f32* vy = PTR_MESH_V(dd_mesh, 0,0,1);
-    f32* vz = PTR_MESH_V(dd_mesh, 0,0,2);
-    f32* ovx = PTR_MESHGEOM_V(dd_mesh_geom, 0,0,0);
-    f32* ovy = PTR_MESHGEOM_V(dd_mesh_geom, 0,0,1);
-    f32* ovz = PTR_MESHGEOM_V(dd_mesh_geom, 0,0,2);
-    
-    // Perform the movement
-    for (u64 i = 0; i < (dd_mesh->nc+1)*(dd_mesh->ns+1); i++) {
-        const linalg::alias::float4 origin_pos = {ovx[i], ovy[i], ovz[i], 1.f};
-        const linalg::alias::float4 transformed_pt = linalg::mul(transform, origin_pos);
-        vx[i] = transformed_pt.x;
-        vy[i] = transformed_pt.y;
-        vz[i] = transformed_pt.z;
-    }
+// TODO: change linalg to use std::array as underlying storage
+void linalg_to_flat(const linalg::alias::float4x4& m, float* flat_m) {
+    flat_m[0] = m.x.x;
+    flat_m[1] = m.x.y;
+    flat_m[2] = m.x.z;
+    flat_m[3] = m.x.w;
+    flat_m[4] = m.y.x;
+    flat_m[5] = m.y.y;
+    flat_m[6] = m.y.z;
+    flat_m[7] = m.y.w;
+    flat_m[8] = m.z.x;
+    flat_m[9] = m.z.y;
+    flat_m[10] = m.z.z;
+    flat_m[11] = m.z.w;
+    flat_m[12] = m.w.x;
+    flat_m[13] = m.w.y;
+    flat_m[14] = m.w.z;
+    flat_m[15] = m.w.w;
+}
 
-    // Copy new trailing edge vertices on the wake buffer // CAREFUL OVERLAP
-    std::copy(PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 0), PTR_MESH_V(dd_mesh, dd_mesh->nc+1, 0, 0), PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa - 1, 0, 0));
-    std::copy(PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 1), PTR_MESH_V(dd_mesh, dd_mesh->nc+1, 0, 1), PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa - 1, 0, 1));
-    std::copy(PTR_MESH_V(dd_mesh, dd_mesh->nc, 0, 2), PTR_MESH_V(dd_mesh, dd_mesh->nc+1, 0, 2), PTR_MESH_V(dd_mesh, dd_mesh->nc + dd_mesh->nw - dd_mesh->nwa - 1, 0, 2));
+void BackendCPU::displace_wing_and_shed(const std::vector<linalg::alias::float4x4>& transforms, f32* verts_wing, f32* verts_wing_init, f32* verts_wake) {
+    // const tiny::ScopedTimer t("Mesh::move");
+    assert(transforms.size() == prm.size());
+
+    f32 transform[16]; // col major 4x4 matrix
+
+    // TODO: parallel for
+    for (u64 i = 0; i < prm.size(); i++) {
+        const auto& p = prm[i];
+        assert(prm.nwa < prm.nw);
+        f32* vwing = verts_wing + p.off_wing_v;
+        f32* vwake = verts_wake + p.off_wake_v;
     
-    dd_mesh->nwa++;
+        // Shed wake before moving
+        memory->copy(MemoryTransfer::DeviceToDevice, PTR_V(vwake, p.nw, p.ns, p.nw-p.nwa,0,0), PTR_V(vwing, p.nc, p.ns, p.nc, 0, 0), (p.ns+1)*sizeof(f32));
+        memory->copy(MemoryTransfer::DeviceToDevice, PTR_V(vwake, p.nw, p.ns, p.nw-p.nwa,0,1), PTR_V(vwing, p.nc, p.ns, p.nc, 0, 1), (p.ns+1)*sizeof(f32));
+        memory->copy(MemoryTransfer::DeviceToDevice, PTR_V(vwake, p.nw, p.ns, p.nw-p.nwa,0,2), PTR_V(vwing, p.nc, p.ns, p.nc, 0, 2), (p.ns+1)*sizeof(f32));
+        
+        linalg_to_flat(transforms[i], &transform[0]);
+
+        cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, 4, prm.nb_vertices_wing(), 4, 1.0f, &transform[0], 4, verts_wing_init, prm.nb_vertices_wing(), 0.0f, verts_wing, prm.nb_vertices_wing());
+
+        // Copy new trailing edge vertices on the wake buffer // CAREFUL OVERLAP
+        memory->copy(MemoryTransfer::DeviceToDevice, PTR_V(vwake, p.nw, p.ns, p.nw-p.nwa-1,0,0), PTR_V(vwing, p.nc, p.ns, p.nc, 0, 0), (p.ns+1)*sizeof(f32));
+        memory->copy(MemoryTransfer::DeviceToDevice, PTR_V(vwake, p.nw, p.ns, p.nw-p.nwa-1,0,1), PTR_V(vwing, p.nc, p.ns, p.nc, 0, 1), (p.ns+1)*sizeof(f32));
+        memory->copy(MemoryTransfer::DeviceToDevice, PTR_V(vwake, p.nw, p.ns, p.nw-p.nwa-1,0,2), PTR_V(vwing, p.nc, p.ns, p.nc, 0, 2), (p.ns+1)*sizeof(f32));
+        
+        p.nwa++;
+    }
 }
 
 // Temporary

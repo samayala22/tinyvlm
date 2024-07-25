@@ -6,7 +6,6 @@ class FlowData;
 struct MeshView;
 struct MeshGeom;
 struct Data;
-struct Allocator;
 struct Memory;
 class Mesh;
 class Backend;

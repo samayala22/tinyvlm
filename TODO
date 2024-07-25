@@ -6,18 +6,6 @@
 // store kinematics in the backend ??
 // store flow properties in the backend ??
 
-lhs_assemble()
-rhs_assemble_velocities()
-rhs_assemble_wake_influence()
-gamma_shed()
-gamma_delta()
-displace_wing(transform) // store the origin position on device
-displace_wake_rollup()
-coeff_steady_cl(area, j, n)
-coeff_steady_cd
-coeff_steady_cm
-coeff_unsteady_cl(area, j, n)
-coeff_unsteady_cd
-coeff_unsteady_cm
-set_velocities(val)
-set_velocities(vec_val)
+Notes:
+
+- Backend takes raw device pointers as arguments otherwise it needs to be templated to take Buffer objects.

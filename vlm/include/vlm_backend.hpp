@@ -4,13 +4,13 @@
 #include "vlm_types.hpp"
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
-#include "vlm_allocator.hpp"
+#include "vlm_memory.hpp"
 
 namespace vlm {
 
 class Backend {
     public:
-        const Allocator allocator;
+        const std::unique_ptr<Memory> memory;
         std::vector<MeshParams> prm;
 
         i32* d_solver_info = nullptr;
@@ -18,11 +18,11 @@ class Backend {
         f32* d_solver_buffer = nullptr;
 
         f32 sigma_vatistas = 0.0f;
-        Backend(const Allocator& allocator) : allocator(allocator) {}
+        Backend(std::unique_ptr<Memory> memory) : memory(std::move(memory)) {}
         ~Backend();
 
         // Kernels that run for all the meshes
-        virtual void lhs_assemble(f32* lhs) = 0;
+        virtual void lhs_assemble(f32* lhs, const f32* colloc, const f32* normals, const f32* verts_wing, const f32* verts_wake) = 0;
         virtual void rhs_assemble_velocities(f32* rhs, const f32* normals, const f32* velocities) = 0;
         virtual void rhs_assemble_wake_influence(f32* rhs, const f32* gamma) = 0;
         virtual void displace_wake_rollup(float dt, f32* rollup_vertices, f32* verts_wake, const f32* verts_wing, const f32* gamma) = 0;
@@ -39,7 +39,7 @@ class Backend {
         virtual linalg::alias::float3 coeff_steady_cm(const MeshParams& param, const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) = 0;
         virtual f32 coeff_steady_cd(const MeshParams& param, const FlowData& flow, const f32 area, const u64 j, const u64 n) = 0;
 
-        virtual void mesh_metrics(const f32 alpha) = 0;
+        virtual void mesh_metrics(const f32 alpha_rad, const f32* verts_wing, f32* colloc, f32* normals, f32* areas) = 0;
         virtual f32 mesh_mac(const MeshParams& param, const u64 j, const u64 n) = 0;
         virtual f32 mesh_area(const MeshParams& param, const u64 i, const u64 j, const u64 m, const u64 n) = 0;
 };

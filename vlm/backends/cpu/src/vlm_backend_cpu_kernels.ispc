@@ -44,6 +44,13 @@ inline F3 quad_normal(const F3& v0, const F3& v1, const F3& v2, const F3& v3) {
     return normalize(cross(v3-v1, v2-v0));
 }
 
+typedef float f32;
+typedef double f64;
+typedef int32 i32;
+typedef int64 i64;
+typedef uint32 u32;
+typedef uint64 u64;
+
 export struct Mesh {
     float* vertices; // (nc+nw+1)*(ns+1)*3
     // TODO: evaluate if we really need those values or we can just compute on the fly in the kernels
@@ -108,25 +115,12 @@ inline void kernel_symmetry(float3& inf, C colloc, const V& vertex0, const V& ve
     inf.z += induced_speed_sym.z;
 }
 
-export void kernel_influence(
-    uniform const Mesh* uniform m,
-    uniform float* uniform lhs,
-    uniform uint64 ia, uniform uint64 lidx, uniform float sigma
-    ) {
-    const uniform uint64 nb_panels = m->ns * m->nc;
-    const uniform uint64 v0 = lidx + lidx / m->ns;
-    const uniform uint64 v1 = v0 + 1;
-    const uniform uint64 v3 = v0 + m->ns+1;
-    const uniform uint64 v2 = v3 + 1;
-
-    // Broadcast vertices
-    const uniform float* uniform vx = PTR_MESH_V(m, 0, 0, 0);
-    const uniform float* uniform vy = PTR_MESH_V(m, 0, 0, 1);
-    const uniform float* uniform vz = PTR_MESH_V(m, 0, 0, 2);
-    uniform float3 vertex0 = {vx[v0], vy[v0], vz[v0]};
-    uniform float3 vertex1 = {vx[v1], vy[v1], vz[v1]};
-    uniform float3 vertex2 = {vx[v2], vy[v2], vz[v2]};
-    uniform float3 vertex3 = {vx[v3], vy[v3], vz[v3]};
+export void kernel_influence2(uniform u64 m, uniform f32* uniform lhs, uniform f32* uniform collocs, uniform u64 collocs_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_rld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32 sigma) {
+    
+    uniform float3 vertex0 = {v[0 * v_ld]           , v[1 * v_ld]           , v[2 * v_ld]           };
+    uniform float3 vertex1 = {v[0 * v_ld + 1]       , v[1 * v_ld + 1]       , v[2 * v_ld + 1]       };
+    uniform float3 vertex2 = {v[0 * v_ld + v_rld +1], v[1 * v_ld + v_rld +1], v[2 * v_ld + v_rld +1]};
+    uniform float3 vertex3 = {v[0 * v_ld + v_rld]   , v[1 * v_ld + v_rld]   , v[2 * v_ld + v_rld]   };
 
     // print("Influencer %: \n", lidx);
     // print("Vertex 0: % % %\n", vertex0.x, vertex0.y, vertex0.z);
@@ -134,9 +128,9 @@ export void kernel_influence(
     // print("Vertex 2: % % %\n", vertex2.x, vertex2.y, vertex2.z);
     // print("Vertex 3: % % %\n", vertex3.x, vertex3.y, vertex3.z);
 
-    foreach(ia2 = 0 ... nb_panels) {
-        const float3 colloc = {m->colloc[ia2 + 0*nb_panels], m->colloc[ia2 + 1*nb_panels], m->colloc[ia2 + 2*nb_panels]};
-        const float3 normal = {m->normals[ia2 + 0*nb_panels], m->normals[ia2 + 1*nb_panels], m->normals[ia2 + 2*nb_panels]};
+    foreach(i = 0 ... m) {
+        const float3 colloc = {collocs[0 * collocs_ld + i], collocs[1 * collocs_ld + i], collocs[2 * collocs_ld + i]};
+        const float3 normal = {normals[0 * normals_ld + i], normals[1 * normals_ld + i], normals[2 * normals_ld + i]};
         
         // print("Influenced: %\n", ia2);
         // print("Colloc: \n % \n % \n %\n", colloc.x, colloc.y, colloc.z);
@@ -148,7 +142,7 @@ export void kernel_influence(
         kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
         kernel_symmetry(inf, colloc, vertex2, vertex3, sigma);
         kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
-        lhs[ia * nb_panels + ia2] += dot(inf, normal); // store
+        lhs[i] += dot(inf, normal); // store
     }
 }
 
