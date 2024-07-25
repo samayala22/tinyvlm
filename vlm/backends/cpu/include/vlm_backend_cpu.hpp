@@ -9,7 +9,7 @@ class BackendCPU final : public Backend {
     public:
         BackendCPU();
         ~BackendCPU();
-        void lhs_assemble(f32* lhs) override;
+        void lhs_assemble(f32* lhs, const f32* colloc, const f32* normals, const f32* verts_wing, const f32* verts_wake) override;
         void rhs_assemble_velocities(f32* rhs, const f32* normals, const f32* velocities) override;
         void rhs_assemble_wake_influence(f32* rhs, const f32* gamma) override;
         void displace_wake_rollup(float dt, f32* rollup_vertices, f32* verts_wake, const f32* verts_wing, const f32* gamma) override;
@@ -26,7 +26,7 @@ class BackendCPU final : public Backend {
         linalg::alias::float3 coeff_steady_cm(const MeshParams& param, const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) override;
         f32 coeff_steady_cd(const MeshParams& param, const FlowData& flow, const f32 area, const u64 j, const u64 n) override;
 
-        void mesh_metrics(const f32 alpha) override;
+        void mesh_metrics(const f32 alpha_rad, const f32* verts_wing, f32* colloc, f32* normals, f32* areas) override;
         f32 mesh_mac(const MeshParams& param, const u64 j, const u64 n) override;
         f32 mesh_area(const MeshParams& param, const u64 i, const u64 j, const u64 m, const u64 n) override;
 };

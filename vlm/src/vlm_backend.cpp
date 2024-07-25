@@ -43,7 +43,7 @@ std::vector<std::string> vlm::get_available_backends() {
 
 Backend::~Backend() {
     // Free device-device ptrs
-    allocator.d_free(d_solver_info);
-    allocator.d_free(d_solver_ipiv);
-    allocator.d_free(d_solver_buffer);
+    memory->free(MemoryLocation::Device, d_solver_info);
+    memory->free(MemoryLocation::Device, d_solver_ipiv);
+    memory->free(MemoryLocation::Device, d_solver_buffer);
 }
