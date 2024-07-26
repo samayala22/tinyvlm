@@ -42,6 +42,10 @@ class View {
         T* ptr = nullptr; // required
         Layout layout;
 
+        View() = default;
+        View(T* ptr, const Layout& layout) : ptr(ptr), layout(layout) {}
+        ~View() = default;
+
         std::size_t size() const { return layout.size(); }
         std::size_t size_bytes() const { return layout.size() * sizeof(T); }
         T& operator[](std::size_t index) {
@@ -62,11 +66,11 @@ public:
     explicit Buffer(const Memory& memory) : memory(memory) {}
     ~Buffer() { dealloc(); }
 
-    View<T, Layout>& h_ptr() {
+    View<T, Layout>& h_view() {
         static_assert(is_host::value);
         return _host;
     }
-    View<T, Layout>& d_ptr() {
+    View<T, Layout>& d_view() {
         static_assert(is_device::value);
         return _device;
     }
@@ -121,20 +125,49 @@ private:
     Buffer& operator=(const Buffer&) = delete;
 };
 
+struct SurfaceDims { // ns major
+    uint64_t nc;
+    uint64_t ns;
+    uint64_t offset;
+    uint64_t size() const {return nc * ns;}
+};
+
+class SingleSurface {
+    public:
+
+        SingleSurface() = default;
+        SingleSurface(const SurfaceDims& surface, uint64_t stride, uint32_t dim) { construct(surface, stride,dim); }
+        ~SingleSurface() = default;
+
+        void construct(const SurfaceDims& surface, uint64_t stride, uint32_t dim) {
+            _surface = surface;
+            _stride = stride;
+            _dim = dim;
+        }
+
+        std::size_t size() const {return dim() * stride(); } // required
+        const SurfaceDims& surface() const {return _surface; }
+        uint64_t stride() const {return _stride; }
+        uint64_t dim() const {return _dim; }
+
+    private:
+        SurfaceDims _surface;
+        uint64_t _stride = 0;
+        uint32_t _dim = 1;
+};
+
 class MultiSurface {
     public:
-        struct Surface { // ns major
-            uint64_t ns;
-            uint64_t nc;
-            uint64_t offset;
-        };
 
         MultiSurface() = default;
-        MultiSurface(const std::vector<Surface>& surfaces, uint32_t dim) : 
-            _surfaces(surfaces),
-            _stride(surfaces.back().offset + surfaces.back().ns * surfaces.back().nc),
-            _dim(dim) {}
+        MultiSurface(const std::vector<SurfaceDims>& surfaces, uint32_t dim) { construct(surfaces, dim); }
         ~MultiSurface() = default;
+
+        void construct(const std::vector<SurfaceDims>& surfaces, uint32_t dim) {
+            _surfaces = surfaces;
+            _stride = surfaces.back().offset + surfaces.back().size();
+            _dim = dim;
+        }
 
         uint64_t operator()(uint32_t wing_id, uint32_t dim) { // returns start of the specific wing buffer
             assert(wing_id < _surfaces.size());
@@ -142,12 +175,26 @@ class MultiSurface {
             return _surfaces[wing_id].offset + dim * _stride;
         }
 
-        uint64_t size() const {return _dim * _stride; } // required
+        std::size_t size() const {return dim() * stride(); } // required
+        const std::vector<SurfaceDims>& surfaces() const {return _surfaces; }
         uint64_t stride() const {return _stride; }
-        uint64_t dim() const {return _dim; }
+        uint32_t dim() const {return _dim; }
+        
+        template<typename T>
+        View<T, SingleSurface> subview(T* ptr, uint32_t wing_id, uint64_t i, uint64_t m, uint64_t j, uint64_t n) {
+            assert(wing_id < _surfaces.size());
+            assert(i + m < _surfaces[wing_id].nc);
+            assert(j + n < _surfaces[wing_id].ns);
+
+            auto& surface = _surfaces[wing_id];
+            return {
+                ptr + surface.offset + i * surface.ns + j,
+                SingleSurface{SurfaceDims{m,n,0}, stride(), dim()}
+            };
+        }
 
     private:
-        std::vector<Surface> _surfaces;
+        std::vector<SurfaceDims> _surfaces;
         uint64_t _stride = 0; // stride between each Dim
         uint32_t _dim = 1;
 };

@@ -10,9 +10,15 @@ namespace vlm {
 
 class Simulation {
     public:
-
         std::unique_ptr<Backend> backend;
+        // Common geometry buffers
         Mesh2 mesh;
+        // Dimensions of the buffers
+        MultiSurface wing_panels;
+        MultiSurface wing_vertices;
+        MultiSurface wake_panels;
+        MultiSurface wake_vertices;
+        // Misc
         std::vector<linalg::alias::float4x4> wing_positions; // todo: move this somewhere
 
         Simulation(const std::string& backend_name, const std::vector<std::string>& meshes);
@@ -26,13 +32,13 @@ class VLM final: public Simulation {
         AeroCoefficients run(const FlowData& flow);
         
         // Pulic for output purposes (eg dump gamma to file)
-        Buffer<f32, MemoryLocation::Device> lhs; // (ns*nc)^2
-        Buffer<f32, MemoryLocation::Device> rhs; // ns*nc
-        Buffer<f32, MemoryLocation::HostDevice> gamma_wing; // nc*ns
-        Buffer<f32, MemoryLocation::Device> gamma_wake; // nw*ns
-        Buffer<f32, MemoryLocation::Device> gamma_wing_prev; // nc*ns
-        Buffer<f32, MemoryLocation::Device> gamma_wing_delta; // nc*ns
-        Buffer<f32, MemoryLocation::Device> local_velocities; // ns*nc*3
+        Buffer<f32, MemoryLocation::Device, MultiSurface> lhs; // (ns*nc)^2
+        Buffer<f32, MemoryLocation::Device, MultiSurface> rhs; // ns*nc
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing; // nc*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wake; // nw*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev; // nc*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta; // nc*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> local_velocities; // ns*nc*3
     private:
         void alloc_buffers();
 };
