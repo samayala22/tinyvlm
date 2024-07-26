@@ -11,7 +11,6 @@ namespace vlm {
 class Backend {
     public:
         const std::unique_ptr<Memory> memory;
-        std::vector<MeshParams> prm;
 
         i32* d_solver_info = nullptr;
         i32* d_solver_ipiv = nullptr;
@@ -22,26 +21,26 @@ class Backend {
         ~Backend();
 
         // Kernels that run for all the meshes
-        virtual void lhs_assemble(f32* lhs, const f32* colloc, const f32* normals, const f32* verts_wing, const f32* verts_wake) = 0;
-        virtual void rhs_assemble_velocities(f32* rhs, const f32* normals, const f32* velocities) = 0;
-        virtual void rhs_assemble_wake_influence(f32* rhs, const f32* gamma) = 0;
-        virtual void displace_wake_rollup(float dt, f32* rollup_vertices, f32* verts_wake, const f32* verts_wing, const f32* gamma) = 0;
+        virtual void lhs_assemble(View<f32, MultiSurface>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake) = 0;
+        virtual void rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) = 0;
+        virtual void rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma) = 0;
+        virtual void displace_wake_rollup(float dt, View<f32, MultiSurface>& rollup_vertices, View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma) = 0;
         // virtual void displace_wing(const linalg::alias::float4x4& transform) = 0;
-        virtual void displace_wing_and_shed(const std::vector<linalg::alias::float4x4>& transform, f32* verts_wing, f32* verts_wake) = 0;
-        virtual void gamma_shed(f32* gamma, f32* gamma_prev) = 0;
-        virtual void gamma_delta(f32* gamma_delta, const f32* gamma) = 0;
-        virtual void lu_factor(f32* lhs) = 0;
-        virtual void lu_solve(f32* lhs, f32* rhs, f32* gamma) = 0;
+        virtual void displace_wing_and_shed(const std::vector<linalg::alias::float4x4>& transform, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake) = 0;
+        virtual void gamma_shed(View<f32, MultiSurface>& gamma, View<f32, MultiSurface>& gamma_prev) = 0;
+        virtual void gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) = 0;
+        virtual void lu_factor(View<f32, MultiSurface>& lhs) = 0;
+        virtual void lu_solve(View<f32, MultiSurface>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) = 0;
         
         // Per mesh kernels
-        virtual f32 coeff_steady_cl(const MeshParams& param, const f32* verts_wing, const f32* gamma_delta, const FlowData& flow, const f32 area, const u64 j, const u64 n) = 0;
-        virtual f32 coeff_unsteady_cl(const MeshParams& param, const f32* verts_wing, const f32* gamma_delta, const f32* gamma, const f32* gamma_prev, const f32* local_velocities, const f32* areas, const f32* normals, const linalg::alias::float3& freestream, f32 dt, const f32 area, const u64 j, const u64 n) = 0;
-        virtual linalg::alias::float3 coeff_steady_cm(const MeshParams& param, const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) = 0;
-        virtual f32 coeff_steady_cd(const MeshParams& param, const FlowData& flow, const f32 area, const u64 j, const u64 n) = 0;
+        virtual f32 coeff_steady_cl(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow) = 0;
+        virtual f32 coeff_unsteady_cl(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma, const View<f32, MultiSurface>& gamma_prev, const View<f32, MultiSurface>& local_velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, const linalg::alias::float3& freestream, f32 dt) = 0;
+        // virtual linalg::alias::float3 coeff_steady_cm(const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) = 0;
+        // virtual f32 coeff_steady_cd(const FlowData& flow, const f32 area, const u64 j, const u64 n) = 0;
 
-        virtual void mesh_metrics(const f32 alpha_rad, const f32* verts_wing, f32* colloc, f32* normals, f32* areas) = 0;
-        virtual f32 mesh_mac(const MeshParams& param, const u64 j, const u64 n) = 0;
-        virtual f32 mesh_area(const MeshParams& param, const u64 i, const u64 j, const u64 m, const u64 n) = 0;
+        virtual void mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) = 0;
+        // virtual f32 mesh_mac(const u64 j, const u64 n) = 0;
+        // virtual f32 mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) = 0;
 };
 
 std::unique_ptr<Backend> create_backend(const std::string& backend_name);
