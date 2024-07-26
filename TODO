@@ -1,11 +1,6 @@
-- Get rid of 3D vectors and use homogeneous coordinates everywhere (4d vector).
 - Move some of the logic from theodorsen test case to its own class
-- Rename many functions and harmonize the API
 - Consider calling delta_gamma directly from lu_solve
+- Get rid of exceptions
 
 // store kinematics in the backend ??
 // store flow properties in the backend ??
-
-Notes:
-
-- Backend takes raw device pointers as arguments otherwise it needs to be templated to take Buffer objects.

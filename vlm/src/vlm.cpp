@@ -22,21 +22,30 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     {
         u64 off_wing_p = 0;
         u64 off_wing_v = 0;
+        std::vector<SurfaceDims> panels;
+        std::vector<SurfaceDims> vertices;
         for (const auto& m_name : meshes) {
             const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
             auto [nc,ns] = mesh_io.get_dims(m_name);
-            mesh.params.emplace_back(MeshParams{nc, ns, 0, 0, off_wing_p, off_wing_v, 0, 0, true});
-            off_wing_p += mesh.params.back().nb_panels_wing();
-            off_wing_v += mesh.params.back().nb_vertices_wing();
+            panels.emplace_back(SurfaceDims{nc, ns, off_wing_p});
+            vertices.emplace_back(SurfaceDims{nc+1, ns+1, off_wing_v});
+            off_wing_p += panels.back().size();
+            off_wing_v += vertices.back().size();
         }
+
+        wing_panels.construct(panels, 1);
+        wing_vertices.construct(vertices, 1);
     }
-    mesh.alloc_wing();
+    mesh.alloc_wing(wing_panels, wing_vertices);
     wing_positions.resize(meshes.size());
 
     // Perform the actual read of the mesh files
     for (u64 i = 0; i < meshes.size(); i++) {
         const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
-        mesh_io.read(meshes[i], mesh.verts_wing_init.h_ptr() + mesh.params[i].off_wing_p);
+        auto& current_view = mesh.verts_wing_init.h_view();
+        View<f32, SingleSurface> vertices = current_view.layout.subview(current_view.ptr, i, 0, current_view.layout.surfaces()[i].nc, 0, current_view.layout.surfaces()[i].ns);
+        
+        mesh_io.read(meshes[i], vertices);
     }
 };
 

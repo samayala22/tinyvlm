@@ -12,15 +12,16 @@
 
 using namespace vlm;
 
-void mesh_quarterchord(f32* vertices, u64 nc, u64 ns) {
-    f32* vx = vertices + 0 * (nc+1) * (ns+1);
-    f32* vy = vertices + 1 * (nc+1) * (ns+1);
-    f32* vz = vertices + 2 * (nc+1) * (ns+1);
+void mesh_quarterchord(View<f32, SingleSurface>& vertices) {
+    f32* vx = vertices.ptr + 0 * vertices.layout.stride();
+    f32* vy = vertices.ptr + 1 * vertices.layout.stride();
+    f32* vz = vertices.ptr + 2 * vertices.layout.stride();
 
-    for (u64 i = 0; i < nc; i++) {
-        for (u64 j = 0; j < ns+1; j++) {
-            const u64 v0 = (i+0) * (ns+1) + j;
-            const u64 v3 = (i+1) * (ns+1) + j;
+
+    for (u64 i = 0; i < vertices.layout.surface().nc - 1; i++) {
+        for (u64 j = 0; j < vertices.layout.surface().ns; j++) {
+            const u64 v0 = (i+0) * vertices.layout.surface().ns + j;
+            const u64 v3 = (i+1) * vertices.layout.surface().ns + j;
 
             vx[v0] = 0.75f * vx[v0] + 0.25f * vx[v3];
             vy[v0] = 0.75f * vy[v0] + 0.25f * vy[v3];
@@ -29,10 +30,10 @@ void mesh_quarterchord(f32* vertices, u64 nc, u64 ns) {
     }
 
     // Trailing edge vertices
-    const u64 i = nc-1;
-    for (u64 j = 0; j < ns+1; j++) {
-        const u64 v0 = (i+0) * (ns+1) + j;
-        const u64 v3 = (i+1) * (ns+1) + j;
+    const u64 i = vertices.layout.surface().nc - 2;
+    for (u64 j = 0; j < vertices.layout.surface().ns; j++) {
+        const u64 v0 = (i+0) * vertices.layout.surface().ns + j;
+        const u64 v3 = (i+1) * vertices.layout.surface().ns + j;
         
         vx[v3] = (4.f/3.f) * vx[v3] - (1.f/3.f) * vx[v0];
         vy[v3] = (4.f/3.f) * vy[v3] - (1.f/3.f) * vy[v0];
@@ -55,13 +56,15 @@ public:
         return {ni-1, nj-1};
     }
 
-    SurfDims read(std::ifstream& f, f32* vertices) const override {
+    void read(std::ifstream& f, View<f32, SingleSurface>& vertices) const override {
         u64 ni, nj, nk, blocks;
         f32 x, y, z;
         f >> blocks;
         f >> ni >> nj >> nk;
-        assert(mesh->ns == nj - 1);
-        assert(mesh->nc == ni - 1);
+        assert(vertices.surface().ns == nj);
+        assert(vertices.surface().nc == ni);
+        assert(vertices.dim() == 3);
+
         const u64 nb_vertices = ni * nj;
         
         for (u64 j = 0; j < nj; j++) {
@@ -89,13 +92,12 @@ public:
         // if (std::abs(m.v.x[0]) != eps || std::abs(m.v.y[0]) != eps) {
         //     throw std::runtime_error("First vertex of plot3d mesh must be at origin");
         // }
-        const f32 first_y =vertices[nb_vertices * 1 + 0];
+        const f32 first_y = vertices[nb_vertices * 1 + 0];
         for (u64 i = 1; i < ni; i++) {
             if ( vertices[nb_vertices * 1 + i*nj] != first_y) {
-                throw std::runtime_error("Mesh vertices should be ordered in chordwise direction");
+                throw std::runtime_error("Mesh vertices should be ordered in chordwise direction"); // todo get rid of throw
             }
         }
-        return {ni-1, nj-1};
     }
 };
 
@@ -121,13 +123,13 @@ public:
         return dims;
     }
 
-    void read(const std::string& filename, f32* vertices) const {
-        std::ifstream file(filename);
-        if (!file.is_open()) {
+    void read(const std::string& filename, View<f32, SingleSurface>& vertices) const {
+        std::ifstream file_stream(filename);
+        if (!file_stream.is_open()) {
             throw std::runtime_error("Failed to open mesh file");
         }
-        auto [nc, ns] = _file->read(file, vertices);
-        mesh_quarterchord(vertices, nc, ns);
+        _file->read(file_stream, vertices);
+        mesh_quarterchord(vertices);
     }
 
 private:
