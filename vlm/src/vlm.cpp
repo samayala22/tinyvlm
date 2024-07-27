@@ -19,23 +19,17 @@ using namespace vlm;
 
 Simulation::Simulation(const std::string& backend_name, const std::vector<std::string>& meshes) : backend(create_backend(backend_name)), mesh(*backend->memory) {
     // Read the sizes of all the meshes
-    {
-        u64 off_wing_p = 0;
-        u64 off_wing_v = 0;
-        std::vector<SurfaceDims> panels;
-        std::vector<SurfaceDims> vertices;
-        for (const auto& m_name : meshes) {
-            const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
-            auto [nc,ns] = mesh_io.get_dims(m_name);
-            panels.emplace_back(SurfaceDims{nc, ns, off_wing_p});
-            vertices.emplace_back(SurfaceDims{nc+1, ns+1, off_wing_v});
-            off_wing_p += panels.back().size();
-            off_wing_v += vertices.back().size();
-        }
-
-        wing_panels.construct(panels, 1);
-        wing_vertices.construct(vertices, 1);
+    u64 off_wing_p = 0;
+    u64 off_wing_v = 0;
+    for (const auto& m_name : meshes) {
+        const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
+        auto [nc,ns] = mesh_io.get_dims(m_name);
+        wing_panels.emplace_back(SurfaceDims{nc, ns, off_wing_p});
+        wing_vertices.emplace_back(SurfaceDims{nc+1, ns+1, off_wing_v});
+        off_wing_p += wing_panels.back().size();
+        off_wing_v += wing_vertices.back().size();
     }
+
     mesh.alloc_wing(wing_panels, wing_vertices);
     wing_positions.resize(meshes.size());
 
@@ -43,7 +37,7 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     for (u64 i = 0; i < meshes.size(); i++) {
         const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
         auto& current_view = mesh.verts_wing_init.h_view();
-        View<f32, SingleSurface> vertices = current_view.layout.subview(current_view.ptr, i, 0, current_view.layout.surfaces()[i].nc, 0, current_view.layout.surfaces()[i].ns);
+        View<f32, SingleSurface> vertices = current_view.layout.subview(current_view.ptr, i, 0, current_view.layout.nc(i), 0, current_view.layout.ns(i));
         
         mesh_io.read(meshes[i], vertices);
     }
@@ -51,14 +45,15 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
 
 VLM::VLM(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes), 
     lhs(*backend->memory), rhs(*backend->memory), gamma_wing(*backend->memory), gamma_wake(*backend->memory), gamma_wing_prev(*backend->memory), gamma_wing_delta(*backend->memory), local_velocities(*backend->memory) {
+    
+    const u64 nw = 1;
     u64 off_wake_p = 0;
     u64 off_wake_v = 0;
-    for (auto& p : mesh.params) {
-        p.nw = 1; // single wake panel
-        p.off_wake_p = off_wake_p;
-        p.off_wake_v = off_wake_v;
-        off_wake_p += p.nb_panels_wake();
-        off_wake_v += p.nb_vertices_wake();
+    for (u32 i = 0; i < wing_panels.size(); i++) {
+        wake_panels.emplace_back(SurfaceDims{nw, wing_panels[i].ns, off_wake_p});
+        wake_vertices.emplace_back(SurfaceDims{nw+1, wing_vertices[i].ns, off_wake_v});
+        off_wake_p += wake_panels.back().size();
+        off_wake_v += wake_vertices.back().size();
     }
 
     mesh.verts_wing_init.to_device();
@@ -66,26 +61,20 @@ VLM::VLM(const std::string& backend_name, const std::vector<std::string>& meshes
 };
 
 void VLM::alloc_buffers() {
-    lhs.alloc(mesh.total_nb_panels_wing() * mesh.total_nb_panels_wing());
-    rhs.alloc(mesh.total_nb_panels_wing());
-    gamma_wing.alloc(mesh.total_nb_panels_wing());
-    gamma_wing_prev.alloc(mesh.total_nb_panels_wing());
-    gamma_wing_delta.alloc(mesh.total_nb_panels_wing());
-    gamma_wake.alloc(mesh.total_nb_panels_wake());
-    local_velocities.alloc(mesh.total_nb_panels_wing() * 3);
+    lhs.alloc(Matrix<MatrixLayout::ColMajor>{wing_panels.size(),wing_panels.size(), wing_panels.size()});
+    rhs.alloc(MultiSurface{wing_panels, 1});
+    gamma_wing.alloc(MultiSurface{wing_panels, 1});
+    gamma_wing_prev.alloc(MultiSurface{wing_panels, 1});
+    gamma_wing_delta.alloc(MultiSurface{wing_panels, 1});
+    gamma_wake.alloc(MultiSurface{wake_panels, 1});
+    local_velocities.alloc(MultiSurface{wing_panels, 3});
 }
 
 AeroCoefficients VLM::run(const FlowData& flow) {
     // Reset buffer state
-    backend->memory->fill_f32(MemoryLocation::Device, lhs.d_ptr(), 0.f, lhs.size_bytes());
-    backend->memory->fill_f32(MemoryLocation::Device, rhs.d_ptr(), 0.f, rhs.size_bytes());
-    backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_ptr(), mesh.verts_wing_init.d_ptr(), mesh.verts_wing.size());
-    
-    // todo: maybe change to SoA so that this becomes a simple memset
-    for (auto& p : mesh.params) {
-        p.nwa = 0;
-    }
-    backend->prm = mesh.params; // hmm this is ugly
+    backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size_bytes());
+    backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size_bytes());
+    backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, mesh.verts_wing_init.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
 
     // global initial position
     auto init_pos = translation_matrix<f32>({
@@ -95,16 +84,16 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     });
     std::fill(wing_positions.begin(), wing_positions.end(), init_pos);
 
-    backend->displace_wing_and_shed(wing_positions, mesh.verts_wing.d_ptr(), mesh.verts_wake.d_ptr());
-    backend->mesh_metrics(flow.alpha, mesh.verts_wing.d_ptr(), mesh.colloc.d_ptr(), mesh.normals.d_ptr(), mesh.area.d_ptr());
-    backend->lhs_assemble(lhs.d_ptr(), mesh.colloc.d_ptr(), mesh.normals.d_ptr(), mesh.verts_wing.d_ptr(), mesh.verts_wake.d_ptr());
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_ptr() + 0 * mesh.total_nb_panels_wing(), flow.freestream.x, mesh.total_nb_panels_wing() * sizeof(f32));
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_ptr() + 1 * mesh.total_nb_panels_wing(), flow.freestream.y, mesh.total_nb_panels_wing() * sizeof(f32));
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_ptr() + 2 * mesh.total_nb_panels_wing(), flow.freestream.z, mesh.total_nb_panels_wing() * sizeof(f32));
-    backend->rhs_assemble_velocities(rhs.d_ptr(), mesh.normals.d_ptr(), local_velocities.d_ptr());
-    backend->lu_factor(lhs.d_ptr());
-    backend->lu_solve(lhs.d_ptr(), rhs.d_ptr(), gamma_wing.d_ptr());
-    backend->gamma_delta(gamma_wing_delta.d_ptr(), gamma_wing.d_ptr());
+    backend->displace_wing_and_shed(wing_positions, mesh.verts_wing.d_view(), mesh.verts_wake.d_view());
+    backend->mesh_metrics(flow.alpha, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
+    backend->lhs_assemble(lhs.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wing.d_view(), mesh.verts_wake.d_view());
+    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view() + 0 * mesh.total_nb_panels_wing(), flow.freestream.x, mesh.total_nb_panels_wing() * sizeof(f32));
+    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view() + 1 * mesh.total_nb_panels_wing(), flow.freestream.y, mesh.total_nb_panels_wing() * sizeof(f32));
+    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view() + 2 * mesh.total_nb_panels_wing(), flow.freestream.z, mesh.total_nb_panels_wing() * sizeof(f32));
+    backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), local_velocities.d_view());
+    backend->lu_factor(lhs.d_view());
+    backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
+    backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
     return AeroCoefficients{
         backend->coeff_steady_cl(flow),
         backend->coeff_steady_cm(flow),

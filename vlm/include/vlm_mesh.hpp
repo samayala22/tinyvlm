@@ -41,19 +41,19 @@ struct Mesh2 {
     verts_wing_init(memory), verts_wing(memory), verts_wake(memory),
     normals(memory), colloc(memory), area(memory) {};
     
-    void alloc_wing(const MultiSurface& wing_panels, const MultiSurface& wing_vertices) {
-        verts_wing_init.alloc(MultiSurface{wing_vertices.surfaces(), 4});
-        verts_wing.alloc(MultiSurface{wing_vertices.surfaces(), 4});
-        normals.alloc(MultiSurface{wing_panels.surfaces(), 3});
-        colloc.alloc(MultiSurface{wing_panels.surfaces(), 3});
-        area.alloc(MultiSurface{wing_panels.surfaces(), 1});
+    void alloc_wing(const std::vector<SurfaceDims>& wing_panels, const std::vector<SurfaceDims>& wing_vertices) {
+        verts_wing_init.alloc(MultiSurface{wing_vertices, 4});
+        verts_wing.alloc(MultiSurface{wing_vertices, 4});
+        normals.alloc(MultiSurface{wing_panels, 3});
+        colloc.alloc(MultiSurface{wing_panels, 3});
+        area.alloc(MultiSurface{wing_panels, 1});
 
         // Sete last row to 1 for homogeneous coordinatesverts_wing_init.h_view().layout
         verts_wing_init.memory.fill_f32(MemoryLocation::Host, verts_wing_init.h_view().ptr + verts_wing_init.h_view().layout(0,3), 1.f, verts_wing_init.h_view().layout.stride());
     }
 
-    void alloc_wake(const MultiSurface& wake_vertices) {
-        verts_wake.alloc(MultiSurface{wake_vertices.surfaces(), 4});
+    void alloc_wake(const std::vector<SurfaceDims>& wake_vertices) {
+        verts_wake.alloc(MultiSurface{wake_vertices, 4});
         verts_wake.memory.fill_f32(MemoryLocation::Device, verts_wake.d_view().ptr + verts_wake.d_view().layout(0,3), 1.f,  verts_wake.d_view().layout.stride());
     }
 };
@@ -72,7 +72,7 @@ public:
     MeshIO(const std::string& format);
     SurfDims get_dims(const std::string& filename) const;
     void read(const std::string& filename, View<f32, SingleSurface>& vertices) const;
-    
+
 private:
     std::unique_ptr<MeshFile> _file;
 };

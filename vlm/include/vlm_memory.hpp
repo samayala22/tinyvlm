@@ -179,24 +179,51 @@ class MultiSurface {
         const std::vector<SurfaceDims>& surfaces() const {return _surfaces; }
         uint64_t stride() const {return _stride; }
         uint32_t dim() const {return _dim; }
+
+        uint64_t nc(uint32_t wing_id) const {return _surfaces[wing_id].nc; }
+        uint64_t ns(uint32_t wing_id) const {return _surfaces[wing_id].ns; }
+        uint64_t offset(uint32_t wing_id) const {return _surfaces[wing_id].offset; }
         
         template<typename T>
         View<T, SingleSurface> subview(T* ptr, uint32_t wing_id, uint64_t i, uint64_t m, uint64_t j, uint64_t n) {
             assert(wing_id < _surfaces.size());
-            assert(i + m < _surfaces[wing_id].nc);
-            assert(j + n < _surfaces[wing_id].ns);
+            assert(i + m < nc(wing_id));
+            assert(j + n < ns(wing_id));
 
-            auto& surface = _surfaces[wing_id];
             return {
-                ptr + surface.offset + i * surface.ns + j,
+                ptr + offset(wing_id) + i * ns(wing_id) + j,
                 SingleSurface{SurfaceDims{m,n,0}, stride(), dim()}
             };
         }
 
     private:
         std::vector<SurfaceDims> _surfaces;
-        uint64_t _stride = 0; // stride between each Dim
+        uint64_t _stride = 0;
         uint32_t _dim = 1;
+};
+
+enum class MatrixLayout {
+    RowMajor, ColMajor
+};
+
+template<MatrixLayout Layout>
+class Matrix {
+    public:
+        Matrix() = default;
+        Matrix(uint64_t m, uint64_t n, uint64_t stride) { construct(m, n, stride); }
+        void construct(uint64_t m, uint64_t n, uint64_t stride) {
+            _m = m;
+            _n = n;
+            _stride = stride;
+        }
+
+        std::size_t size() const {return _m * _n; }
+        MatrixLayout layout() const {return Layout; }
+
+    private:
+        uint64_t _m = 0;
+        uint64_t _n = 0;
+        uint64_t _stride = 0; // leading dimension
 };
 
 } // namespace vlm
