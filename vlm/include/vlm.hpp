@@ -14,10 +14,11 @@ class Simulation {
         // Common geometry buffers
         Mesh2 mesh;
         // Dimensions of the buffers
-        MultiSurface wing_panels;
-        MultiSurface wing_vertices;
-        MultiSurface wake_panels;
-        MultiSurface wake_vertices;
+        std::vector<SurfaceDims> wing_panels;
+        std::vector<SurfaceDims> wing_vertices;
+        std::vector<SurfaceDims> wake_panels;
+        std::vector<SurfaceDims> wake_vertices;
+        
         // Misc
         std::vector<linalg::alias::float4x4> wing_positions; // todo: move this somewhere
 
@@ -32,7 +33,7 @@ class VLM final: public Simulation {
         AeroCoefficients run(const FlowData& flow);
         
         // Pulic for output purposes (eg dump gamma to file)
-        Buffer<f32, MemoryLocation::Device, MultiSurface> lhs; // (ns*nc)^2
+        Buffer<f32, MemoryLocation::Device, Matrix<MatrixLayout::ColMajor>> lhs; // (ns*nc)^2
         Buffer<f32, MemoryLocation::Device, MultiSurface> rhs; // ns*nc
         Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing; // nc*ns
         Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wake; // nw*ns
