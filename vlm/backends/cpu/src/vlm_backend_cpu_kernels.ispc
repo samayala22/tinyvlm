@@ -115,7 +115,8 @@ inline void kernel_symmetry(float3& inf, C colloc, const V& vertex0, const V& ve
     inf.z += induced_speed_sym.z;
 }
 
-export void kernel_influence2(uniform u64 m, uniform f32* uniform lhs, uniform f32* uniform collocs, uniform u64 collocs_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_rld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32 sigma) {
+// v_rld : influencer vertices row leading dimension = nb of points span wise
+export void kernel_influence(uniform u64 m, uniform f32* uniform lhs, uniform f32* uniform collocs, uniform u64 collocs_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_rld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32 sigma) {
     
     uniform float3 vertex0 = {v[0 * v_ld]           , v[1 * v_ld]           , v[2 * v_ld]           };
     uniform float3 vertex1 = {v[0 * v_ld + 1]       , v[1 * v_ld + 1]       , v[2 * v_ld + 1]       };
