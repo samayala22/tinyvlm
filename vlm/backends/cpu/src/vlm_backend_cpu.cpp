@@ -23,6 +23,7 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
+/// @brief Memory manager implementation for the CPU backend
 class MemoryCPU final : public Memory {
     public:
         MemoryCPU() : Memory(true) {}
@@ -51,22 +52,32 @@ BackendCPU::~BackendCPU() = default;
 //     dd_mesh->nwa = 0;
 // }
 
-void BackendCPU::gamma_delta(f32* gamma_delta, const f32* gamma) {
+/// @brief Compute the gamma_delta vector
+/// @details
+/// Compute the gamma_delta vector of the VLM system (\Delta\Gamma = \Gamma_{i,j} - \Gamma_{i-1,j})
+/// The vector is computed for each lifting surface of the system
+/// @param gamma_delta gamma_delta vector
+/// @param gamma gamma vector
+void BackendCPU::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) {
+    assert(gamma_delta.layout.surfaces() == gamma.layout.surfaces());
+    assert(gamma_delta.layout.dims() == 1);
+    assert(gamma.layout.dims() == 1);
+        
     tf::Taskflow graph;
 
     auto begin = graph.placeholder();
     auto end = graph.placeholder();
 
-    for (const auto& p : prm)  {
-        f32* p_gamma_delta = gamma_delta + p.off_wing_p;
-        const f32* p_gamma = gamma + p.off_wing_p;
+    for (const auto& surf : gamma_delta.layout.surfaces())  {
+        f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
+        const f32* s_gamma = gamma.ptr + surf.offset;
         tf::Task first_row = graph.emplace([&]{
-            memory->copy(MemoryTransfer::DeviceToDevice, p_gamma_delta, p_gamma, p.ns * sizeof(f32));
+            memory->copy(MemoryTransfer::DeviceToDevice, s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
         });
-        tf::Task remaining_rows = graph.for_each_index((u64)1,p.nc, [&] (u64 b, u64 e) {
+        tf::Task remaining_rows = graph.for_each_index((u64)1,surf.nc, [&] (u64 b, u64 e) {
             for (u64 i = b; i < e; i++) {
-                for (u64 j = 0; j < p.ns; j++) {
-                    p_gamma_delta[i*p.ns + j] = p_gamma[i*p.ns + j] - p_gamma[(i-1)*p.ns + j];
+                for (u64 j = 0; j < surf.ns; j++) {
+                    s_gamma_delta[i*surf.ns + j] = s_gamma[i*surf.ns + j] - s_gamma[(i-1)*surf.ns + j];
                 }
             }
         });
@@ -78,59 +89,57 @@ void BackendCPU::gamma_delta(f32* gamma_delta, const f32* gamma) {
     };
 
     Executor::get().run(graph).wait();
-    graph.dump(std::cout); 
-
-    // std::copy(gamma,gamma+ns, delta_gamma);
-
-    // // note: this is efficient as the memory is contiguous
-    // for (u64 i = 1; i < nc; i++) {
-    //     for (u64 j = 0; j < ns; j++) {
-    //         delta_gamma[i*ns + j] = gamma[i*ns + j] - gamma[(i-1)*ns + j];
-    //     }
-    // }
+    // graph.dump(std::cout);
 }
 
-void kernel_inf(u64 m, f32* lhs, f32* influenced, u64 influenced_ld, f32* influencer, u64 influencer_ld, u64 influencer_rld, f32* normals, u64 normals_ld);
+// void kernel_inf(u64 m, f32* lhs, f32* influenced, u64 influenced_ld, f32* influencer, u64 influencer_ld, u64 influencer_rld, f32* normals, u64 normals_ld);
 
-void BackendCPU::lhs_assemble(f32* lhs, const f32* colloc, const f32* normals, const f32* verts_wing, const f32* verts_wake) {
+/// @brief Assemble the left hand side matrix
+/// @details
+/// Assemble the left hand side matrix of the VLM system. The matrix is
+/// assembled in column major order. The matrix is assembled for each lifting
+/// surface of the system
+/// @param lhs left hand side matrix
+/// @param colloc collocation points for all surfaces
+/// @param normals normals of all surfaces
+/// @param verts_wing vertices of the wing surfaces
+/// @param verts_wake vertices of the wake surfaces
+/// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
+void BackendCPU::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
     // tiny::ScopedTimer timer("LHS");
-
-    const u64 total_nb_panels_wing = prm.back().off_wing_p + prm.back().nb_panels_wing();
-    const u64 total_nb_vertices_wing = prm.back().off_wing_v + prm.back().nb_vertices_wing();
-    
     tf::Taskflow graph;
 
     auto begin = graph.placeholder();
     auto end = graph.placeholder();
 
-    for (const auto& m_col : prm)  {
-        f32* lhs_section = lhs + m_col.off_wing_p * total_nb_panels_wing;
-        const f32* vwing_section = verts_wing + m_col.off_wing_v;
-        const f32* vwake_section = verts_wake + m_col.off_wake_v;
+    for (u32 i = 0; i < colloc.layout.surfaces().size(); i++) {
+        f32* lhs_section = lhs.ptr + colloc.layout.offset(i) * lhs.layout.stride();
+        
+        const f32* vwing_section = verts_wing.ptr + verts_wing.layout.offset(i);
+        const f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(i);
         const u64 zero = 0;
-        const u64 end_wing = (m_col.nc - 1) * m_col.ns;
-        const u64 m = total_nb_panels_wing; // sections span the whole rows of lhs matrix
-        u64 w = 0; // wake row index (0 to nwa)
+        const u64 end_wing = (colloc.layout.nc(i) - 1) * colloc.layout.ns(i);
+        u32 w = 0; // wake row index (0 to nwa)
 
         auto wing_pass = graph.for_each_index(zero, end_wing, [&] (u64 lidx) {
-            f32* lhs_slice = lhs_section + lidx * total_nb_panels_wing;
-            const f32* vwing_slice = vwing_section + lidx + lidx / m_col.ns;
-            ispc::kernel_influence(m, lhs_slice, colloc, total_nb_panels_wing, vwing_slice, total_nb_vertices_wing, m_col.ns+1, normals, total_nb_panels_wing);
+            f32* lhs_slice = lhs_section + lidx * lhs.layout.stride();
+            const f32* vwing_slice = vwing_section + lidx + lidx / colloc.layout.ns(i);
+            ispc::kernel_influence(lhs.layout.m(), lhs_slice, colloc.ptr, colloc.layout.stride(), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
         });
 
-        auto last_row = graph.for_each_index(end_wing, m_col.nb_panels_wing(), [&] (u64 lidx) {
-            f32* lhs_slice = lhs_section + lidx * total_nb_panels_wing;
-            const f32* vwing_slice = vwing_section + lidx + lidx / m_col.ns;
-            ispc::kernel_influence(m, lhs_slice, colloc, total_nb_panels_wing, vwing_slice, total_nb_vertices_wing, m_col.ns+1, normals, total_nb_panels_wing);
+        auto last_row = graph.for_each_index(end_wing, colloc.layout.ns(i) * colloc.layout.nc(i), [&] (u64 lidx) {
+            f32* lhs_slice = lhs_section + lidx * lhs.layout.stride();
+            const f32* vwing_slice = vwing_section + lidx + lidx / colloc.layout.ns(i);
+            ispc::kernel_influence(lhs.layout.m(), lhs_slice, colloc.ptr, colloc.layout.stride(), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
         });
 
         auto cond = graph.emplace([&]{
-            return w < m_col.nwa ? 0 : 1; // 0 means continue, 1 means break
+            return w < iteration ? 0 : 1; // 0 means continue, 1 means break (exit loop)
         });
-        auto wake_pass = graph.for_each_index(zero, m_col.ns, [&] (u64 j) {
-            f32* lhs_slice = lhs_section + (j+end_wing) * total_nb_panels_wing;
-            const f32* vwake_slice = vwake_section + (m_col.nw - w - 1) * (m_col.ns+1) + j;
-            ispc::kernel_influence(m, lhs_slice, colloc, total_nb_panels_wing, vwake_slice, total_nb_vertices_wing, m_col.ns+1, normals, total_nb_panels_wing);
+        auto wake_pass = graph.for_each_index(zero, colloc.layout.ns(i), [&] (u64 j) {
+            f32* lhs_slice = lhs_section + (j+end_wing) * lhs.layout.stride();
+            const f32* vwake_slice = vwake_section + (verts_wake.layout.nc(i) - w - 2) * verts_wake.layout.ns(i) + j;
+            ispc::kernel_influence(lhs.layout.m(), lhs_slice, colloc.ptr, colloc.layout.stride(), vwake_slice, verts_wake.layout.stride(), verts_wake.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
         });
         auto back = graph.emplace([&]{
             w++;
@@ -148,17 +157,27 @@ void BackendCPU::lhs_assemble(f32* lhs, const f32* colloc, const f32* normals, c
     Executor::get().run(graph).wait();
 }
 
-void BackendCPU::rhs_assemble_velocities(f32* rhs, const f32* normals, const f32* velocities) {
-    const tiny::ScopedTimer timer("RHS");
-
-    const u64 total_nb_panels_wing = prm.back().off_wing_p + prm.back().nb_panels_wing(); // todo replace raw ptr to views ? 
+/// @brief Add velocity contributions to the right hand side vector
+/// @details
+/// Add velocity contributions to the right hand side vector of the VLM system
+/// @param rhs right hand side vector
+/// @param normals normals of all surfaces
+/// @param velocities displacement velocities of all surfaces
+void BackendCPU::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) {
+    // const tiny::ScopedTimer timer("RHS");
+    assert(rhs.layout.stride() == rhs.size()); // single dim
+    assert(rhs.layout.stride() == normals.layout.stride());
+    assert(rhs.layout.stride() == velocities.layout.stride());
+    assert(rhs.layout.dims() == 1);
+    assert(velocities.layout.dims() == 3);
+    assert(normals.layout.dims() == 3);
 
     // todo: parallelize
-    for (u64 i = 0; i < total_nb_panels_wing; i++) {
-        rhs[i] = - (
-            velocities[i + 0 * total_nb_panels_wing] * normals[i + 0 * total_nb_panels_wing] +
-            velocities[i + 1 * total_nb_panels_wing] * normals[i + 1 * total_nb_panels_wing] +
-            velocities[i + 2 * total_nb_panels_wing] * normals[i + 2 * total_nb_panels_wing]);
+    for (u64 i = 0; i < rhs.size(); i++) {
+        rhs[i] += - (
+            velocities[i + 0 * velocities.layout.stride()] * normals[i + 0 * normals.layout.stride()] +
+            velocities[i + 1 * velocities.layout.stride()] * normals[i + 1 * normals.layout.stride()] +
+            velocities[i + 2 * velocities.layout.stride()] * normals[i + 2 * normals.layout.stride()]);
     }
 }
 

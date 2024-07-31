@@ -48,7 +48,12 @@ class View {
 
         std::size_t size() const { return layout.size(); }
         std::size_t size_bytes() const { return layout.size() * sizeof(T); }
-        T& operator[](std::size_t index) {
+        inline T& operator[](std::size_t index) {
+            assert(ptr != nullptr && "Pointer is null");
+            assert(index < layout.size() && "Index out of bounds");
+            return ptr[index];
+        }
+        inline const T& operator[](std::size_t index) const {
             assert(ptr != nullptr && "Pointer is null");
             assert(index < layout.size() && "Index out of bounds");
             return ptr[index];
@@ -218,7 +223,10 @@ class Matrix {
         }
 
         std::size_t size() const {return _m * _n; }
-        MatrixLayout layout() const {return Layout; }
+        uint64_t m() const {return _m; }
+        uint64_t n() const {return _n; }
+        uint64_t stride() const {return _stride; }
+        constexpr MatrixLayout layout() const {return Layout; }
 
     private:
         uint64_t _m = 0;
