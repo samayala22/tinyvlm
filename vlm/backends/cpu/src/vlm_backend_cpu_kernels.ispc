@@ -51,34 +51,10 @@ typedef int64 i64;
 typedef uint32 u32;
 typedef uint64 u64;
 
-export struct Mesh {
-    float* vertices; // (nc+nw+1)*(ns+1)*3
-    // TODO: evaluate if we really need those values or we can just compute on the fly in the kernels
-    float* normals; // nc*ns*3
-    float* colloc; // nc*ns*3
-    float* area; // nc*ns
-
-    uint64 nc; // number of wing panels chordwise
-    uint64 ns; // number of wing panels spanwise
-    uint64 nw; // number of wake panels chordwise
-    uint64 nwa; // number of wake panels active chordwise
-
-    float s_ref; // reference area
-    float c_ref; // reference chord
-    float frame[16];
-
-    int8* name; // mesh name
-    bool lifting;
-};
-
 // Bio-savart Kernel
 #define RCUT 1e-10f
 #define RCUT2 1e-5f
-
 #define PI_f 3.141593f
-#define PTR_MESH_V(m, i,j,k) (m->vertices + (j) + (i) * (m->ns+1) + (k) * (m->nc+m->nw+1) * (m->ns+1))
-#define PTR_MESH_C(m, i,j,k) (m->colloc + (j) + (i) * (m->ns) + (k) * (m->nc) * (m->ns))
-#define PTR_MESH_N(m, i,j,k) (m->normals + (j) + (i) * (m->ns) + (k) * (m->nc) * (m->ns))
 
 template<typename C, typename V>
 inline float3 kernel_biosavart(C& colloc, const V& vertex1, const V& vertex2, const uniform float& sigma) {
@@ -116,6 +92,7 @@ inline void kernel_symmetry(float3& inf, C colloc, const V& vertex0, const V& ve
 }
 
 // v_rld : influencer vertices row leading dimension = nb of points span wise
+// Influence of a wing vortex ring (vertex quad) on all the collocation points of all wings
 export void kernel_influence(uniform u64 m, uniform f32* uniform lhs, uniform f32* uniform collocs, uniform u64 collocs_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_rld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32 sigma) {
     
     uniform float3 vertex0 = {v[0 * v_ld]           , v[1 * v_ld]           , v[2 * v_ld]           };
@@ -147,32 +124,37 @@ export void kernel_influence(uniform u64 m, uniform f32* uniform lhs, uniform f3
     }
 }
 
-export void kernel_wake_influence(
-    uniform const Mesh* uniform m,
-    uniform uint64 lidx, uniform float* uniform gamma, uniform float* uniform rhs, uniform float sigma
-    ) {
-    const uniform uint64 nb_panels = m->ns * m->nc;
-    const uniform float3 colloc_influenced = {m->colloc[lidx + 0*nb_panels], m->colloc[lidx + 1*nb_panels], m->colloc[lidx + 2*nb_panels]};
+/// @brief Influence of a specific wing wake on a collocation point
+/// @param colloc ptr to x pos of influenced collocation point
+/// @param colloc_ld leading dimension of colloc
+/// @param normals ptr to x pos of normals
+/// @param normals_ld leading dimension of normals
+/// @param v ptr to beginning of wake vertices
+/// @param v_ld leading dimension of v (for each 3D dimension)
+/// @param v_m number of wake vertices chordwise
+/// @param v_n number of wake vertices spanwise
+/// @param gamma ptr to gamma value of influenced panel
+/// @param rhs ptr to rhs  value of influenced panel
+/// @param sigma vortex core model factor
+/// @param iteration current iteration number
+export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 colloc_ld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_m, uniform u64 v_n, uniform f32* uniform gamma, uniform f32* uniform rhs, uniform f32 sigma, uniform u32 iteration) {
+    const uniform float3 colloc_influenced = {colloc[0*colloc_ld], colloc[1*colloc_ld], colloc[2*colloc_ld]};
 
     float3 induced_vel = {0.0f, 0.0f, 0.0f};
 
-    const uniform float* uniform vx = PTR_MESH_V(m, 0, 0, 0);
-    const uniform float* uniform vy = PTR_MESH_V(m, 0, 0, 1);
-    const uniform float* uniform vz = PTR_MESH_V(m, 0, 0, 2);
-
     // Wake influence on wing
-    for (uint64 i = m->nc + m->nw - m->nwa; i < m->nc + m->nw; i++) {
-        foreach(j = 0 ... m->ns) {
-            uint64 v0 = (i+0) * (m->ns+1) + j;
-            uint64 v1 = (i+0) * (m->ns+1) + j + 1;
-            uint64 v2 = (i+1) * (m->ns+1) + j + 1;
-            uint64 v3 = (i+1) * (m->ns+1) + j;
+    for (u64 i = v_m - iteration - 1; i < v_m-1; i++) {
+        foreach(j = 0 ... v_n - 1) {
+            uint64 v0 = (i+0) * v_n + j;
+            uint64 v1 = (i+0) * v_n + j + 1;
+            uint64 v2 = (i+1) * v_n + j + 1;
+            uint64 v3 = (i+1) * v_n + j;
 
             // Loads
-            const float3 vertex0 = {vx[v0], vy[v0], vz[v0]};
-            const float3 vertex1 = {vx[v1], vy[v1], vz[v1]};
-            const float3 vertex2 = {vx[v2], vy[v2], vz[v2]};
-            const float3 vertex3 = {vx[v3], vy[v3], vz[v3]};
+            const float3 vertex0 = {v[0*v_ld + v0], v[1*v_ld + v0], v[2*v_ld + v0]};
+            const float3 vertex1 = {v[0*v_ld + v1], v[1*v_ld + v1], v[2*v_ld + v1]};
+            const float3 vertex2 = {v[0*v_ld + v2], v[1*v_ld + v2], v[2*v_ld + v2]};
+            const float3 vertex3 = {v[0*v_ld + v3], v[1*v_ld + v3], v[2*v_ld + v3]};
         
             float3 ind = {0.0f, 0.0f, 0.0f};
             kernel_symmetry(ind, colloc_influenced, vertex0, vertex1, sigma);
@@ -180,49 +162,50 @@ export void kernel_wake_influence(
             kernel_symmetry(ind, colloc_influenced, vertex2, vertex3, sigma);
             kernel_symmetry(ind, colloc_influenced, vertex3, vertex0, sigma);
 
-            induced_vel += ind * gamma[i * m->ns + j];
+            induced_vel += ind * gamma[i * (v_n-1) + j];
         }
     }
 
-    const uniform float* uniform nx = PTR_MESH_N(m, 0, 0, 0);
-    const uniform float* uniform ny = PTR_MESH_N(m, 0, 0, 1);
-    const uniform float* uniform nz = PTR_MESH_N(m, 0, 0, 2);
-
-    const uniform float3 normal = {nx[lidx], ny[lidx], nz[lidx]};
+    const uniform float3 normal = {normals[0*normals_ld], normals[1*normals_ld], normals[2*normals_ld]};
     const float induced_vel_dot_normal = dot(induced_vel, normal); // vertical 2 fma + mul
-    rhs[lidx] -= reduce_add(induced_vel_dot_normal);
+    *rhs -= reduce_add(induced_vel_dot_normal);
 }
 
-export void kernel_rollup(
-    uniform const Mesh* uniform m, uniform float dt, 
-    uniform float* uniform rollup,
-    uniform uint64 vidx, uniform float* uniform gamma, uniform float sigma
-    ) {
-    const uniform uint64 nb_verts_total = (m->nc+m->nw+1) * (m->ns+1);
-
-    const uniform float* uniform vx = PTR_MESH_V(m, 0, 0, 0);
-    const uniform float* uniform vy = PTR_MESH_V(m, 0, 0, 1);
-    const uniform float* uniform vz = PTR_MESH_V(m, 0, 0, 2);
-    uniform float* uniform rollup_vx = rollup + 0 * nb_verts_total;
-    uniform float* uniform rollup_vy = rollup + 1 * nb_verts_total;
-    uniform float* uniform rollup_vz = rollup + 2 * nb_verts_total;
-    const uniform float3 vertex_influenced = {vx[vidx], vy[vidx], vz[vidx]};
+/// @brief Compute the new position of the wake vertices due to rollup effect (influence wing and wake vortex rings)
+/// @param v_wake vertices of the wake vortex vertices (ptr to start of wing wake)
+/// @param v_wake_ld leading dimension (for x, y and z) of the vertices of the wake vertices
+/// @param v_wake_m number of wake vertices chord wise
+/// @param v_wake_n number of wake vertices span wise
+/// @param v_wake_idx index of the wake vertex to be updated
+/// @param v_wing vertices of the wing vortex vertices (ptr to start of wing wake)
+/// @param v_wing_ld leading dimension (for x, y and z) of the vertices of the wing vertices
+/// @param v_wing_m number of wing vertices chord wise
+/// @param v_wing_n number of wing vertices span wise
+/// @param rollup vertices of the new wake vertices
+/// @param rollup_ld leading dimension (for x, y and z) of the vertices of the new wake vertices
+/// @param gamma_wing gamma vector of the wing vertices
+/// @param gamma_wake gamma vector of the wake vertices
+/// @param sigma vortex core model factor
+/// @param dt time step
+/// @param iteration current iteration number
+export void kernel_rollup(uniform f32* uniform v_wake, uniform u64 v_wake_ld, uniform u64 v_wake_m, uniform u64 v_wake_n, uniform u64 v_wake_idx, uniform f32* uniform v_wing, uniform u64 v_wing_ld, uniform u64 v_wing_m, uniform u64 v_wing_n, uniform f32* uniform rollup, uniform u64 rollup_ld, uniform f32* uniform gamma_wing, uniform f32* uniform gamma_wake, uniform f32 sigma, uniform f32 dt, uniform u32 iteration) {
+    const uniform float3 vertex_influenced = {v_wake[0*v_wake_ld + v_wake_idx], v_wake[1*v_wake_ld + v_wake_idx], v_wake[2*v_wake_ld + v_wake_idx]};
 
     float3 induced_vel = {0.0f, 0.0f, 0.0f};
 
     // Wing influence
-    for (uint64 i = 0; i < m->nc; i++) {
-        foreach(j = 0 ... m->ns) {
-            uint64 v0 = (i+0) * (m->ns+1) + j;
-            uint64 v1 = (i+0) * (m->ns+1) + j + 1;
-            uint64 v2 = (i+1) * (m->ns+1) + j + 1;
-            uint64 v3 = (i+1) * (m->ns+1) + j;
+    for (uint64 i = 0; i < v_wing_m - 1; i++) {
+        foreach(j = 0 ... v_wing_n - 1) {
+            uint64 v0 = (i+0) * (v_wing_n) + j;
+            uint64 v1 = (i+0) * (v_wing_n) + j + 1;
+            uint64 v2 = (i+1) * (v_wing_n) + j + 1;
+            uint64 v3 = (i+1) * (v_wing_n) + j;
 
             // Loads
-            const float3 vertex0 = {vx[v0], vy[v0], vz[v0]};
-            const float3 vertex1 = {vx[v1], vy[v1], vz[v1]};
-            const float3 vertex2 = {vx[v2], vy[v2], vz[v2]};
-            const float3 vertex3 = {vx[v3], vy[v3], vz[v3]};
+            const float3 vertex0 = {v_wing[0*v_wing_ld + v0], v_wing[1*v_wing_ld + v0], v_wing[2*v_wing_ld + v0]};
+            const float3 vertex1 = {v_wing[0*v_wing_ld + v1], v_wing[1*v_wing_ld + v1], v_wing[2*v_wing_ld + v1]};
+            const float3 vertex2 = {v_wing[0*v_wing_ld + v2], v_wing[1*v_wing_ld + v2], v_wing[2*v_wing_ld + v2]};
+            const float3 vertex3 = {v_wing[0*v_wing_ld + v3], v_wing[1*v_wing_ld + v3], v_wing[2*v_wing_ld + v3]};
         
             float3 ind = {0.0f, 0.0f, 0.0f};
             kernel_symmetry(ind, vertex_influenced, vertex0, vertex1, sigma);
@@ -230,23 +213,23 @@ export void kernel_rollup(
             kernel_symmetry(ind, vertex_influenced, vertex2, vertex3, sigma);
             kernel_symmetry(ind, vertex_influenced, vertex3, vertex0, sigma);
 
-            induced_vel += ind * gamma[i * m->ns + j];
+            induced_vel += ind * gamma_wing[i * (v_wing_n-1) + j];
         }
     }
 
     // Wake influence
-    for (uint64 i = m->nc + m->nw - m->nwa; i < m->nc + m->nw; i++) {
-        foreach(j = 0 ... m->ns) {
-            uint64 v0 = (i+0) * (m->ns+1) + j;
-            uint64 v1 = (i+0) * (m->ns+1) + j + 1;
-            uint64 v2 = (i+1) * (m->ns+1) + j + 1;
-            uint64 v3 = (i+1) * (m->ns+1) + j;
+    for (u64 i = v_wake_m - iteration - 1; i < v_wake_m-1; i++) {
+        foreach(j = 0 ... v_wake_n - 1) {
+            u64 v0 = (i+0) * (v_wake_n) + j;
+            u64 v1 = (i+0) * (v_wake_n) + j + 1;
+            u64 v2 = (i+1) * (v_wake_n) + j + 1;
+            u64 v3 = (i+1) * (v_wake_n) + j;
 
             // Loads
-            const float3 vertex0 = {vx[v0], vy[v0], vz[v0]};
-            const float3 vertex1 = {vx[v1], vy[v1], vz[v1]};
-            const float3 vertex2 = {vx[v2], vy[v2], vz[v2]};
-            const float3 vertex3 = {vx[v3], vy[v3], vz[v3]};
+            const float3 vertex0 = {v_wake[0*v_wake_ld + v0], v_wake[1*v_wake_ld + v0], v_wake[2*v_wake_ld + v0]};
+            const float3 vertex1 = {v_wake[0*v_wake_ld + v1], v_wake[1*v_wake_ld + v1], v_wake[2*v_wake_ld + v1]};
+            const float3 vertex2 = {v_wake[0*v_wake_ld + v2], v_wake[1*v_wake_ld + v2], v_wake[2*v_wake_ld + v2]};
+            const float3 vertex3 = {v_wake[0*v_wake_ld + v3], v_wake[1*v_wake_ld + v3], v_wake[2*v_wake_ld + v3]};
         
             float3 ind = {0.0f, 0.0f, 0.0f};
             kernel_symmetry(ind, vertex_influenced, vertex0, vertex1, sigma);
@@ -254,143 +237,79 @@ export void kernel_rollup(
             kernel_symmetry(ind, vertex_influenced, vertex2, vertex3, sigma);
             kernel_symmetry(ind, vertex_influenced, vertex3, vertex0, sigma);
 
-            induced_vel += ind * gamma[i * m->ns + j];
+            induced_vel += ind * gamma_wake[i * (v_wake_n-1) + j];
         }
     }
 
-    rollup_vx[vidx] = vx[vidx] + reduce_add(induced_vel.x) * dt;
-    rollup_vy[vidx] = vy[vidx] + reduce_add(induced_vel.y) * dt;
-    rollup_vz[vidx] = vz[vidx] + reduce_add(induced_vel.z) * dt;
+    rollup[0*rollup_ld + v_wake_idx] = vertex_influenced.x + reduce_add(induced_vel.x) * dt;
+    rollup[1*rollup_ld + v_wake_idx] = vertex_influenced.y + reduce_add(induced_vel.y) * dt;
+    rollup[2*rollup_ld + v_wake_idx] = vertex_influenced.z + reduce_add(induced_vel.z) * dt;
 }
 
-// export uniform float kernel_trefftz_cd(
-//     uniform const Mesh* uniform m,
-//     uniform float* uniform gamma,
-//     uniform float* uniform trefftz_buffer,
-//     uniform uint64 j, uniform uint64 n, uniform float sigma
-//     ) {
-//     const uniform uint64 nb_panels = m->ns * m->nc;
-//     uniform uint64 begin = nb_panels + j;
-//     uniform uint64 end = begin + n;
-//     float cd = 0.0f;
-
-//     const uniform float* uniform vx = PTR_MESH_V(m, 0, 0, 0);
-//     const uniform float* uniform vy = PTR_MESH_V(m, 0, 0, 1);
-//     const uniform float* uniform vz = PTR_MESH_V(m, 0, 0, 2);
-//     const uniform float* uniform cx = PTR_MESH_C(m, 0, 0, 0);
-//     const uniform float* uniform cy = PTR_MESH_C(m, 0, 0, 1);
-//     const uniform float* uniform cz = PTR_MESH_C(m, 0, 0, 2);
-//     const uniform float* uniform nx = PTR_MESH_N(m, 0, 0, 0);
-//     const uniform float* uniform ny = PTR_MESH_N(m, 0, 0, 1);
-//     const uniform float* uniform nz = PTR_MESH_N(m, 0, 0, 2);
-
-//     // Compute the induced velocity of the streamwise wake vortex segments
-//     for (uniform uint64 ia = nb_panels; ia < nb_panels + m->ns; ia++) {
-//         const uniform uint64 v0 = ia + ia / m->ns;
-//         const uniform uint64 v1 = v0 + 1;
-//         const uniform uint64 v3 = v0 + m->ns+1;
-//         const uniform uint64 v2 = v3 + 1;
-
-//         // Broadcast vertices
-//         const float3 vertex0 = {vx[v0], vy[v0], vz[v0]};
-//         const float3 vertex1 = {vx[v1], vy[v1], vz[v1]};
-//         const float3 vertex2 = {vx[v2], vy[v2], vz[v2]};
-//         const float3 vertex3 = {vx[v3], vy[v3], vz[v3]};
-
-//         uniform float gammaw = gamma[ia - m->ns];
-//         foreach(ia2 = begin ... end) {
-//             const float3 colloc = {cx[ia2], cy[ia2], cz[ia2]};
-//             const float3 normal = {nx[ia2], ny[ia2], nz[ia2]};
-//             float3 inf = {0.0f, 0.0f, 0.0f};
-
-//             kernel_symmetry(inf, colloc, vertex1, vertex2, sigma);
-//             kernel_symmetry(inf, colloc, vertex3, vertex0, sigma);
-//             trefftz_buffer[ia2 - begin + j] += gammaw * dot(inf, normal); // store
-//         }
-//     }
-//     // Perform the integration (Katz Plotkin, Low speed Aero | Eq 8.146)
-//     foreach(i = j ... j + n) {
-//         uint64 li = (m->nc-1) * m->ns + i;
-//         float3 v0 = {vx[i], vy[i], vz[i]};
-//         float3 v1 = {vx[i+1], vy[i+1], vz[i+1]};
-//         float dl = length(v1 - v0);
-//         cd -= gamma[li] * trefftz_buffer[i] * dl; // used to have 0.5f * flow.rho
-//     }
-//     return reduce_add(cd);
-// }
-
-export uniform float kernel_trefftz_cd2(
-    uniform const Mesh* uniform m,
-    uniform float* uniform gamma,
-    uniform uint64 jp, uniform uint64 n, uniform float sigma
-    ) {
+export uniform float kernel_trefftz_cd(uniform f32* uniform v_wake, uniform u64 v_wake_ld, uniform u64 v_wake_m, uniform u64 v_wake_n, uniform float* uniform gamma_wake, uniform f32 sigma) {
     varying float cd = 0.0f;
 
-    const uniform float* uniform vx = PTR_MESH_V(m, 0, 0, 0);
-    const uniform float* uniform vy = PTR_MESH_V(m, 0, 0, 1);
-    const uniform float* uniform vz = PTR_MESH_V(m, 0, 0, 2);
-
     // Loop over first wake panel spanwise section
-    const uniform uint64 i = m->nc;
+    const uniform u64 i = v_wake_m - 2; // 2nd to last wake chordwise index
     // parallel for
-    for (uniform uint64 j = jp; j < jp+n; j++) {
-        uniform uint64 v0 = (i+0) * (m->ns+1) + j;
-        uniform uint64 v1 = (i+0) * (m->ns+1) + j + 1;
-        uniform uint64 v2 = (i+1) * (m->ns+1) + j + 1;
-        uniform uint64 v3 = (i+1) * (m->ns+1) + j;
+    for (uniform u64 j = 0; j < v_wake_n - 1; j++) {
+        uniform u64 v0 = (i+0) * (v_wake_n) + j;
+        uniform u64 v1 = (i+0) * (v_wake_n) + j + 1;
+        uniform u64 v2 = (i+1) * (v_wake_n) + j + 1;
+        uniform u64 v3 = (i+1) * (v_wake_n) + j;
  
         // Loads
-        const uniform float3 vertex0 = {vx[v0], vy[v0], vz[v0]};
-        const uniform float3 vertex1 = {vx[v1], vy[v1], vz[v1]};
-        const uniform float3 vertex2 = {vx[v2], vy[v2], vz[v2]};
-        const uniform float3 vertex3 = {vx[v3], vy[v3], vz[v3]};
+        const uniform float3 vertex0 = {v_wake[0*v_wake_ld + v0], v_wake[1*v_wake_ld + v0], v_wake[2*v_wake_ld + v0]};
+        const uniform float3 vertex1 = {v_wake[0*v_wake_ld + v1], v_wake[1*v_wake_ld + v1], v_wake[2*v_wake_ld + v1]};
+        const uniform float3 vertex2 = {v_wake[0*v_wake_ld + v2], v_wake[1*v_wake_ld + v2], v_wake[2*v_wake_ld + v2]};
+        const uniform float3 vertex3 = {v_wake[0*v_wake_ld + v3], v_wake[1*v_wake_ld + v3], v_wake[2*v_wake_ld + v3]};
 
         const uniform float3 colloc = 0.25f * (vertex0 + vertex1 + vertex2 + vertex3); // 3*(3 add + 1 mul)
 
         varying float3 inf = {0.0f, 0.0f, 0.0f};
 
-        foreach(jj = jp ... jp+n) {
-            varying uint64 vv0 = (i+0) * (m->ns+1) + jj;
-            varying uint64 vv1 = (i+0) * (m->ns+1) + jj + 1;
-            varying uint64 vv2 = (i+1) * (m->ns+1) + jj + 1;
-            varying uint64 vv3 = (i+1) * (m->ns+1) + jj;
+        foreach(jj = 0 ... v_wake_n - 1) {
+            varying u64 vv0 = (i+0) * (v_wake_n) + jj;
+            varying u64 vv1 = (i+0) * (v_wake_n) + jj + 1;
+            varying u64 vv2 = (i+1) * (v_wake_n) + jj + 1;
+            varying u64 vv3 = (i+1) * (v_wake_n) + jj;
 
             // Loads
-            const varying float3 vvertex0 = {vx[vv0], vy[vv0], vz[vv0]};
-            const varying float3 vvertex1 = {vx[vv1], vy[vv1], vz[vv1]};
-            const varying float3 vvertex2 = {vx[vv2], vy[vv2], vz[vv2]};
-            const varying float3 vvertex3 = {vx[vv3], vy[vv3], vz[vv3]};
+            const varying float3 vvertex0 = {v_wake[0*v_wake_ld + vv0], v_wake[1*v_wake_ld + vv0], v_wake[2*v_wake_ld + vv0]};
+            const varying float3 vvertex1 = {v_wake[0*v_wake_ld + vv1], v_wake[1*v_wake_ld + vv1], v_wake[2*v_wake_ld + vv1]};
+            const varying float3 vvertex2 = {v_wake[0*v_wake_ld + vv2], v_wake[1*v_wake_ld + vv2], v_wake[2*v_wake_ld + vv2]};
+            const varying float3 vvertex3 = {v_wake[0*v_wake_ld + vv3], v_wake[1*v_wake_ld + vv3], v_wake[2*v_wake_ld + vv3]};
             varying float3 inf2 = {0.0f, 0.0f, 0.0f};
 
             kernel_symmetry(inf2, colloc, vvertex1, vvertex2, sigma);
             kernel_symmetry(inf2, colloc, vvertex3, vvertex0, sigma);
 
-            varying float gammaw = gamma[(m->nc-1)*m->ns + jj];
+            varying float gammaw = gamma_wake[i * (v_wake_n-1) + jj];
             inf += gammaw * inf2;
         }
 
         const uniform float3 normal = quad_normal(vertex0, vertex1, vertex2, vertex3);
         const varying float induced_vel = dot(inf, normal);
-        cd -= gamma[(m->nc-1)*m->ns + j] * induced_vel * length(vertex1 - vertex0);
+        cd -= gamma_wake[i * (v_wake_n-1) + j] * induced_vel * length(vertex1 - vertex0);
     }
     return reduce_add(cd); // hadd, hadd, extract
 }
 
-export uniform float kernel_trefftz_cl(
-    uniform const Mesh* uniform m,
-    uniform float* uniform gamma,
-    uniform uint64 j, uniform uint64 n
-    ) {
-    float cl = 0.0f;
-    const uniform float* uniform vx = PTR_MESH_V(m, 0, 0, 0);
-    const uniform float* uniform vy = PTR_MESH_V(m, 0, 0, 1);
-    const uniform float* uniform vz = PTR_MESH_V(m, 0, 0, 2);
-    foreach(i = j ... j + n) {
-        uint64 li = (m->nc-1) * m->ns + i;
-        float3 v0 = {vx[i], vy[i], vz[i]};
-        float3 v1 = {vx[i+1], vy[i+1], vz[i+1]};
-        float dl = length(v1 - v0);
-        cl += gamma[li]* dl; // used to have 0.5f * flow.rho
-    }
-    return reduce_add(cl);
-}
+// export uniform float kernel_trefftz_cl(
+//     uniform const Mesh* uniform m,
+//     uniform float* uniform gamma,
+//     uniform uint64 j, uniform uint64 n
+//     ) {
+//     float cl = 0.0f;
+//     const uniform float* uniform vx = PTR_MESH_V(m, 0, 0, 0);
+//     const uniform float* uniform vy = PTR_MESH_V(m, 0, 0, 1);
+//     const uniform float* uniform vz = PTR_MESH_V(m, 0, 0, 2);
+//     foreach(i = j ... j + n) {
+//         uint64 li = (m->nc-1) * m->ns + i;
+//         float3 v0 = {vx[i], vy[i], vz[i]};
+//         float3 v1 = {vx[i+1], vy[i+1], vz[i+1]};
+//         float dl = length(v1 - v0);
+//         cl += gamma[li]* dl; // used to have 0.5f * flow.rho
+//     }
+//     return reduce_add(cl);
+// }

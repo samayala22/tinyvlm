@@ -1,5 +1,4 @@
 #include "vlm_backend_cpu.hpp"
-#include "vlm_backend_cpu_kernels.hpp"
 #include "vlm_backend_cpu_kernels_ispc.h"
 
 #include "linalg.h"
@@ -36,21 +35,6 @@ class MemoryCPU final : public Memory {
 
 BackendCPU::BackendCPU() : Backend(std::make_unique<MemoryCPU>()) {}
 BackendCPU::~BackendCPU() = default;
-
-// void BackendCPU::reset() {
-//     const u64 nb_panels_wing = hd_mesh->nc * hd_mesh->ns;
-//     const u64 nb_vertices_wing = (hd_mesh->nc+1)*(hd_mesh->ns+1);
-
-
-//     // std::fill(gamma.begin(), gamma.end(), 0.0f);
-//     std::fill(hd_data->lhs, hd_data->lhs + nb_panels_wing*nb_panels_wing, 0.0f); // influence kernel is +=
-//     // std::fill(rhs.begin(), rhs.end(), 0.0f);
-//     memory->dd_copy(PTR_MESH_V(hd_mesh, 0, 0, 0), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 0), nb_vertices_wing*sizeof(f32));
-//     memory->dd_copy(PTR_MESH_V(hd_mesh, 0, 0, 1), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 1), nb_vertices_wing*sizeof(f32));
-//     memory->dd_copy(PTR_MESH_V(hd_mesh, 0, 0, 2), PTR_MESHGEOM_V(hd_mesh_geom, 0, 0, 2), nb_vertices_wing*sizeof(f32));
-
-//     dd_mesh->nwa = 0;
-// }
 
 /// @brief Compute the gamma_delta vector
 /// @details
@@ -181,38 +165,34 @@ void BackendCPU::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const Vie
     }
 }
 
-void BackendCPU::rhs_assemble_wake_influence() {
+// export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 colloc_ld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_m, uniform u64 v_n, uniform f32* uniform gamma, uniform f32* uniform rhs, uniform f32 sigma, uniform u32 iteration) {
+
+void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
+    assert(rhs.layout.stride() == rhs.size()); // single dim
+
     tf::Taskflow taskflow;
 
-    auto init = taskflow.placeholder();
-    auto wake_influence = taskflow.for_each_index((u64)0, ns * nc, [&] (u64 lidx) {
-        ispc::kernel_wake_influence(&mesh, lidx, dd_data->gamma, dd_data->rhs, sigma_vatistas);
-    });
-    auto sync = taskflow.placeholder();
+    auto begin = taskflow.placeholder();
+    auto end = taskflow.placeholder();
 
-    init.precede(wake_influence);
-    wake_influence.precede(sync);
+    auto wake_influence = taskflow.for_each_index((u64)0, rhs.layout.stride(), [&] (u64 idx) {
+        for (u32 i = 0; i < rhs.layout.surfaces().size(); i++) {
+            ispc::kernel_wake_influence(colloc.ptr + idx, colloc.layout.stride(), normals.ptr + idx, normals.layout.stride(), verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), gamma.ptr + idx, rhs.ptr + idx, sigma_vatistas, iteration);
+        }
+    });
+
+    begin.precede(wake_influence);
+    wake_influence.precede(end);
 
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::displace_wake_rollup(float dt) {
-    const tiny::ScopedTimer timer("Wake Rollup");
-
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-    const u64 nwa = dd_mesh->nwa;
+void BackendCPU::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) {
+    // const tiny::ScopedTimer timer("Wake Rollup");
 
     const u64 wake_vertices_begin = (nc + nw - nwa + 1) * (ns+1);
     const u64 wake_vertices_end = (nc + nw + 1) * (ns + 1);
-
-    const f32* rx = dd_data->rollup_vertices + (nc+nw+1)*(ns+1)*0;
-    const f32* ry = dd_data->rollup_vertices + (nc+nw+1)*(ns+1)*1;
-    const f32* rz = dd_data->rollup_vertices + (nc+nw+1)*(ns+1)*2;
-
-    ispc::Mesh mesh = mesh_to_ispc(dd_mesh);
 
     tf::Taskflow taskflow;
 
