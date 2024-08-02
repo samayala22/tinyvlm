@@ -11,8 +11,8 @@ class BackendCPU final : public Backend {
         ~BackendCPU();
         void lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, u32 iteration) override;
         void rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) override;
-        void rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma) override;
-        void displace_wake_rollup(float dt, View<f32, MultiSurface>& rollup_vertices, View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma) override;
+        void rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) override;
+        void displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) override;
         // void displace_wing(const linalg::alias::float4x4& transform) override;
         void displace_wing_and_shed(const std::vector<linalg::alias::float4x4>& transform, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake) override;
         void gamma_shed(View<f32, MultiSurface>& gamma, View<f32, MultiSurface>& gamma_prev) override;
