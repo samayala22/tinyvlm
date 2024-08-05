@@ -7,19 +7,7 @@
 
 #include "tinyfwd.hpp"
 
-// #define PTR_MESHGEOM_V(m, i,j,k) (m->vertices + (j) + (i) * (m->ns+1) + (k) * (m->nc+1) * (m->ns+1))
-// #define PTR_MESH_V(m, i,j,k) (m->vertices + (j) + (i) * (m->ns+1) + (k) * (m->nc+m->nw+1) * (m->ns+1))
-// #define PTR_MESH_C(m, i,j,k) (m->colloc + (j) + (i) * (m->ns) + (k) * (m->nc) * (m->ns))
-// #define PTR_MESH_N(m, i,j,k) (m->normals + (j) + (i) * (m->ns) + (k) * (m->nc) * (m->ns))
-
 namespace vlm {
-
-// constexpr inline f32* PTR_P(f32* ptr, u64 ni, u64 nj, u64 i, u64 j, u64 k) {
-//     return ptr + j + i*nj + k*ni*nj;
-// }
-// constexpr inline f32* PTR_V(f32* ptr, u64 ni, u64 nj, u64 i, u64 j, u64 k) {
-//     return ptr + j + i*(nj+1) + k*(ni+1)*(nj+1);
-// }
 
 // TODO: move functions into cpp file
 struct Mesh2 {
