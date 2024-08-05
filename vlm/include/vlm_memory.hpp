@@ -182,6 +182,7 @@ class MultiSurface {
 
         std::size_t size() const {return dim() * stride(); } // required
         const std::vector<SurfaceDims>& surfaces() const {return _surfaces; }
+        const SurfaceDims& surface(uint32_t wing_id) const {return _surfaces[wing_id]; }
         uint64_t stride() const {return _stride; }
         uint32_t dim() const {return _dim; }
 
@@ -190,7 +191,7 @@ class MultiSurface {
         uint64_t offset(uint32_t wing_id) const {return _surfaces[wing_id].offset; }
         
         template<typename T>
-        View<T, SingleSurface> subview(T* ptr, uint32_t wing_id, uint64_t i, uint64_t m, uint64_t j, uint64_t n) {
+        View<T, SingleSurface> subview(T* ptr, uint32_t wing_id, uint64_t i, uint64_t m, uint64_t j, uint64_t n) const {
             assert(wing_id < _surfaces.size());
             assert(i + m < nc(wing_id));
             assert(j + n < ns(wing_id));

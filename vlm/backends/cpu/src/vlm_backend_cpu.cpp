@@ -165,8 +165,6 @@ void BackendCPU::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const Vie
     }
 }
 
-// export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 colloc_ld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_m, uniform u64 v_n, uniform f32* uniform gamma, uniform f32* uniform rhs, uniform f32 sigma, uniform u32 iteration) {
-
 void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
     assert(rhs.layout.stride() == rhs.size()); // single dim
@@ -190,85 +188,79 @@ void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const
 
 void BackendCPU::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) {
     // const tiny::ScopedTimer timer("Wake Rollup");
-
-    const u64 wake_vertices_begin = (nc + nw - nwa + 1) * (ns+1);
-    const u64 wake_vertices_end = (nc + nw + 1) * (ns + 1);
-
     tf::Taskflow taskflow;
 
-    auto init = taskflow.placeholder();
-    auto rollup = taskflow.for_each_index(wake_vertices_begin, wake_vertices_end, [&] (u64 vidx) {
-        ispc::kernel_rollup(&mesh, dt, dd_data->rollup_vertices, vidx, dd_data->gamma, sigma_vatistas);
-    });
-    auto copy = taskflow.emplace([&]{
-        std::copy(rx + wake_vertices_begin, rx + wake_vertices_end, PTR_MESH_V(dd_mesh, 0,0,0) + wake_vertices_begin);
-        std::copy(ry + wake_vertices_begin, ry + wake_vertices_end, PTR_MESH_V(dd_mesh, 0,0,1) + wake_vertices_begin);
-        std::copy(rz + wake_vertices_begin, rz + wake_vertices_end, PTR_MESH_V(dd_mesh, 0,0,2) + wake_vertices_begin);
-    });
-    auto sync = taskflow.placeholder();
-    init.precede(rollup);
-    rollup.precede(copy);
-    copy.precede(sync);
+    auto begin = taskflow.placeholder();
+    auto end = taskflow.placeholder();
+
+    for (u64 m = 0; m < verts_wake.layout.surfaces().size(); m++) {
+        u64 wake_begin = (verts_wake.layout.nc(m) - iteration) * (verts_wake.layout.ns(m));
+        u64 wake_end = verts_wake.layout.nc(m) * (verts_wake.layout.ns(m));
+        auto rollup = taskflow.for_each_index(wake_begin, wake_end, [&] (u64 vidx) {
+            for (u64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
+                ispc::kernel_rollup(verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), vidx, verts_wing.ptr + verts_wing.layout.offset(i), verts_wing.layout.stride(), verts_wing.layout.nc(i), verts_wing.layout.ns(i), wake_rollup.ptr + wake_rollup.layout.offset(i), wake_rollup.layout.stride(), gamma_wing.ptr + gamma_wing.layout.offset(i), gamma_wake.ptr + gamma_wake.layout.offset(i), sigma_vatistas, dt, iteration);
+            }
+        });
+        auto copy = taskflow.emplace([&]{
+            memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 0*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 0*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
+            memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 1*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 1*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
+            memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 2*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 2*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
+        });
+        begin.precede(rollup);
+        rollup.precede(copy);
+        copy.precede(end);
+    }
 
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::gamma_shed() {
+void BackendCPU::gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) {
     // const tiny::ScopedTimer timer("Shed Gamma");
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-    const u64 nwa = dd_mesh->nwa;
-    const u64 nb_panels_wing = nc * ns;
-    const u64 wake_row_start = (nc + nw - nwa - 1) * ns;
 
-    std::copy(dd_data->gamma, dd_data->gamma + nb_panels_wing, dd_data->gamma_prev); // store current timestep for delta_gamma
-    std::copy(dd_data->gamma + ns * (nc-1), dd_data->gamma + nb_panels_wing, dd_data->gamma + wake_row_start);
+    memory->copy(MemoryTransfer::DeviceToDevice, gamma_wing_prev.ptr, gamma_wing.ptr, gamma_wing.size_bytes());
+    for (u64 i = 0; i < gamma_wake.layout.surfaces().size(); i++) {
+        f32* gamma_wake_ptr = gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration - 1) * gamma_wake.layout.ns(i);
+        f32* gamma_wing_ptr = gamma_wing.ptr + gamma_wing.layout.offset(i) + (gamma_wing.layout.nc(i) - 1) * gamma_wing.layout.ns(i); // last row
+        memory->copy(MemoryTransfer::DeviceToDevice, gamma_wake_ptr, gamma_wing_ptr, gamma_wing.layout.ns(i) * sizeof(f32));
+    }
 }
 
-void BackendCPU::lu_factor(f32* lhs) {
+void BackendCPU::lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
     // const tiny::ScopedTimer timer("Factor");
-    const u64 total_nb_panels_wing = prm.back().off_wing_p + prm.back().nb_panels_wing();
-    const int32_t n = static_cast<int32_t>(total_nb_panels_wing);
-    LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs, n, d_solver_ipiv);
+    assert(lhs.layout.m() == lhs.layout.n()); // square matrix
+    const int32_t n = static_cast<int32_t>(lhs.layout.n());
+    LAPACKE_sgetrf(LAPACK_COL_MAJOR, n, n, lhs.ptr, n, d_solver_ipiv);
 }
 
-void BackendCPU::lu_solve(f32* lhs, f32* rhs, f32* gamma) {
+void BackendCPU::lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) {
     // const tiny::ScopedTimer timer("Solve");
-    const u64 total_nb_panels_wing = prm.back().off_wing_p + prm.back().nb_panels_wing();
-    const int32_t n = static_cast<int32_t>(total_nb_panels_wing);
+    const int32_t n = static_cast<int32_t>(lhs.layout.n());
 
-    memory->copy(MemoryTransfer::DeviceToDevice, gamma, lhs, total_nb_panels_wing * sizeof(f32));
+    memory->copy(MemoryTransfer::DeviceToDevice, gamma.ptr, rhs.ptr, rhs.size_bytes());
 
-    LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs, n, d_solver_ipiv, gamma, n);
+    LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.ptr, n, d_solver_ipiv, gamma.ptr, n);
 }
 
-f32 BackendCPU::coeff_steady_cl(const FlowData& flow, const f32 area, const u64 j, const u64 n) {
+f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const FlowData& flow, f32 area) {
     // const tiny::ScopedTimer timer("Compute CL");
-
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-    const u64 nwa = dd_mesh->nwa;
-    const u64 nb_panels_wing = nc * ns;
-
-    assert(n > 0);
-    assert(j >= 0 && j+n <= dd_mesh->ns);
-    
     f32 cl = 0.0f;
 
-    for (u64 u = 0; u < nc; u++) {
-        for (u64 v = j; v < j + n; v++) {
-            const linalg::alias::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
-            const linalg::alias::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
+    u64 nc = gamma_delta.layout.surface().nc;
+    u64 ns = gamma_delta.layout.surface().ns;
+    for (u64 i = 0; i < nc; i++) {
+        for (u64 j = 0; j < ns; j++) {
+            u64 v0 = (i+0) * verts_wing.layout.surface().ns + j;
+            u64 v1 = (i+0) * verts_wing.layout.surface().ns + j + 1;
+            const linalg::alias::float3 vertex0{verts_wing.ptr[0*verts_wing.layout.stride() + v0], verts_wing.ptr[1*verts_wing.layout.stride() + v0], verts_wing.ptr[2*verts_wing.layout.stride() + v0]}; // upper left
+            const linalg::alias::float3 vertex1{verts_wing.ptr[0*verts_wing.layout.stride() + v1], verts_wing.ptr[1*verts_wing.layout.stride() + v1], verts_wing.ptr[2*verts_wing.layout.stride() + v1]}; // upper right
             // const linalg::alias::float3 v3 = mesh.get_v3(li);
             // Leading edge vector pointing outward from wing root
-            const linalg::alias::float3 dl = v1 - v0;
+            const linalg::alias::float3 dl = vertex1 - vertex0;
             // const linalg::alias::float3 local_left_chord = linalg::normalize(v3 - v0);
             // const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
             // dl -= projected_vector; // orthogonal leading edge vector
             // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * dd_data->delta_gamma[u * ns + v];
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * gamma_delta[i * ns + j];
             cl += linalg::dot(force, flow.lift_axis); // projection on the body lift axis
         }
     }
@@ -277,93 +269,114 @@ f32 BackendCPU::coeff_steady_cl(const FlowData& flow, const f32 area, const u64 
     return cl;
 }
 
-f32 BackendCPU::coeff_unsteady_cl(const linalg::alias::float3& freestream, const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) {
-    assert(n > 0);
-    assert(j >= 0 && j+n <= dd_mesh->ns);
-
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-    const u64 nwa = dd_mesh->nwa;
-    const u64 nb_panels_wing = nc * ns;
-    
+f32 BackendCPU::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow) {
+    // const tiny::ScopedTimer timer("Compute CL");
     f32 cl = 0.0f;
-    const f32 rho = 1.0f; // TODO: remove hardcoded rho
-    const linalg::alias::float3 span_axis{dd_mesh->frame + 4};
-    const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
-
-    for (u64 u = 0; u < nc; u++) {
-        for (u64 v = j; v < j + n; v++) {
-            const u64 li = u * ns + v; // linear index
-
-            linalg::alias::float3 V{vel.x[li], vel.y[li], vel.z[li]}; // local velocity (freestream + displacement vel)
-
-            const linalg::alias::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
-            const linalg::alias::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
-            const linalg::alias::float3 normal{*PTR_MESH_N(dd_mesh, u, v, 0), *PTR_MESH_N(dd_mesh, u, v, 1), *PTR_MESH_N(dd_mesh, u, v, 2)}; // normal
-
-            linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
-            const f32 gamma_dt = (dd_data->gamma[li] - dd_data->gamma_prev[li]) / dt; // backward difference
-
-            // Joukowski method
-            force += rho * dd_data->delta_gamma[li] * linalg::cross(V, v1 - v0);
-            force += rho * gamma_dt * dd_mesh->area[li] * normal;
-
-            // Katz Plotkin method
-            // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
-            // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
-            // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
-            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
-            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
-            // delta_p += gamma_dt;
-            // force = (delta_p * mesh.area[li]) * normal;
-
-            // force /= linalg::length2(freestream);
-            
-            cl += linalg::dot(force, lift_axis);
+    f32 total_area = 0.0f;
+    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
+        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i, 0, verts_wing.layout.nc(i), 0, verts_wing.layout.ns(i));
+        const auto gamma_delta_local = gamma_delta.layout.subview(gamma_delta.ptr, i, 0, verts_wing.layout.nc(i), 0, verts_wing.layout.ns(i));
+        f32 area_local = 0.f;
+        const f32* areas_local = areas.ptr + areas.layout.offset(i);
+        for (u64 j = 0; j < verts_wing.layout.surface(i).size(); j++) {
+            area_local += areas_local[j];
         }
-    }
-    cl /= 0.5f * rho * linalg::length2(freestream) * area;
 
+        f32 wing_cl = coeff_steady_cl_single(verts_wing_local, gamma_delta_local, flow, area_local);
+        cl += wing_cl * area_local;
+        total_area += area_local;
+    }
+    cl /= total_area;
     return cl;
 }
 
-linalg::alias::float3 BackendCPU::coeff_steady_cm(
-    const FlowData& flow,
-    const f32 area,
-    const f32 chord,
-    const u64 j,
-    const u64 n)
-{
-    assert(n > 0);
-    assert(j >= 0 && j+n <= dd_mesh->ns);
+// f32 BackendCPU::coeff_unsteady_cl(const linalg::alias::float3& freestream, const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) {
+//     assert(n > 0);
+//     assert(j >= 0 && j+n <= dd_mesh->ns);
 
-    const u64 nc = dd_mesh->nc;
-    const u64 ns = dd_mesh->ns;
-    const u64 nw = dd_mesh->nw;
-    const u64 nwa = dd_mesh->nwa;
-    const u64 nb_panels_wing = nc * ns;
+//     const u64 nc = dd_mesh->nc;
+//     const u64 ns = dd_mesh->ns;
+//     const u64 nw = dd_mesh->nw;
+//     const u64 nwa = dd_mesh->nwa;
+//     const u64 nb_panels_wing = nc * ns;
+    
+//     f32 cl = 0.0f;
+//     const f32 rho = 1.0f; // TODO: remove hardcoded rho
+//     const linalg::alias::float3 span_axis{dd_mesh->frame + 4};
+//     const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
 
-    linalg::alias::float3 cm(0.f, 0.f, 0.f);
-    const linalg::alias::float3 ref_pt{dd_mesh->frame + 12}; // frame origin as moment pt
+//     for (u64 u = 0; u < nc; u++) {
+//         for (u64 v = j; v < j + n; v++) {
+//             const u64 li = u * ns + v; // linear index
 
-    for (u64 u = 0; u < nc; u++) {
-        for (u64 v = j; v < j + n; v++) {
-            const u64 li = u * ns + v; // linear index
-            const linalg::alias::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
-            const linalg::alias::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
-            // Leading edge vector pointing outward from wing root
-            const linalg::alias::float3 dl = v1 - v0;
-            // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 dst_to_ref = ref_pt - 0.5f * (v0 + v1);
-            // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * dd_data->delta_gamma[li];
-            cm += linalg::cross(force, dst_to_ref);
-        }
-    }
-    cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * chord;
-    return cm;
-}
+//             linalg::alias::float3 V{vel.x[li], vel.y[li], vel.z[li]}; // local velocity (freestream + displacement vel)
+
+//             const linalg::alias::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
+//             const linalg::alias::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
+//             const linalg::alias::float3 normal{*PTR_MESH_N(dd_mesh, u, v, 0), *PTR_MESH_N(dd_mesh, u, v, 1), *PTR_MESH_N(dd_mesh, u, v, 2)}; // normal
+
+//             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
+//             const f32 gamma_dt = (dd_data->gamma[li] - dd_data->gamma_prev[li]) / dt; // backward difference
+
+//             // Joukowski method
+//             force += rho * dd_data->delta_gamma[li] * linalg::cross(V, v1 - v0);
+//             force += rho * gamma_dt * dd_mesh->area[li] * normal;
+
+//             // Katz Plotkin method
+//             // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
+//             // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
+//             // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
+//             // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
+//             // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
+//             // delta_p += gamma_dt;
+//             // force = (delta_p * mesh.area[li]) * normal;
+
+//             // force /= linalg::length2(freestream);
+            
+//             cl += linalg::dot(force, lift_axis);
+//         }
+//     }
+//     cl /= 0.5f * rho * linalg::length2(freestream) * area;
+
+//     return cl;
+// }
+
+// linalg::alias::float3 BackendCPU::coeff_steady_cm(
+//     const FlowData& flow,
+//     const f32 area,
+//     const f32 chord,
+//     const u64 j,
+//     const u64 n)
+// {
+//     assert(n > 0);
+//     assert(j >= 0 && j+n <= dd_mesh->ns);
+
+//     const u64 nc = dd_mesh->nc;
+//     const u64 ns = dd_mesh->ns;
+//     const u64 nw = dd_mesh->nw;
+//     const u64 nwa = dd_mesh->nwa;
+//     const u64 nb_panels_wing = nc * ns;
+
+//     linalg::alias::float3 cm(0.f, 0.f, 0.f);
+//     const linalg::alias::float3 ref_pt{dd_mesh->frame + 12}; // frame origin as moment pt
+
+//     for (u64 u = 0; u < nc; u++) {
+//         for (u64 v = j; v < j + n; v++) {
+//             const u64 li = u * ns + v; // linear index
+//             const linalg::alias::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
+//             const linalg::alias::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
+//             // Leading edge vector pointing outward from wing root
+//             const linalg::alias::float3 dl = v1 - v0;
+//             // Distance from the center of leading edge to the reference point
+//             const linalg::alias::float3 dst_to_ref = ref_pt - 0.5f * (v0 + v1);
+//             // Distance from the center of leading edge to the reference point
+//             const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * dd_data->delta_gamma[li];
+//             cm += linalg::cross(force, dst_to_ref);
+//         }
+//     }
+//     cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * chord;
+//     return cm;
+// }
 
 f32 BackendCPU::coeff_steady_cd(
     const FlowData& flow,
@@ -399,18 +412,6 @@ f32 BackendCPU::coeff_steady_cd(
 //     cl /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area;
 //     return cl;
 // }
-
-void BackendCPU::set_velocities(const linalg::alias::float3& vel) {
-    const u64 nb_panels_wing = hd_mesh->nc * hd_mesh->ns;
-    std::fill(dd_data->local_velocities + 0 * nb_panels_wing, dd_data->local_velocities + 1 * nb_panels_wing, vel.x);
-    std::fill(dd_data->local_velocities + 1 * nb_panels_wing, dd_data->local_velocities + 2 * nb_panels_wing, vel.y);
-    std::fill(dd_data->local_velocities + 2 * nb_panels_wing, dd_data->local_velocities + 3 * nb_panels_wing, vel.z);
-}
-
-void BackendCPU::set_velocities(const f32* vels) {
-    const u64 nb_panels_wing = mesh_nb_panels_wing(hd_mesh);
-    memory->hd_copy(dd_data->local_velocities, vels, 3 * nb_panels_wing * sizeof(f32));
-}
 
 // TODO: change this to use the per panel local alpha (in global frame)
 void BackendCPU::mesh_metrics(const f32 alpha_rad, const f32* verts_wing, f32* colloc, f32* normals, f32* areas) {
@@ -519,23 +520,6 @@ f32 BackendCPU::mesh_mac(u64 j, u64 n) {
     return mac / mesh_area(0, j, nc, n);
 }
 
-f32 BackendCPU::mesh_area(const u64 i, const u64 j, const u64 m, const u64 n) {
-    assert(i + m <= dd_mesh->nc);
-    assert(j + n <= dd_mesh->ns);
-    const u64 nc = hd_mesh->nc;
-    const u64 ns = hd_mesh->ns;
-    const u64 nw = hd_mesh->nw;
-
-    const f32* areas = hd_mesh->area + j + i * (ns);
-    f32 area_sum = 0.0f;
-    for (u64 u = 0; u < m; u++) {
-        for (u64 v = 0; v < n; v++) {
-            area_sum += areas[v + u * ns];
-        }
-    }
-    return area_sum;
-}
-
 // TODO: change linalg to use std::array as underlying storage
 void linalg_to_flat(const linalg::alias::float4x4& m, float* flat_m) {
     flat_m[0] = m.x.x;
@@ -588,20 +572,20 @@ void BackendCPU::displace_wing_and_shed(const std::vector<linalg::alias::float4x
 }
 
 // Temporary
-void BackendCPU::update_wake(const linalg::alias::float3& freestream) {
-    const f32 chord_root = 1.0f;
-    const f32 off_x = freestream.x * 100.0f * chord_root;
-    const f32 off_y = freestream.y * 100.0f * chord_root;
-    const f32 off_z = freestream.z * 100.0f * chord_root;
+// void BackendCPU::update_wake(const linalg::alias::float3& freestream) {
+//     const f32 chord_root = 1.0f;
+//     const f32 off_x = freestream.x * 100.0f * chord_root;
+//     const f32 off_y = freestream.y * 100.0f * chord_root;
+//     const f32 off_z = freestream.z * 100.0f * chord_root;
 
-    f32* vx = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,0);
-    f32* vy = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,1);
-    f32* vz = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,2);
+//     f32* vx = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,0);
+//     f32* vy = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,1);
+//     f32* vz = PTR_MESH_V(dd_mesh, dd_mesh->nc,0,2);
 
-    for (u64 i = 0; i < dd_mesh->ns+1; ++i) {
-        vx[i + dd_mesh->ns+1] = vx[i] + off_x;
-        vy[i + dd_mesh->ns+1] = vy[i] + off_y;
-        vz[i + dd_mesh->ns+1] = vz[i] + off_z;
-    }
-    dd_mesh->nwa = 1;
-}
+//     for (u64 i = 0; i < dd_mesh->ns+1; ++i) {
+//         vx[i + dd_mesh->ns+1] = vx[i] + off_x;
+//         vy[i + dd_mesh->ns+1] = vy[i] + off_y;
+//         vz[i + dd_mesh->ns+1] = vz[i] + off_z;
+//     }
+//     dd_mesh->nwa = 1;
+// }
