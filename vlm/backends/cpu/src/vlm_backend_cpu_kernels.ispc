@@ -145,10 +145,10 @@ export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 collo
     // Wake influence on wing
     for (u64 i = v_m - iteration - 1; i < v_m-1; i++) {
         foreach(j = 0 ... v_n - 1) {
-            uint64 v0 = (i+0) * v_n + j;
-            uint64 v1 = (i+0) * v_n + j + 1;
-            uint64 v2 = (i+1) * v_n + j + 1;
-            uint64 v3 = (i+1) * v_n + j;
+            const u64 v0 = (i+0) * v_n + j;
+            const u64 v1 = (i+0) * v_n + j + 1;
+            const u64 v2 = (i+1) * v_n + j + 1;
+            const u64 v3 = (i+1) * v_n + j;
 
             // Loads
             const float3 vertex0 = {v[0*v_ld + v0], v[1*v_ld + v0], v[2*v_ld + v0]};
@@ -191,15 +191,15 @@ export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 collo
 export void kernel_rollup(uniform f32* uniform v_wake, uniform u64 v_wake_ld, uniform u64 v_wake_m, uniform u64 v_wake_n, uniform u64 v_wake_idx, uniform f32* uniform v_wing, uniform u64 v_wing_ld, uniform u64 v_wing_m, uniform u64 v_wing_n, uniform f32* uniform rollup, uniform u64 rollup_ld, uniform f32* uniform gamma_wing, uniform f32* uniform gamma_wake, uniform f32 sigma, uniform f32 dt, uniform u32 iteration) {
     const uniform float3 vertex_influenced = {v_wake[0*v_wake_ld + v_wake_idx], v_wake[1*v_wake_ld + v_wake_idx], v_wake[2*v_wake_ld + v_wake_idx]};
 
-    float3 induced_vel = {0.0f, 0.0f, 0.0f};
+    float3 induced_vel = {0.0f, 0.0f, 0.0f}; 
 
     // Wing influence
     for (uint64 i = 0; i < v_wing_m - 1; i++) {
         foreach(j = 0 ... v_wing_n - 1) {
-            uint64 v0 = (i+0) * (v_wing_n) + j;
-            uint64 v1 = (i+0) * (v_wing_n) + j + 1;
-            uint64 v2 = (i+1) * (v_wing_n) + j + 1;
-            uint64 v3 = (i+1) * (v_wing_n) + j;
+            u64 v0 = (i+0) * (v_wing_n) + j;
+            u64 v1 = (i+0) * (v_wing_n) + j + 1;
+            u64 v2 = (i+1) * (v_wing_n) + j + 1;
+            u64 v3 = (i+1) * (v_wing_n) + j;
 
             // Loads
             const float3 vertex0 = {v_wing[0*v_wing_ld + v0], v_wing[1*v_wing_ld + v0], v_wing[2*v_wing_ld + v0]};
