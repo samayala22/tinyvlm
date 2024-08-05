@@ -57,11 +57,13 @@ VLM::VLM(const std::string& backend_name, const std::vector<std::string>& meshes
     }
 
     mesh.verts_wing_init.to_device();
+    mesh.alloc_wake(wake_vertices);  
     alloc_buffers();
 };
 
 void VLM::alloc_buffers() {
-    lhs.alloc(Matrix<MatrixLayout::ColMajor>{wing_panels.size(),wing_panels.size(), wing_panels.size()});
+    const u64 n = wing_panels.back().offset + wing_panels.back().size();
+    lhs.alloc(Matrix<MatrixLayout::ColMajor>{n, n, n});
     rhs.alloc(MultiSurface{wing_panels, 1});
     gamma_wing.alloc(MultiSurface{wing_panels, 1});
     gamma_wing_prev.alloc(MultiSurface{wing_panels, 1});
@@ -72,10 +74,11 @@ void VLM::alloc_buffers() {
 
 AeroCoefficients VLM::run(const FlowData& flow) {
     // Reset buffer state
-    backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size_bytes());
-    backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size_bytes());
+    backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
+    backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
     backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, mesh.verts_wing_init.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
-
+    backend->lu_allocate(lhs.d_view());
+    
     // global initial position
     auto init_pos = translation_matrix<f32>({
         -100.0f * flow.u_inf*std::cos(flow.alpha),
@@ -84,20 +87,23 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     });
     std::fill(wing_positions.begin(), wing_positions.end(), init_pos);
 
-    backend->displace_wing_and_shed(wing_positions, mesh.verts_wing.d_view(), mesh.verts_wake.d_view());
+    backend->wake_shed(mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), 0);
+    backend->displace_wing(wing_positions, mesh.verts_wing.d_view(), mesh.verts_wing_init.d_view());
+    backend->wake_shed(mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), 1);
+
     backend->mesh_metrics(flow.alpha, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
-    backend->lhs_assemble(lhs.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wing.d_view(), mesh.verts_wake.d_view());
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view() + 0 * mesh.total_nb_panels_wing(), flow.freestream.x, mesh.total_nb_panels_wing() * sizeof(f32));
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view() + 1 * mesh.total_nb_panels_wing(), flow.freestream.y, mesh.total_nb_panels_wing() * sizeof(f32));
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view() + 2 * mesh.total_nb_panels_wing(), flow.freestream.z, mesh.total_nb_panels_wing() * sizeof(f32));
+    backend->lhs_assemble(lhs.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), 1);
+    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view().ptr + 0 * local_velocities.d_view().layout.stride(), flow.freestream.x, local_velocities.d_view().layout.stride());
+    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view().ptr + 1 * local_velocities.d_view().layout.stride(), flow.freestream.y, local_velocities.d_view().layout.stride());
+    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view().ptr + 2 * local_velocities.d_view().layout.stride(), flow.freestream.z, local_velocities.d_view().layout.stride());
     backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), local_velocities.d_view());
     backend->lu_factor(lhs.d_view());
     backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
     backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
     return AeroCoefficients{
-        backend->coeff_steady_cl(flow),
-        backend->coeff_steady_cm(flow),
-        backend->coeff_steady_cd(flow)
+        backend->coeff_steady_cl_multi(mesh.verts_wing.d_view(), mesh.area.d_view(), gamma_wing_delta.d_view(), flow),
+        0.0f, // todo implement
+        {0.0f, 0.0f, 0.0f} // todo implement
     };
 }
 

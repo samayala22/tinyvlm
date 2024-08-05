@@ -114,23 +114,16 @@ int main(int  /*argc*/, char ** /*argv*/) {
     const std::vector<std::string> backends = get_available_backends();
     std::vector<f32> test_alphas = {0, 1, 2, 3, 4, 5, 10, 15};
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);
-    
-    const MeshIO mesh_io{"plot3d"};
-    MeshGeom mesh_geom{}; // DEPRECATE
+
     auto solvers = tiny::make_combination(meshes, backends);
     for (const auto& [mesh_name, backend_name] : solvers) {
         std::printf(">>> MESH: %s | BACKEND: %s\n", mesh_name.get().c_str(), backend_name.get().c_str());
 
-        auto dims = mesh_io.get_dims(mesh_name);
-        // LinearVLM solver{backend_name, }
-
-        mesh_io_read_file(mesh_name, &mesh_geom); // DEPRECATE
-        mesh_quarterchord(&mesh_geom); // DEPRECATE
-        LinearVLM solver{create_backend(backend_name, &mesh_geom, 1)};
+        VLM simulation{backend_name, {mesh_name}};
 
         for (u64 i = 0; i < test_alphas.size(); i++) {
             const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
-            const auto coeffs = solver.solve(flow);
+            const auto coeffs = simulation.run(flow);
             const f32 analytical_cl = compute_analytical_cl(flow.alpha, a, b);
             const f32 analytical_cd = compute_analytical_cd(analytical_cl, a, b);
             const f32 cl_aerr = std::abs(coeffs.cl - analytical_cl);
@@ -142,8 +135,6 @@ int main(int  /*argc*/, char ** /*argv*/) {
             std::printf(">>> Analytical CD: %.7f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cd, cd_aerr, cd_rerr*100.f);
             if (cl_rerr > 0.03f || cd_rerr > 0.03f) return 1;
         }
-        
-        delete[] mesh_geom.vertices;
     }
     return 0;
 }

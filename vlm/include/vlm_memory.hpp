@@ -18,7 +18,7 @@ enum class MemoryTransfer {
 class Memory {
     public:
         Memory(bool unified) : _unified(unified) {}
-        virtual ~Memory() = default;
+        ~Memory() = default;
         virtual void* alloc(MemoryLocation location, std::size_t size) const = 0;
         virtual void free(MemoryLocation location, void* ptr) const = 0;
         virtual void copy(MemoryTransfer transfer, void* dst, const void* src, std::size_t size) const = 0;
@@ -99,22 +99,21 @@ public:
         _host.layout = layout;
         _device.layout = layout;
 
-        if constexpr (is_host::value) {
+        if (memory.is_unified()) {
             _host.ptr = static_cast<T*>(memory.alloc(MemoryLocation::Host, size_bytes()));
-        }
-        if constexpr (is_device::value) {
-            _device.ptr = (!memory.is_unified()) 
-                ? static_cast<T*>(memory.alloc(MemoryLocation::Device, size_bytes()))
-                : _host.ptr;
+            _device.ptr = _host.ptr;
+        } else {
+            if constexpr (is_host::value) _host.ptr = static_cast<T*>(memory.alloc(MemoryLocation::Host, size_bytes()));
+            if constexpr (is_device::value) _device.ptr = static_cast<T*>(memory.alloc(MemoryLocation::Device, size_bytes()));
         }
     }
 
     void dealloc() {
-        if constexpr (is_host::value) {
+        if (memory.is_unified()) {
             memory.free(MemoryLocation::Host, _host.ptr);
-        }
-        if constexpr (is_device::value) {
-            if (!memory.is_unified()) memory.free(MemoryLocation::Device, _device());
+        } else {
+            if constexpr (is_host::value) memory.free(MemoryLocation::Host, _host.ptr);
+            if constexpr (is_device::value) memory.free(MemoryLocation::Device, _device.ptr);
         }
     }
 
@@ -180,11 +179,11 @@ class MultiSurface {
             return _surfaces[wing_id].offset + dim * _stride;
         }
 
-        std::size_t size() const {return dim() * stride(); } // required
+        std::size_t size() const {return dims() * stride(); } // required
         const std::vector<SurfaceDims>& surfaces() const {return _surfaces; }
         const SurfaceDims& surface(uint32_t wing_id) const {return _surfaces[wing_id]; }
         uint64_t stride() const {return _stride; }
-        uint32_t dim() const {return _dim; }
+        uint32_t dims() const {return _dim; }
 
         uint64_t nc(uint32_t wing_id) const {return _surfaces[wing_id].nc; }
         uint64_t ns(uint32_t wing_id) const {return _surfaces[wing_id].ns; }
@@ -193,12 +192,12 @@ class MultiSurface {
         template<typename T>
         View<T, SingleSurface> subview(T* ptr, uint32_t wing_id, uint64_t i, uint64_t m, uint64_t j, uint64_t n) const {
             assert(wing_id < _surfaces.size());
-            assert(i + m < nc(wing_id));
-            assert(j + n < ns(wing_id));
+            assert(i + m <= nc(wing_id));
+            assert(j + n <= ns(wing_id));
 
             return {
                 ptr + offset(wing_id) + i * ns(wing_id) + j,
-                SingleSurface{SurfaceDims{m,n,0}, stride(), dim()}
+                SingleSurface{SurfaceDims{m,n,0}, stride(), dims()}
             };
         }
 
