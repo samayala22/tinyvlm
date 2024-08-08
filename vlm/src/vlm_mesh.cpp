@@ -64,25 +64,23 @@ public:
         assert(vertices.layout.surface().ns == nj);
         assert(vertices.layout.surface().nc == ni);
         assert(vertices.layout.dim() == 4);
-
-        const u64 nb_vertices = ni * nj;
         
         for (u64 j = 0; j < nj; j++) {
             for (u64 i = 0; i < ni; i++) {
                 f >> x;
-                vertices[nb_vertices * 0 + nj*i + j] = x;
+                vertices[vertices.layout.stride() * 0 + nj*i + j] = x;
             }
         }
         for (u64 j = 0; j < nj; j++) {
             for (u64 i = 0; i < ni; i++) {
                 f >> y;
-                vertices[nb_vertices * 1 + nj*i + j] = y;
+                vertices[vertices.layout.stride() * 1 + nj*i + j] = y;
             }
         }
         for (u64 j = 0; j < nj; j++) {
             for (u64 i = 0; i < ni; i++) {
                 f >> z;
-                vertices[nb_vertices * 2 + nj*i + j] = z;
+                vertices[vertices.layout.stride() * 2 + nj*i + j] = z;
             }
         }
 
@@ -92,9 +90,9 @@ public:
         // if (std::abs(m.v.x[0]) != eps || std::abs(m.v.y[0]) != eps) {
         //     throw std::runtime_error("First vertex of plot3d mesh must be at origin");
         // }
-        const f32 first_y = vertices[nb_vertices * 1 + 0];
+        const f32 first_y = vertices[vertices.layout.stride() * 1 + 0];
         for (u64 i = 1; i < ni; i++) {
-            if ( vertices[nb_vertices * 1 + i*nj] != first_y) {
+            if ( vertices[vertices.layout.stride() * 1 + i*nj] != first_y) {
                 throw std::runtime_error("Mesh vertices should be ordered in chordwise direction"); // todo get rid of throw
             }
         }
