@@ -31,6 +31,8 @@ class VLM final: public Simulation {
         VLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~VLM() = default;
         AeroCoefficients run(const FlowData& flow);
+
+        std::vector<u32> condition0;
         
         // Pulic for output purposes (eg dump gamma to file)
         Buffer<f32, MemoryLocation::Device, Matrix<MatrixLayout::ColMajor>> lhs; // (ns*nc)^2

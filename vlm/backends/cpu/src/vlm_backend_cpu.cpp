@@ -54,10 +54,10 @@ void BackendCPU::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f3
     for (const auto& surf : gamma_delta.layout.surfaces())  {
         f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
         const f32* s_gamma = gamma.ptr + surf.offset;
-        tf::Task first_row = graph.emplace([&]{
+        tf::Task first_row = graph.emplace([=]{
             memory->copy(MemoryTransfer::DeviceToDevice, s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
         });
-        tf::Task remaining_rows = graph.for_each_index((u64)1,surf.nc, [&] (u64 b, u64 e) {
+        tf::Task remaining_rows = graph.for_each_index((u64)1,surf.nc, [=] (u64 b, u64 e) {
             for (u64 i = b; i < e; i++) {
                 for (u64 j = 0; j < surf.ns; j++) {
                     s_gamma_delta[i*surf.ns + j] = s_gamma[i*surf.ns + j] - s_gamma[(i-1)*surf.ns + j];
@@ -88,8 +88,12 @@ void BackendCPU::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f3
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCPU::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
+void BackendCPU::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) {
     // tiny::ScopedTimer timer("LHS");
+
+    assert(condition.size() == colloc.layout.surfaces().size());
+    std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
+
     tf::Taskflow graph;
 
     auto begin = graph.placeholder();
@@ -102,30 +106,29 @@ void BackendCPU::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, co
         f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(i);
         const u64 zero = 0;
         const u64 end_wing = (colloc.layout.nc(i) - 1) * colloc.layout.ns(i);
-        u32 w = 0; // wake row index (0 to nwa)
-
-        auto wing_pass = graph.for_each_index(zero, end_wing, [&, lhs_section, vwing_section] (u64 lidx) {
+        
+        auto wing_pass = graph.for_each_index(zero, end_wing, [&, lhs_section, vwing_section, i] (u64 lidx) {
             f32* lhs_slice = lhs_section + lidx * lhs.layout.stride();
             f32* vwing_slice = vwing_section + lidx + lidx / colloc.layout.ns(i);
             ispc::kernel_influence(lhs.layout.m(), lhs_slice, colloc.ptr, colloc.layout.stride(), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
         });
 
-        auto last_row = graph.for_each_index(end_wing, colloc.layout.ns(i) * colloc.layout.nc(i), [&, lhs_section, vwing_section] (u64 lidx) {
+        auto last_row = graph.for_each_index(end_wing, colloc.layout.ns(i) * colloc.layout.nc(i), [&, lhs_section, vwing_section, i] (u64 lidx) {
             f32* lhs_slice = lhs_section + lidx * lhs.layout.stride();
             f32* vwing_slice = vwing_section + lidx + lidx / colloc.layout.ns(i);
             ispc::kernel_influence(lhs.layout.m(), lhs_slice, colloc.ptr, colloc.layout.stride(), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
         });
 
-        auto cond = graph.emplace([&]{
-            return w < iteration ? 0 : 1; // 0 means continue, 1 means break (exit loop)
+        auto cond = graph.emplace([&, iteration, i]{
+            return condition[i] < iteration ? 0 : 1; // 0 means continue, 1 means break (exit loop)
         });
-        auto wake_pass = graph.for_each_index(zero, colloc.layout.ns(i), [&, lhs_section, vwake_section, end_wing] (u64 j) {
+        auto wake_pass = graph.for_each_index(zero, colloc.layout.ns(i), [&, lhs_section, vwake_section, end_wing, i] (u64 j) {
             f32* lhs_slice = lhs_section + (j+end_wing) * lhs.layout.stride();
-            f32* vwake_slice = vwake_section + (verts_wake.layout.nc(i) - w - 2) * verts_wake.layout.ns(i) + j;
+            f32* vwake_slice = vwake_section + (verts_wake.layout.nc(i) - condition[i] - 2) * verts_wake.layout.ns(i) + j;
             ispc::kernel_influence(lhs.layout.m(), lhs_slice, colloc.ptr, colloc.layout.stride(), vwake_slice, verts_wake.layout.stride(), verts_wake.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
         });
-        auto back = graph.emplace([&]{
-            w++;
+        auto back = graph.emplace([&, i]{
+            condition[i]++;
             return 0; // 0 means continue
         });
 
@@ -175,7 +178,7 @@ void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const
         for (u32 i = 0; i < rhs.layout.surfaces().size(); i++) {
             ispc::kernel_wake_influence(colloc.ptr + idx, colloc.layout.stride(), normals.ptr + idx, normals.layout.stride(), verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), gamma.ptr + idx, rhs.ptr + idx, sigma_vatistas, iteration);
         }
-    });
+    }).name("RHS Wake Influence");
 
     begin.precede(wake_influence);
     wake_influence.precede(end);
@@ -191,14 +194,14 @@ void BackendCPU::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, cons
     auto end = taskflow.placeholder();
 
     for (u64 m = 0; m < verts_wake.layout.surfaces().size(); m++) {
-        u64 wake_begin = (verts_wake.layout.nc(m) - iteration) * (verts_wake.layout.ns(m));
-        u64 wake_end = verts_wake.layout.nc(m) * (verts_wake.layout.ns(m));
+        const u64 wake_begin = (verts_wake.layout.nc(m) - iteration) * (verts_wake.layout.ns(m));
+        const u64 wake_end = verts_wake.layout.nc(m) * (verts_wake.layout.ns(m));
         auto rollup = taskflow.for_each_index(wake_begin, wake_end, [&] (u64 vidx) {
             for (u64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
                 ispc::kernel_rollup(verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), vidx, verts_wing.ptr + verts_wing.layout.offset(i), verts_wing.layout.stride(), verts_wing.layout.nc(i), verts_wing.layout.ns(i), wake_rollup.ptr + wake_rollup.layout.offset(i), wake_rollup.layout.stride(), gamma_wing.ptr + gamma_wing.layout.offset(i), gamma_wake.ptr + gamma_wake.layout.offset(i), sigma_vatistas, dt, iteration);
             }
         });
-        auto copy = taskflow.emplace([&]{
+        auto copy = taskflow.emplace([&, wake_begin, wake_end, m]{
             memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 0*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 0*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
             memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 1*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 1*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
             memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 2*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 2*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
@@ -216,12 +219,14 @@ void BackendCPU::gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, Multi
 
     memory->copy(MemoryTransfer::DeviceToDevice, gamma_wing_prev.ptr, gamma_wing.ptr, gamma_wing.size_bytes());
     for (u64 i = 0; i < gamma_wake.layout.surfaces().size(); i++) {
+        assert(iteration < gamma_wake.layout.nc(i));
         f32* gamma_wake_ptr = gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration - 1) * gamma_wake.layout.ns(i);
         f32* gamma_wing_ptr = gamma_wing.ptr + gamma_wing.layout.offset(i) + (gamma_wing.layout.nc(i) - 1) * gamma_wing.layout.ns(i); // last row
         memory->copy(MemoryTransfer::DeviceToDevice, gamma_wake_ptr, gamma_wing_ptr, gamma_wing.layout.ns(i) * sizeof(f32));
     }
 }
 
+// TODO: consider moving this buffer to be simulation side rather than backend side
 void BackendCPU::lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
     d_solver_ipiv = (i32*)memory->alloc(MemoryLocation::Device, sizeof(i32) * lhs.layout.m());
 }
@@ -270,16 +275,16 @@ f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_win
     return cl;
 }
 
-f32 BackendCPU::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow) {
+f32 BackendCPU::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow, const View<f32, MultiSurface>& areas) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
     for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
         const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i, 0, verts_wing.layout.nc(i), 0, verts_wing.layout.ns(i));
-        const auto gamma_delta_local = gamma_delta.layout.subview(gamma_delta.ptr, i, 0, verts_wing.layout.nc(i), 0, verts_wing.layout.ns(i));
+        const auto gamma_delta_local = gamma_delta.layout.subview(gamma_delta.ptr, i, 0, gamma_delta.layout.nc(i), 0, gamma_delta.layout.ns(i));
         f32 area_local = 0.f;
         const f32* areas_local = areas.ptr + areas.layout.offset(i);
-        for (u64 j = 0; j < verts_wing.layout.surface(i).size(); j++) {
+        for (u64 j = 0; j < areas.layout.surface(i).size(); j++) {
             area_local += areas_local[j];
         }
 
@@ -379,21 +384,33 @@ f32 BackendCPU::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing,
 //     return cm;
 // }
 
-// f32 BackendCPU::coeff_steady_cd_single(
-//     const FlowData& flow,
-//     const f32 area,
-//     const u64 j,
-//     const u64 n) 
-// {
-//     tiny::ScopedTimer timer("Compute CD");
-//     assert(n > 0);
-//     assert(j >= 0 && j+n <= dd_mesh->ns);
-//     // std::fill(dd_data->trefftz_buffer, dd_data->trefftz_buffer + hd_mesh->ns, 0.0f);
-//     ispc::Mesh mesh = mesh_to_ispc(dd_mesh);
-//     f32 cd = ispc::kernel_trefftz_cd2(&mesh, dd_data->gamma, j, n, sigma_vatistas);
-//     cd /= linalg::length2(flow.freestream) * area;
-//     return cd;
-// }
+f32 BackendCPU::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) {
+    // tiny::ScopedTimer timer("Compute CD");
+    f32 cd = ispc::kernel_trefftz_cd(verts_wake.ptr, verts_wake.layout.stride(), verts_wake.layout.surface().nc, verts_wake.layout.surface().ns, gamma_wake.ptr, sigma_vatistas);
+    cd /= linalg::length2(flow.freestream) * area;
+    return cd;
+}
+
+f32 BackendCPU::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& gamma_wake, const FlowData& flow, const View<f32, MultiSurface>& areas) {
+    // const tiny::ScopedTimer timer("Compute CL");
+    f32 cd = 0.0f;
+    f32 total_area = 0.0f;
+    for (u64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
+        const auto verts_wake_local = verts_wake.layout.subview(verts_wake.ptr, i, 0, verts_wake.layout.nc(i), 0, verts_wake.layout.ns(i));
+        const auto gamma_wake_local = gamma_wake.layout.subview(gamma_wake.ptr, i, 0, gamma_wake.layout.nc(i), 0, gamma_wake.layout.ns(i));
+        f32 area_local = 0.f;
+        const f32* areas_local = areas.ptr + areas.layout.offset(i);
+        for (u64 j = 0; j < areas.layout.surface(i).size(); j++) {
+            area_local += areas_local[j];
+        }
+
+        const f32 wing_cd = coeff_steady_cd_single(verts_wake_local, gamma_wake_local, flow, area_local);
+        cd += wing_cd * area_local;
+        total_area += area_local;
+    }
+    cd /= total_area;
+    return cd;
+}
 
 // Using Trefftz plane
 // f32 BackendCPU::compute_coefficient_cl(

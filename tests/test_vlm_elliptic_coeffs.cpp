@@ -35,83 +35,13 @@ float compute_analytical_gamma(float y, float a, float b, float alpha) {
     return gamma0 * std::sqrt(1.0f - ratio*ratio);
 }
 
-// bool elliptic_convergence() {
-//     tiny::Config cfg("../../../../config/elliptic.vlm");
-
-//     vlm::VLM vlm(cfg);
-
-//     std::vector<int> dimensions = {
-//         16, 32, 45, 64, 90, 128
-//     };
-
-//     const float a = 1.0f; // wing chord root
-//     const float b = 5.0f; // half wing span
-
-//     std::vector<double> norm_l1;
-//     std::vector<double> norm_l2;
-//     std::vector<double> norm_linf;
-
-//     const float alpha = 0.1f; // degrees
-
-//     for (const auto& dim : dimensions) {
-//         std::string filename = std::format("../../../../mesh/elliptic_{}x{}.x", dim, dim);
-//         vlm.mesh.io_read(filename);
-//         vlm.init();
-//         vlm::Solver solver(vlm.mesh, vlm.data, cfg);
-//         solver.run(alpha);
-
-//         double l1 = 0.0f;
-//         double l2 = 0.0f;
-//         double linf = 0.0f;
-//         int begin = (vlm.mesh.nc - 1) * vlm.mesh.ns;
-//         int end = vlm.mesh.nc * vlm.mesh.ns;
-//         // loop over last row of panels
-//         for (int i = begin; i < end; i++) {
-//             const float y = vlm.mesh.colloc.y[i];
-//             const float gamma = vlm.data.gamma[i];
-//             const float gamma_analytical = analytical_gamma(y, a, b, alpha);
-//             const double error = std::abs((gamma - gamma_analytical) / (gamma_analytical + 1e-7f));
-//             std::printf("y: %f, gamma: %f, gamma_analytical: %f, error: %f \n", y, gamma, gamma_analytical, error);
-
-//             l1 += error;
-//             l2 += error * error;
-//             linf = std::max(linf, error);
-//         }
-//         l1 /= (end - begin);
-//         l2 = std::sqrt(l2) / (end - begin);
-//         std::printf("L1: %f, L2: %f, Linf: %f\n", l1, l2, linf);
-
-//         norm_l1.push_back(l1);
-//         norm_l2.push_back(l2);
-//         norm_linf.push_back(linf);
-//     }
-
-//     double order_l1 = 0.0f;
-//     double order_l2 = 0.0f;
-//     double order_linf = 0.0f;
-
-//     auto order = [=](double norm0, double norm1, float dim0, float dim1) {
-//         return std::log(norm0 / norm1) / std::log((b/dim0)/(b/dim1));
-//     };
-
-//     for (int i = 0; i < dimensions.size() - 1; i++) {
-//         order_l1 += order(norm_l1[i], norm_l1[i+1], dimensions[i], dimensions[i+1]);
-//         order_l2 += order(norm_l2[i], norm_l2[i+1], dimensions[i], dimensions[i+1]);
-//         order_linf += order(norm_linf[i], norm_linf[i+1], dimensions[i], dimensions[i+1]);
-//     }
-//     order_l1 /= (dimensions.size() - 1);
-//     order_l2 /= (dimensions.size() - 1);
-//     order_linf /= (dimensions.size() - 1);
-//     std::printf("Order L1: %f, Order L2: %f, Order Linf: %f\n", order_l1, order_l2, order_linf);
-//     return 0;
-// }
-
 int main(int  /*argc*/, char ** /*argv*/) {
     const float a = 1.0f; // wing chord root
     const float b = 5.0f; // half wing span
 
     const std::vector<std::string> meshes = {"../../../../mesh/elliptic_64x64.x"};
     const std::vector<std::string> backends = get_available_backends();
+    
     std::vector<f32> test_alphas = {0, 1, 2, 3, 4, 5, 10, 15};
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);
 
