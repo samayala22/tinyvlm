@@ -45,39 +45,4 @@ inline T pow(T x) {
     return result;
 }
 
-// Structure of arrays struct to store 3D data (coordinates or vectors)
-template<typename T>
-struct SoA_3D_t {
-    std::vector<T> x = {};
-    std::vector<T> y = {};
-    std::vector<T> z = {};
-    u64 size = 0;
-    
-    void resize(u64 size_) {
-        size = size_;
-        x.resize(size, 0.f);
-        y.resize(size, 0.f);
-        z.resize(size, 0.f);
-    }
-
-    void reserve(u64 size_) {
-        size = size_;
-        x.reserve(size);
-        y.reserve(size);
-        z.reserve(size);
-    }
-};
-
-template<typename T>
-struct Status {
-    bool ok = false; // true if no error
-    union {
-        struct err_t {
-            int args = 0; // bitfield for position of wrong arguments
-            char* msg = nullptr; // error message
-        } err;
-        T data; // data to return
-    };
-};
-
 } // namespace vlm
