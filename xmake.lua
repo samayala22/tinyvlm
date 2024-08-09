@@ -44,7 +44,7 @@ includes("packages/*.lua")
 includes("vlm/xmake.lua") -- library and main driver
 
 -- Create tests
-for _, file in ipairs(os.files("tests/test_*.cpp")) do
+for _, file in ipairs(os.files("tests/*.cpp")) do
     local name = path.basename(file)
     target(name)
         set_kind("binary")

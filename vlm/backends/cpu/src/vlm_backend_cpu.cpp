@@ -255,8 +255,8 @@ f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_win
     const u64 ns = gamma_delta.layout.surface().ns;
     for (u64 i = 0; i < nc; i++) {
         for (u64 j = 0; j < ns; j++) {
-            const u64 v0 = (i+0) * verts_wing.layout.surface().ns + j;
-            const u64 v1 = (i+0) * verts_wing.layout.surface().ns + j + 1;
+            const u64 v0 = (i+0) * verts_wing.layout.ld() + j;
+            const u64 v1 = (i+0) * verts_wing.layout.ld() + j + 1;
             const linalg::alias::float3 vertex0{verts_wing.ptr[0*verts_wing.layout.stride() + v0], verts_wing.ptr[1*verts_wing.layout.stride() + v0], verts_wing.ptr[2*verts_wing.layout.stride() + v0]}; // upper left
             const linalg::alias::float3 vertex1{verts_wing.ptr[0*verts_wing.layout.stride() + v1], verts_wing.ptr[1*verts_wing.layout.stride() + v1], verts_wing.ptr[2*verts_wing.layout.stride() + v1]}; // upper right
             // const linalg::alias::float3 v3 = mesh.get_v3(li);
@@ -266,7 +266,7 @@ f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_win
             // const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
             // dl -= projected_vector; // orthogonal leading edge vector
             // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * gamma_delta[i * ns + j];
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * gamma_delta.ptr[i * gamma_delta.layout.ld() + j];
             cl += linalg::dot(force, flow.lift_axis); // projection on the body lift axis
         }
     }
@@ -575,4 +575,12 @@ void BackendCPU::wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, 
         memory->copy(MemoryTransfer::DeviceToDevice, vwake + 1*verts_wake.layout.stride(), vwing + 1*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
         memory->copy(MemoryTransfer::DeviceToDevice, vwake + 2*verts_wake.layout.stride(), vwing + 2*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
     }
+}
+
+f32 BackendCPU::mesh_area(const View<f32, SingleSurface>& areas) {
+    f32 wing_area = 0.0f;
+    for (u64 i = 0; i < areas.layout.surface().size(); i++) {
+        wing_area += areas[i];
+    }
+    return wing_area;
 }

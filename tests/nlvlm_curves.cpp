@@ -72,6 +72,7 @@ int main(int  /*argc*/, char** /*argv*/) {
     lift_curves.emplace_back(std::make_pair("polar", std::make_unique<ThinAirfoilPolarLiftCurve>()));
     
     std::vector<f32> test_alphas = {0, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
+
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);
     std::vector<f32> test_cl(test_alphas.size());
 
@@ -81,11 +82,8 @@ int main(int  /*argc*/, char** /*argv*/) {
     std::vector<f32> db_cl(db_alphas.size()); // modified by lift function
 
     auto solvers = tiny::make_combination(meshes, backends);
-    MeshGeom mesh_geom{};
     for (const auto& [mesh_name, backend_name] : solvers) {
-        mesh_io_read_file(mesh_name, &mesh_geom);
-        mesh_quarterchord(&mesh_geom);
-        NonLinearVLM solver{create_backend(backend_name, &mesh_geom, 1)};
+        NLVLM simulation{backend_name, {mesh_name}};
 
         for (const auto& lift_curve : lift_curves) {
             std::transform(db_alphas.begin(), db_alphas.end(), db_cl.begin(), [&lift_curve](float alpha){ return (*lift_curve.second)(alpha); });
@@ -106,7 +104,7 @@ int main(int  /*argc*/, char** /*argv*/) {
             
             for (u64 i = 0; i < test_alphas.size(); i++) {
                 const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
-                auto coeffs = solver.solve(flow, db);
+                auto coeffs = simulation.run(flow, db);
                 test_cl[i] = coeffs.cl;
                 std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", to_degrees(test_alphas[i]), coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
                 const f32 analytical_cl = (*lift_curve.second)(flow.alpha);
@@ -117,7 +115,6 @@ int main(int  /*argc*/, char** /*argv*/) {
             }
             write_vector_pair(lift_curve.first + "_nonlinear_cl", test_alphas, test_cl);
         }
-        delete[] mesh_geom.vertices;
     }
 
     return 0; // Success
