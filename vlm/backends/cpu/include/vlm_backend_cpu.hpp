@@ -33,6 +33,7 @@ class BackendCPU final : public Backend {
 
         void mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) override;
         f32 mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) override;
+        f32 mesh_area(const View<f32, SingleSurface>& areas) override;
 };
 
 } // namespace vlm

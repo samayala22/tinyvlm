@@ -46,6 +46,33 @@ class VLM final: public Simulation {
         void alloc_buffers();
 };
 
+class NLVLM final: public Simulation {
+    public:
+
+        static constexpr f64 DEFAULT_TOL = 1e-5;
+        static constexpr u64 DEFAULT_MAX_ITER = 100;
+
+        NLVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
+        ~NLVLM() = default;
+        AeroCoefficients run(const FlowData& flow, const Database& db);
+
+        const u64 max_iter = DEFAULT_MAX_ITER;
+        const f64 tol = DEFAULT_TOL;
+        std::vector<u32> condition0;
+
+        Buffer<f32, MemoryLocation::Device, Matrix<MatrixLayout::ColMajor>> lhs; // (ns*nc)^2
+        Buffer<f32, MemoryLocation::Device, MultiSurface> rhs; // ns*nc
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing; // nc*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wake; // nw*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev; // nc*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta; // nc*ns
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> local_velocities; // ns*nc*3
+        Buffer<f32, MemoryLocation::Host, MultiSurface> strip_alphas; // ns
+
+    private:
+        void alloc_buffers();
+};
+
 // class Solver {
 //     public:
 //     std::unique_ptr<Backend> backend;

@@ -44,6 +44,7 @@ class Backend {
 
         virtual void mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) = 0;
         virtual f32 mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) = 0;
+        virtual f32 mesh_area(const View<f32, SingleSurface>& areas) = 0;
 };
 
 std::unique_ptr<Backend> create_backend(const std::string& backend_name);
