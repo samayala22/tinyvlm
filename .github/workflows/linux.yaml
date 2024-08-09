@@ -23,6 +23,7 @@ jobs:
         arch: [x86_64]
         mode: [release, debug]
         compiler: [clang, gcc]
+        sanitizer: [address, thread, undefined]
 
     steps:
       - name: Checkout repository
@@ -74,7 +75,7 @@ jobs:
       # Config xmake
       - name: Config
         run: |
-          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }}
+          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --policies=build.sanitizer.${{ matrix.sanitizer }}
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4
@@ -89,4 +90,4 @@ jobs:
 
       - name: Test
         run: |
-          xmake test
+          xmake test -j1 -v

@@ -22,6 +22,7 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
+
 /// @brief Memory manager implementation for the CPU backend
 class MemoryCPU final : public Memory {
     public:
@@ -34,7 +35,7 @@ class MemoryCPU final : public Memory {
 };
 
 BackendCPU::BackendCPU() : Backend(std::make_unique<MemoryCPU>()) {}
-BackendCPU::~BackendCPU() = default;
+BackendCPU::~BackendCPU() {}
 
 /// @brief Compute the gamma_delta vector
 /// @details

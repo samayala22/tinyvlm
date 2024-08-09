@@ -49,6 +49,7 @@ for _, file in ipairs(os.files("tests/*.cpp")) do
     target(name)
         set_kind("binary")
         set_default(false)
+        add_rpathdirs("$ORIGIN")
         add_deps("libvlm")
         add_files("tests/" .. name .. ".cpp")
         add_tests("default")
