@@ -18,7 +18,7 @@ class Backend {
 
         f32 sigma_vatistas = 0.0f;
         Backend(std::unique_ptr<Memory> memory) : memory(std::move(memory)) {}
-        ~Backend();
+        virtual ~Backend();
 
         // Kernels that run for all the meshes
         virtual void lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) = 0;
