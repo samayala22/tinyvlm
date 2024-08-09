@@ -68,7 +68,7 @@ jobs:
 
       - name: Config
         run: |
-          xmake f -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }}
+          xmake f -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --policies=build.sanitizer.address
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4
@@ -82,4 +82,4 @@ jobs:
 
       - name: Test
         run: |
-          xmake test
+          xmake test -j1 -v

@@ -70,6 +70,8 @@ void VLM::alloc_buffers() {
     gamma_wing_delta.alloc(MultiSurface{wing_panels, 1});
     gamma_wake.alloc(MultiSurface{wake_panels, 1});
     local_velocities.alloc(MultiSurface{wing_panels, 3});
+
+    backend->lu_allocate(lhs.d_view());
 }
 
 AeroCoefficients VLM::run(const FlowData& flow) {
@@ -77,7 +79,6 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
     backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
     backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, mesh.verts_wing_init.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
-    backend->lu_allocate(lhs.d_view());
     
     // global initial position
     auto init_pos = translation_matrix<f32>({
@@ -139,6 +140,8 @@ void NLVLM::alloc_buffers() {
     std::vector<SurfaceDims> strip_alpha_layout = wing_panels;
     for (auto& dims : strip_alpha_layout) dims.nc = 1;
     strip_alphas.alloc(MultiSurface{strip_alpha_layout, 1});
+
+    backend->lu_allocate(lhs.d_view());
 }
 
 void strip_alpha_to_vel(const FlowData& flow, View<f32, MultiSurface>& local_velocities, const View<f32, MultiSurface>& strip_alphas) {
@@ -173,7 +176,6 @@ AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
     backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
     backend->memory->fill_f32(MemoryLocation::Host, strip_alphas.h_view().ptr, flow.alpha, strip_alphas.h_view().size());
     backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, mesh.verts_wing_init.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
-    backend->lu_allocate(lhs.d_view());
 
     backend->wake_shed(mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), 0);
     backend->displace_wing(wing_positions, mesh.verts_wing.d_view(), mesh.verts_wing_init.d_view());
