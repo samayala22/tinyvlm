@@ -10,9 +10,8 @@
 #include "vlm_utils.hpp"
 #include "vlm_kinematics.hpp"
 
-#include <iostream>
 #include <cstdio>
-#include <memory>
+#include <cstring>
 #include <algorithm>
 
 using namespace vlm;
