@@ -130,9 +130,9 @@ private:
 };
 
 struct SurfaceDims { // ns major
-    uint64_t nc;
-    uint64_t ns;
-    uint64_t offset;
+    uint64_t nc; // number of chordwise elements
+    uint64_t ns; // number of spanwise elements
+    uint64_t offset; // offset of the surface in the buffer
     uint64_t size() const {return nc * ns;}
 };
 
@@ -140,22 +140,23 @@ class SingleSurface {
     public:
 
         SingleSurface() = default;
-        SingleSurface(const SurfaceDims& surface, uint64_t stride, uint32_t dim) { construct(surface, stride,dim); }
-        ~SingleSurface() = default;
-
-        void construct(const SurfaceDims& surface, uint64_t stride, uint32_t dim) {
+        SingleSurface(const SurfaceDims& surface, uint64_t ld, uint64_t stride, uint32_t dim) {
             _surface = surface;
+            _ld = ld;
             _stride = stride;
             _dim = dim;
         }
+        ~SingleSurface() = default;
 
         std::size_t size() const {return dim() * stride(); } // required
         const SurfaceDims& surface() const {return _surface; }
+        uint64_t ld() const {return _ld; }
         uint64_t stride() const {return _stride; }
         uint64_t dim() const {return _dim; }
 
     private:
         SurfaceDims _surface;
+        uint64_t _ld = 0;
         uint64_t _stride = 0;
         uint32_t _dim = 1;
 };
@@ -197,7 +198,7 @@ class MultiSurface {
 
             return {
                 ptr + offset(wing_id) + i * ns(wing_id) + j,
-                SingleSurface{SurfaceDims{m,n,0}, stride(), dims()}
+                SingleSurface{SurfaceDims{m,n,0}, ns(wing_id), stride(), dims()}
             };
         }
 
