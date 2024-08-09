@@ -39,7 +39,7 @@ int main(int  /*argc*/, char ** /*argv*/) {
     const float a = 1.0f; // wing chord root
     const float b = 5.0f; // half wing span
 
-    const std::vector<std::string> meshes = {"../../../../mesh/elliptic_64x64.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/elliptic_45x45.x"};
     const std::vector<std::string> backends = get_available_backends();
     
     std::vector<f32> test_alphas = {0, 1, 2, 3, 4, 5, 10, 15};
