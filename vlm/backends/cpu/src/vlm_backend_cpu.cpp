@@ -166,7 +166,7 @@ void BackendCPU::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const Vie
     }
 }
 
-void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
+void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
     assert(rhs.layout.stride() == rhs.size()); // single dim
 
@@ -177,7 +177,7 @@ void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const
 
     auto wake_influence = taskflow.for_each_index((u64)0, rhs.layout.stride(), [&] (u64 idx) {
         for (u32 i = 0; i < rhs.layout.surfaces().size(); i++) {
-            ispc::kernel_wake_influence(colloc.ptr + idx, colloc.layout.stride(), normals.ptr + idx, normals.layout.stride(), verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), gamma.ptr + idx, rhs.ptr + idx, sigma_vatistas, iteration);
+            ispc::kernel_wake_influence(colloc.ptr + idx, colloc.layout.stride(), normals.ptr + idx, normals.layout.stride(), verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), gamma_wake.ptr + idx, rhs.ptr + idx, sigma_vatistas, iteration);
         }
     }).name("RHS Wake Influence");
 
@@ -526,41 +526,17 @@ f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<
     return mac / wing_area;
 }
 
-// TODO: change linalg to use std::array as underlying storage
-void linalg_to_flat(const linalg::alias::float4x4& m, float* flat_m) {
-    flat_m[0] = m.x.x;
-    flat_m[1] = m.x.y;
-    flat_m[2] = m.x.z;
-    flat_m[3] = m.x.w;
-    flat_m[4] = m.y.x;
-    flat_m[5] = m.y.y;
-    flat_m[6] = m.y.z;
-    flat_m[7] = m.y.w;
-    flat_m[8] = m.z.x;
-    flat_m[9] = m.z.y;
-    flat_m[10] = m.z.z;
-    flat_m[11] = m.z.w;
-    flat_m[12] = m.w.x;
-    flat_m[13] = m.w.y;
-    flat_m[14] = m.w.z;
-    flat_m[15] = m.w.w;
-}
-
-void BackendCPU::displace_wing(const std::vector<linalg::alias::float4x4>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) {
+void BackendCPU::displace_wing(const View<f32, Tensor<3>>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) {
     // const tiny::ScopedTimer t("Mesh::move");
-    assert(transforms.size() == verts_wing.layout.surfaces().size());
+    assert(transforms.layout.shape(2) == verts_wing.layout.surfaces().size());
     assert(verts_wing.layout.size() == verts_wing_init.layout.size());
-
-    f32 transform[16]; // col major 4x4 matrix
 
     // TODO: parallel for
     for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
         f32* vwing_ptr = verts_wing.ptr + verts_wing.layout.offset(i);
         f32* vwing_init_ptr = verts_wing_init.ptr + verts_wing.layout.offset(i);
 
-        linalg_to_flat(transforms[i], &transform[0]);
-
-        cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, 4, static_cast<i32>(verts_wing.layout.surface(i).size()), 4, 1.0f, &transform[0], 4, vwing_init_ptr, static_cast<i32>(verts_wing_init.layout.stride()), 0.0f, vwing_ptr, static_cast<i32>(verts_wing.layout.stride()));
+        cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, 4, static_cast<i32>(verts_wing.layout.surface(i).size()), 4, 1.0f, transforms.ptr + transforms.layout.stride(2)*i, 4, vwing_init_ptr, static_cast<i32>(verts_wing_init.layout.stride()), 0.0f, vwing_ptr, static_cast<i32>(verts_wing.layout.stride()));
     }
 }
 
