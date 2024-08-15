@@ -23,7 +23,7 @@ class Kinematics {
         m_joints.push_back(std::move(joint));
     }
 
-    tmatrix displacement(float t, u64 n) {
+    tmatrix displacement(float t, u64 n) const {
         fwd::Float t_dual{t, 1.f};
         tmatrix result = linalg::identity;
         for (u64 i = 0; i < n; i++) {
@@ -31,14 +31,14 @@ class Kinematics {
         }
         return result;
     }
-    tmatrix displacement(float t) {return displacement(t, m_joints.size());}
+    tmatrix displacement(float t) const {return displacement(t, m_joints.size());}
 
-    linalg::alias::float3 velocity(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) {
+    linalg::alias::float3 velocity(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) const {
         linalg::vec<fwd::Float,4> new_pt = linalg::mul(transform, vertex);
         return {new_pt.x.grad(), new_pt.y.grad(), new_pt.z.grad()};
     }
 
-    f32 velocity_magnitude(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) {
+    f32 velocity_magnitude(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) const {
         return linalg::length(velocity(transform, vertex));
     }
 
