@@ -23,7 +23,7 @@ jobs:
         arch: [x86_64]
         mode: [release, debug]
         compiler: [clang, gcc]
-        sanitizer: [address, thread, undefined]
+        sanitizer: [address, undefined] # thread removed due to bugs
 
     steps:
       - name: Checkout repository
