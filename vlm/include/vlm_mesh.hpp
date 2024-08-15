@@ -10,7 +10,8 @@
 namespace vlm {
 
 // TODO: move functions into cpp file
-struct Mesh2 {
+class Mesh {
+    public:
     Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing_init; // (nc+1)*(ns+1)*3
     Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing; // (nc+1)*(ns+1)*3
     Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wake; // (nw+1)*(ns+1)*3
@@ -25,7 +26,7 @@ struct Mesh2 {
         0.0f, 0.0f, 0.0f, 1.0f
     }; // Col major order (TODO: move this to kinematic tracker?)
 
-    Mesh2(const Memory& memory) : 
+    Mesh(const Memory& memory) : 
     verts_wing_init(memory), verts_wing(memory), verts_wake(memory),
     normals(memory), colloc(memory), area(memory) {};
     

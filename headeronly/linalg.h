@@ -89,6 +89,25 @@ namespace linalg
         vec<T,4>                    row(int i) const                { return {x[i], y[i], z[i], w[i]}; }
         const V &                   operator[] (int j) const        { return (&x)[j]; }
         V &                         operator[] (int j)              { return (&x)[j]; }
+        void                        store(T* ptr, std::size_t ld) const {
+            static_assert(M == 4);
+            ptr[0*ld+0] = x.x;
+            ptr[0*ld+1] = x.y;
+            ptr[0*ld+2] = x.z;
+            ptr[0*ld+3] = x.w;
+            ptr[1*ld+0] = y.x;
+            ptr[1*ld+1] = y.y;
+            ptr[1*ld+2] = y.z;
+            ptr[1*ld+3] = y.w;
+            ptr[2*ld+0] = z.x;
+            ptr[2*ld+1] = z.y;
+            ptr[2*ld+2] = z.z;
+            ptr[2*ld+3] = z.w;
+            ptr[3*ld+0] = w.x;
+            ptr[3*ld+1] = w.y;
+            ptr[3*ld+2] = w.z;
+            ptr[3*ld+3] = w.w;
+        } // todo: generalize, only works for 4x4
     };
 
     // Type traits for a binary operation involving linear algebra types, used for SFINAE on templated functions and operator overloads

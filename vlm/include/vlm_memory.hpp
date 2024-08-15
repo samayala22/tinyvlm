@@ -89,7 +89,7 @@ public:
     void to_host() {
         static_assert(is_host::value && is_device::value);
         if (!memory.is_unified()) 
-            memory.copy(MemoryTransfer::DeviceToHost, _host(), _device(), size_bytes());
+            memory.copy(MemoryTransfer::DeviceToHost, _host.ptr, _device.ptr, size_bytes());
     }
 
     std::size_t size() const { return _host.size(); }
@@ -233,6 +233,32 @@ class Matrix {
         uint64_t _m = 0;
         uint64_t _n = 0;
         uint64_t _stride = 0; // leading dimension
+};
+
+template<int Dim>
+class Tensor {        
+    public:
+        Tensor() = default;
+        Tensor(const std::array<uint64_t, Dim>& shape, const std::array<uint64_t, Dim>& strides) : _shape(shape), _strides(strides) {}
+        Tensor(const std::array<uint64_t, Dim>& shape) : _shape(shape) { default_strides(); }
+        std::size_t size() const {
+            std::size_t size = 1;
+            for (std::size_t i = 0; i < Dim; i++) size *= _shape[i];
+            return size;
+        }
+
+        uint64_t stride(int dim) const {return _strides[dim];}
+        uint64_t shape(int dim) const {return _shape[dim];}
+        
+    private:
+        constexpr void default_strides() {
+            _strides[0] = 1;
+            for (std::size_t i = 1; i < Dim; ++i) {
+                _strides[i] = _strides[i - 1] * _shape[i - 1];
+            }
+        }
+        std::array<uint64_t, Dim> _shape;
+        std::array<uint64_t, Dim> _strides;
 };
 
 } // namespace vlm

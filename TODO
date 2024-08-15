@@ -2,5 +2,7 @@
 - Consider calling delta_gamma directly from lu_solve
 - Get rid of exceptions
 - All backend functions should return a tf::Task so that we can build a single taskflow graph
+- Retire Mesh object as it is simply not generic enough, all geometry data is simulation specific
+
 // store kinematics in the backend ??
 // store flow properties in the backend ??
