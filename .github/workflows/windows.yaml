@@ -23,6 +23,7 @@ jobs:
         arch: [x64]
         mode: [release, debug]
         compiler: [msvc]
+        sanitizer: [address]
 
     steps:
       - name: Checkout repository
@@ -57,7 +58,7 @@ jobs:
       - name: Set cache env vars
         run: |
           echo "CACHE_PATH=${{ env.XMAKE_GLOBALDIR }}\.xmake\packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "CACHE_KEY=Windows-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ steps.dep_hash.outputs.hash }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "CACHE_KEY=Windows-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ matrix.sanitizer }}-${{ steps.dep_hash.outputs.hash }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # Cache xmake dependencies
       - name: Restore cached xmake dependencies
@@ -68,7 +69,7 @@ jobs:
 
       - name: Config
         run: |
-          xmake f -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --policies=build.sanitizer.address
+          xmake f -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --policies=build.sanitizer.${{ matrix.sanitizer }}
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4
