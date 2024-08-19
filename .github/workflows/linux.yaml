@@ -63,7 +63,7 @@ jobs:
       - name: Set cache env vars
         run: |
           echo "CACHE_PATH=${{ env.XMAKE_GLOBALDIR }}/.xmake/packages" >> $GITHUB_ENV
-          echo "CACHE_KEY=Linux-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ steps.dep_hash.outputs.hash }}" >> $GITHUB_ENV
+          echo "CACHE_KEY=Linux-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ matrix.sanitizer }}-${{ steps.dep_hash.outputs.hash }}" >> $GITHUB_ENV
 
       # Cache xmake dependencies
       - name: Restore cached xmake dependencies
