@@ -5,7 +5,7 @@ namespace vlm {
 
 using tmatrix = linalg::mat<fwd::Float,4,4>;
 
-linalg::alias::float4x4 dual_to_float(const tmatrix& m) {
+inline linalg::alias::float4x4 dual_to_float(const tmatrix& m) {
     return {
         {m.x.x.val(), m.x.y.val(), m.x.z.val(), m.x.w.val()},
         {m.y.x.val(), m.y.y.val(), m.y.z.val(), m.y.w.val()},

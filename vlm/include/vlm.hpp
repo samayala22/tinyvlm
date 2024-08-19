@@ -84,8 +84,8 @@ class UVLM final: public Simulation {
         ~UVLM() = default;
         void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final);
     
-        // Mes
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing_pos; // (nc+1)*(ns+1)*3
+        // Mesh
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing_pos{*backend->memory}; // (nc+1)*(ns+1)*3
         Buffer<f32, MemoryLocation::Host, MultiSurface> colloc_pos; // (nc)*(ns)*3
 
         // Data
@@ -96,9 +96,11 @@ class UVLM final: public Simulation {
         Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev; // nc*ns
         Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta; // nc*ns
         Buffer<f32, MemoryLocation::HostDevice, MultiSurface> velocities; // ns*nc*3
-        Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms;
+        Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms; // 4*4*nb_meshes
         std::vector<f32> vec_t; // timesteps
         std::vector<f32> local_dt; // per mesh dt (pre reduction)
+        std::vector<u32> condition0;
+
     private:
         void alloc_buffers();
 };
