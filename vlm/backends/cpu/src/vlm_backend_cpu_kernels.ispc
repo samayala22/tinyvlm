@@ -133,12 +133,14 @@ export void kernel_influence(uniform u64 m, uniform f32* uniform lhs, uniform f3
 /// @param v_ld leading dimension of v (for each 3D dimension)
 /// @param v_m number of wake vertices chordwise
 /// @param v_n number of wake vertices spanwise
-/// @param gamma ptr to gamma value of influenced panel
+/// @param gamma ptr to begin of wake gamma
 /// @param rhs ptr to rhs  value of influenced panel
 /// @param sigma vortex core model factor
 /// @param iteration current iteration number
 export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 colloc_ld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_m, uniform u64 v_n, uniform f32* uniform gamma, uniform f32* uniform rhs, uniform f32 sigma, uniform u32 iteration) {
     const uniform float3 colloc_influenced = {colloc[0*colloc_ld], colloc[1*colloc_ld], colloc[2*colloc_ld]};
+
+    // print("Colloc: % % %\n", colloc_influenced.x, colloc_influenced.y, colloc_influenced.z);
 
     float3 induced_vel = {0.0f, 0.0f, 0.0f};
 
@@ -155,7 +157,12 @@ export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 collo
             const float3 vertex1 = {v[0*v_ld + v1], v[1*v_ld + v1], v[2*v_ld + v1]};
             const float3 vertex2 = {v[0*v_ld + v2], v[1*v_ld + v2], v[2*v_ld + v2]};
             const float3 vertex3 = {v[0*v_ld + v3], v[1*v_ld + v3], v[2*v_ld + v3]};
-        
+
+            // print("Vertex 0: % % %\n", vertex0.x, vertex0.y, vertex0.z);
+            // print("Vertex 1: % % %\n", vertex1.x, vertex1.y, vertex1.z);
+            // print("Vertex 2: % % %\n", vertex2.x, vertex2.y, vertex2.z);
+            // print("Vertex 3: % % %\n", vertex3.x, vertex3.y, vertex3.z);
+
             float3 ind = {0.0f, 0.0f, 0.0f};
             kernel_symmetry(ind, colloc_influenced, vertex0, vertex1, sigma);
             kernel_symmetry(ind, colloc_influenced, vertex1, vertex2, sigma);

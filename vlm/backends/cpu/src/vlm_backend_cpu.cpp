@@ -166,6 +166,7 @@ void BackendCPU::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const Vie
     }
 }
 
+// TODO: this doesnt work with multi-mesh rn
 void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
     assert(rhs.layout.stride() == rhs.size()); // single dim
@@ -175,9 +176,9 @@ void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const
     auto begin = taskflow.placeholder();
     auto end = taskflow.placeholder();
 
-    auto wake_influence = taskflow.for_each_index((u64)0, rhs.layout.stride(), [&] (u64 idx) {
+    auto wake_influence = taskflow.for_each_index((u64)0, (u64)rhs.size(), [&] (u64 idx) {
         for (u32 i = 0; i < rhs.layout.surfaces().size(); i++) {
-            ispc::kernel_wake_influence(colloc.ptr + idx, colloc.layout.stride(), normals.ptr + idx, normals.layout.stride(), verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), gamma_wake.ptr + idx, rhs.ptr + idx, sigma_vatistas, iteration);
+            ispc::kernel_wake_influence(colloc.ptr + idx, colloc.layout.stride(), normals.ptr + idx, normals.layout.stride(), verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), gamma_wake.ptr + gamma_wake.layout.offset(i), rhs.ptr + idx, sigma_vatistas, iteration);
         }
     }).name("RHS Wake Influence");
 
@@ -297,56 +298,78 @@ f32 BackendCPU::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing,
     return cl;
 }
 
-// f32 BackendCPU::coeff_unsteady_cl(const linalg::alias::float3& freestream, const SoA_3D_t<f32>& vel, f32 dt, const f32 area, const u64 j, const u64 n) {
-//     assert(n > 0);
-//     assert(j >= 0 && j+n <= dd_mesh->ns);
+f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const View<f32, SingleSurface>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
+    f32 cl = 0.0f;
+    const f32 rho = 1.0f; // TODO: remove hardcoded rho
+    const linalg::alias::float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
+    const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
 
-//     const u64 nc = dd_mesh->nc;
-//     const u64 ns = dd_mesh->ns;
-//     const u64 nw = dd_mesh->nw;
-//     const u64 nwa = dd_mesh->nwa;
-//     const u64 nb_panels_wing = nc * ns;
-    
-//     f32 cl = 0.0f;
-//     const f32 rho = 1.0f; // TODO: remove hardcoded rho
-//     const linalg::alias::float3 span_axis{dd_mesh->frame + 4};
-//     const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
+    const u64 nc = gamma_delta.layout.surface().nc;
+    const u64 ns = gamma_delta.layout.surface().ns;
+    for (u64 i = 0; i < nc; i++) {
+        for (u64 j = 0; j < ns; j++) {
+            const u64 idx = i * ns + j; // linear index
 
-//     for (u64 u = 0; u < nc; u++) {
-//         for (u64 v = j; v < j + n; v++) {
-//             const u64 li = u * ns + v; // linear index
+            linalg::alias::float3 V{
+                velocities[0*velocities.layout.stride() + idx],
+                velocities[1*velocities.layout.stride() + idx],
+                velocities[2*velocities.layout.stride() + idx]
+            }; // local velocity (freestream + displacement vel)
 
-//             linalg::alias::float3 V{vel.x[li], vel.y[li], vel.z[li]}; // local velocity (freestream + displacement vel)
+            const u64 v0 = (i+0) * verts_wing.layout.ld() + j;
+            const u64 v1 = (i+0) * verts_wing.layout.ld() + j + 1;
 
-//             const linalg::alias::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
-//             const linalg::alias::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
-//             const linalg::alias::float3 normal{*PTR_MESH_N(dd_mesh, u, v, 0), *PTR_MESH_N(dd_mesh, u, v, 1), *PTR_MESH_N(dd_mesh, u, v, 2)}; // normal
+            const linalg::alias::float3 vertex0{verts_wing[0*verts_wing.layout.stride() + v0], verts_wing[1*verts_wing.layout.stride() + v0], verts_wing[2*verts_wing.layout.stride() + v0]}; // upper left
+            const linalg::alias::float3 vertex1{verts_wing[0*verts_wing.layout.stride() + v1], verts_wing[1*verts_wing.layout.stride() + v1], verts_wing[2*verts_wing.layout.stride() + v1]}; // upper right
+            const linalg::alias::float3 normal{normals[0*normals.layout.stride() + idx], normals[1*normals.layout.stride() + idx], normals[2*normals.layout.stride() + idx]}; // normal
 
-//             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
-//             const f32 gamma_dt = (dd_data->gamma[li] - dd_data->gamma_prev[li]) / dt; // backward difference
+            linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
+            const f32 gamma_dt = (gamma[idx] - gamma_prev[idx]) / dt; // backward difference
 
-//             // Joukowski method
-//             force += rho * dd_data->delta_gamma[li] * linalg::cross(V, v1 - v0);
-//             force += rho * gamma_dt * dd_mesh->area[li] * normal;
+            // Joukowski method
+            force += rho * gamma_delta[idx] * linalg::cross(V, vertex1 - vertex0); // steady contribution
+            force += rho * gamma_dt * areas[idx] * normal; // unsteady contribution
 
-//             // Katz Plotkin method
-//             // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
-//             // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
-//             // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
-//             // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
-//             // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
-//             // delta_p += gamma_dt;
-//             // force = (delta_p * mesh.area[li]) * normal;
+            // Katz Plotkin method
+            // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
+            // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
+            // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
+            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
+            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
+            // delta_p += gamma_dt;
+            // force = (delta_p * mesh.area[li]) * normal;
 
-//             // force /= linalg::length2(freestream);
+            // force /= linalg::length2(freestream);
             
-//             cl += linalg::dot(force, lift_axis);
-//         }
-//     }
-//     cl /= 0.5f * rho * linalg::length2(freestream) * area;
+            cl += linalg::dot(force, lift_axis);
+        }
+    }
+    cl /= 0.5f * rho * linalg::length2(freestream) * area;
 
-//     return cl;
-// }
+    return cl;
+}
+
+f32 BackendCPU::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, const linalg::alias::float3& freestream, f32 dt) {
+    // const tiny::ScopedTimer timer("Compute CL");
+    f32 cl = 0.0f;
+    f32 total_area = 0.0f;
+    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
+        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
+        const auto areas_local = areas.layout.subview(areas.ptr, i);
+        const auto gamma_delta_local = gamma_wing_delta.layout.subview(gamma_wing_delta.ptr, i);
+        const auto gamma_wing_local = gamma_wing.layout.subview(gamma_wing.ptr, i);
+        const auto gamma_wing_prev_local = gamma_wing_prev.layout.subview(gamma_wing_prev.ptr, i);
+        const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
+        const auto normals_local = normals.layout.subview(normals.ptr, i);
+
+        f32 area_local = mesh_area(areas_local);
+        const f32 wing_cl = coeff_unsteady_cl_single(verts_wing_local, gamma_delta_local, gamma_wing_local, gamma_wing_prev_local, velocities_local, areas_local, normals_local, freestream, dt, area_local);
+        cl += wing_cl * area_local;
+        total_area += area_local;
+    }
+    cl /= total_area;
+    return cl;
+}
 
 // linalg::alias::float3 BackendCPU::coeff_steady_cm(
 //     const FlowData& flow,

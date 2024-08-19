@@ -39,10 +39,9 @@ void print_buffer(const T* start, u64 size) {
 }
 
 int main() {
-    const u64 ni = 56;
+    const u64 ni = 20;
     const u64 nj = 5;
     // vlm::Executor::instance(1);
-    //const std::vector<std::string> meshes = {"../../../../mesh/rectangular_5x10.x"};
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
     const std::vector<std::string> backends = get_available_backends();
 
@@ -52,10 +51,10 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 4.0f;
+    const f32 cycles = 10.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
-    const f32 k = 3.0; // reduced frequency
+    const f32 k = 0.5; // reduced frequency
     const f32 omega = k * 2.0f * u_inf / (2*b);
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
@@ -79,35 +78,35 @@ int main() {
     // });
 
     // Periodic pitching
-    kinematics.add([=](const fwd::Float& t) {
-        return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
-    });
-    const f32 to_rad = PI_f / 180.0f;
-    kinematics.add([=](const fwd::Float& t) {
-        return rotation_matrix<fwd::Float>({0.25f, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_rad * fwd::sin(omega * t));
-    });
+    // kinematics.add([=](const fwd::Float& t) {
+    //     return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
+    // });
+    // const f32 to_rad = PI_f / 180.0f;
+    // kinematics.add([=](const fwd::Float& t) {
+    //     return rotation_matrix<fwd::Float>({0.25f, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_rad * fwd::sin(omega * t));
+    // });
     
     // Sudden acceleration
-    // const f32 alpha = to_radians(5.0f);
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
-    //         -u_inf*cos(alpha)*t,
-    //         0.0f,
-    //         -u_inf*sin(alpha)*t
-    //     });
-    // });
-    // kinematics.add([=](f32 t) {
-    //     return linalg::translation_matrix(linalg::alias::float3{
+    const f32 alpha = to_radians(5.0f);
+    kinematics.add([=](const fwd::Float& t) {
+        return translation_matrix<fwd::Float>({
+            -u_inf*std::cos(alpha)*t,
+            0.0f,
+            -u_inf*std::sin(alpha)*t
+        });
+    });
+    // kinematics.add([=](const fwd::Float& t) {
+    //     return translation_matrix<fwd::Float>({
     //         -u_inf*t,
     //         0.0f,
     //         0.0f
     //     });
     // });
 
-    // for (const auto& [mesh_name, backend_name] : solvers) {
-    //     UVLM simulation{backend_name, {mesh_name}};
-    //     simulation.run({kinematics}, {initial_pose}, t_final);
-    // }
+    for (const auto& [mesh_name, backend_name] : solvers) {
+        UVLM simulation{backend_name, {mesh_name}};
+        simulation.run({kinematics}, {initial_pose}, t_final);
+    }
 
     return 0;
 }

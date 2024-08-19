@@ -191,6 +191,11 @@ class MultiSurface {
         uint64_t offset(uint32_t wing_id) const {return _surfaces[wing_id].offset; }
         
         template<typename T>
+        View<T, SingleSurface> subview(T* ptr, uint32_t wing_id) const {
+            return subview(ptr, wing_id, 0, nc(wing_id), 0, ns(wing_id));
+        }
+        
+        template<typename T>
         View<T, SingleSurface> subview(T* ptr, uint32_t wing_id, uint64_t i, uint64_t m, uint64_t j, uint64_t n) const {
             assert(wing_id < _surfaces.size());
             assert(i + m <= nc(wing_id));
