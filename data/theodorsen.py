@@ -57,7 +57,7 @@ a = ar / c # full span
 pitch_axis = -0.5 # leading edge
 
 # Theodorsen numerical simulation param
-cycles = 10 # number of periods
+cycles = 5 # number of periods
 nb_pts = 1000
 cycle_idx = int((1 - 1 / cycles) * nb_pts - 1)
 
@@ -129,6 +129,16 @@ for file in files:
     print(f"Freq: {k}, Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
 axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
+
+jl_t = []
+jl_cl = []
+with open("build/windows/x64/release/jl_cl.txt", "r") as f:
+    for line in f:
+        t, cl = line.split()
+        jl_t.append(float(t))
+        jl_cl.append(float(cl))
+
+axs["time"].plot(jl_t, jl_cl, label="VortexLattice.jl")
 
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')

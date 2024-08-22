@@ -35,14 +35,4 @@ static const f32 EPS_sqrt_f = std::sqrt(EPS_f);
 static const f64 EPS_cbrt_d = std::cbrt(EPS_d);
 static const f32 EPS_cbrt_f = std::cbrt(EPS_f);
 
-// Optimized n power function that uses template folding optimisations
-// to generate a series of mul instructions
-// https://godbolt.org/z/4boYoM3e8
-template <int N, typename T>
-inline T pow(T x) {
-    T result = x;
-    for (int i = 1; i < N; ++i) result *= x;
-    return result;
-}
-
 } // namespace vlm
