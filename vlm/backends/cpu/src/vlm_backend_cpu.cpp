@@ -22,7 +22,6 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
-
 /// @brief Memory manager implementation for the CPU backend
 class MemoryCPU final : public Memory {
     public:
