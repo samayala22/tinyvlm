@@ -1,8 +1,10 @@
 #include "vlm_backend_cuda.hpp"
 #include "vlm_backend_cuda_kernels.cuh"
+#include "vlm_executor.hpp"
 
 #include "tinytimer.hpp"
 
+#include <taskflow/cuda/cudaflow.hpp>
 #include <cusolverDn.h>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -168,142 +170,90 @@ BackendCUDA::~BackendCUDA() {
     CtxManager::getInstance().destroy();
 }
 
-#define RCUT 1e-10f
-#define RCUT2 1e-5f
-#define PI_f 3.141593f
-#define BlockSizeX 32
-#define BlockSizeY 16
-
-__device__ inline float3 kernel_biosavart(float3 colloc, const float3 vertex1, const float3 vertex2, const float sigma) {
-    float3 r0 = vertex2 - vertex1;
-    float3 r1 = colloc - vertex1;
-    float3 r2 = colloc - vertex2;
-    // Katz Plotkin, Low speed Aero | Eq 10.115
-    float3 r1r2cross = cross(r1, r2);
-    float r1_norm = length(r1);
-    float r2_norm = length(r2);
-    float square = length2(r1r2cross);
+void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) {
+    assert(gamma_delta.layout.dims() == 1);
+    assert(gamma.layout.dims() == 1);
     
-    if ((square<RCUT) || (r1_norm<RCUT2) || (r2_norm<RCUT2)) {
-        float3 res = {0.0f, 0.0f, 0.0f};
-        return res;
-    }
-
-    float smoother = sigma*sigma*length2(r0);
-
-    float coeff = (dot(r0,r1)*r2_norm - dot(r0, r2)*r1_norm) / (4.0f*PI_f*sqrt(square*square + smoother*smoother)*r1_norm*r2_norm);
-    return r1r2cross * coeff;
-}
-
-__device__ inline void kernel_symmetry(float3* inf, float3 colloc, const float3 vertex0, const float3 vertex1, const float sigma) {
-    float3 induced_speed = kernel_biosavart(colloc, vertex0, vertex1, sigma);
-    inf->x += induced_speed.x;
-    inf->y += induced_speed.y;
-    inf->z += induced_speed.z;
-    colloc.y = -colloc.y; // wing symmetry
-    float3 induced_speed_sym = kernel_biosavart(colloc, vertex0, vertex1, sigma);
-    inf->x += induced_speed_sym.x;
-    inf->y -= induced_speed_sym.y;
-    inf->z += induced_speed_sym.z;
-}
-
-// start: starting linear index
-// length: number of panels (columns) to process (from start to start+length)
-// offset: offset between the linear index for the influenced panel and the influencing panel (used when influencing panel is part of the wake)
-// Kernel achieves 32% of theoretical peak performance with 3.32 IPC and 85% of compute throughput
-__global__ void kernel_influence_cuda(
-    const MeshProxy* m,
-    float* d_lhs,
-    const uint64_t start, const uint64_t length, const uint64_t offset, const float sigma) {
-
-    u64 j = blockIdx.y * blockDim.y + threadIdx.y;
-    u64 i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (j >= length || i >= m->nb_panels) return;
-
-    __shared__ float sharedCollocX[BlockSizeX];
-    __shared__ float sharedCollocY[BlockSizeX];
-    __shared__ float sharedCollocZ[BlockSizeX];
-    __shared__ float sharedNormalX[BlockSizeX];
-    __shared__ float sharedNormalY[BlockSizeX];
-    __shared__ float sharedNormalZ[BlockSizeX];
-
-    // Load memory along warp onto the shared memory
-    if (threadIdx.y == 0) {
-        // Load colloc and normal data into shared memory
-        sharedCollocX[threadIdx.x] = m->colloc.x[i];
-        sharedCollocY[threadIdx.x] = m->colloc.y[i];
-        sharedCollocZ[threadIdx.x] = m->colloc.z[i];
-        sharedNormalX[threadIdx.x] = m->normal.x[i];
-        sharedNormalY[threadIdx.x] = m->normal.y[i];
-        sharedNormalZ[threadIdx.x] = m->normal.z[i];
-    }
-
-    __syncthreads(); // Synchronize to ensure all shared mem data is loaded before proceeding
-
-    float3 inf{0.0f, 0.0f, 0.0f};
-    {
-        const u64 v0 = (start + offset + j) + (start + offset + j) / m->ns;
-        const u64 v1 = v0 + 1;
-        const u64 v3 = v0 + m->ns + 1;
-        const u64 v2 = v3 + 1;
+    for (const auto& surf : gamma_delta.layout.surfaces())  {
+        f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
+        const f32* s_gamma = gamma.ptr + surf.offset;
+        memory->copy(MemoryTransfer::DeviceToDevice, s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
         
-        // Tried to put them in shared memory but got worse L1 hit rate. 
-        const float3 vertex0{m->v.x[v0], m->v.y[v0], m->v.z[v0]};
-        const float3 vertex1{m->v.x[v1], m->v.y[v1], m->v.z[v1]};
-        const float3 vertex2{m->v.x[v2], m->v.y[v2], m->v.z[v2]};
-        const float3 vertex3{m->v.x[v3], m->v.y[v3], m->v.z[v3]};
+        constexpr Dim3<u32> block{32, 32};
+        const Dim3<u64> n{surf.nc-1, surf.ns};
+        kernel_gamma_delta<block><<<grid_size(block, n)(), block()>>>(n.x, n.y, s_gamma_delta + surf.ns, s_gamma + surf.ns);
+        CHECK_CUDA(cudaGetLastError());
+    };
 
-        // No bank conflicts as each thread reads a different index
-        const float3 colloc = {sharedCollocX[threadIdx.x], sharedCollocY[threadIdx.x], sharedCollocZ[threadIdx.x]};
+    // tf::Taskflow taskflow;
 
-        kernel_symmetry(&inf, colloc, vertex0, vertex1, sigma);
-        kernel_symmetry(&inf, colloc, vertex1, vertex2, sigma);
-        kernel_symmetry(&inf, colloc, vertex2, vertex3, sigma);
-        kernel_symmetry(&inf, colloc, vertex3, vertex0, sigma);
-    }
-    {
-        const float3 normal = {sharedNormalX[threadIdx.x], sharedNormalY[threadIdx.x], sharedNormalZ[threadIdx.x]};
-        d_lhs[(start + j) * m->nb_panels + i] += dot(inf, normal);
-    }
+    // auto kernels = taskflow.emplace([&](tf::cudaFlow& cf){
+    //     for (const auto& surf : gamma_delta.layout.surfaces())  {
+    //         f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
+    //         const f32* s_gamma = gamma.ptr + surf.offset;
+    //         tf::cudaTask copy = cf.copy(s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
+                
+    //         constexpr Dim3<u32> block{32, 32};
+    //         const Dim3<u64> n{surf.nc-1, surf.ns};
+    //         tf::cudaTask kernel = cf.kernel(grid_size(block, n), block, 0, kernel_gamma_delta, n.x, n.y, s_gamma_delta + surf.ns, s_gamma + surf.ns).succede(copy);
+    //     };
+    // });
+    // auto check = taskflow.emplace([&](){
+    //     CHECK_CUDA(cudaGetLastError());
+    // }).succede(kernels);
+
+    // Executor::get().run(taskflow).wait();
 }
 
-void BackendCUDA::lhs_assemble(const FlowData& flow) {
-    tiny::ScopedTimer timer("LHS");
-    // Copy the latest mesh that has been corrected for the aoa
-    u64 npt = mesh.nb_panels_total();
-    u64 nvt = mesh.nb_vertices_total();
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.v.x, mesh.v.x.data(), nvt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.v.y, mesh.v.y.data(), nvt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.v.z, mesh.v.z.data(), nvt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.colloc.x, mesh.colloc.x.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.colloc.y, mesh.colloc.y.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.colloc.z, mesh.colloc.z.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.normal.x, mesh.normal.x.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.normal.y, mesh.normal.y.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpyAsync(h_mesh.normal.z, mesh.normal.z.data(), npt * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaDeviceSynchronize());
-    CHECK_CUDA(cudaMemcpy(d_mesh, &h_mesh, sizeof(MeshProxy), cudaMemcpyHostToDevice));
+/// @brief Assemble the left hand side matrix
+/// @details
+/// Assemble the left hand side matrix of the VLM system. The matrix is
+/// assembled in column major order. The matrix is assembled for each lifting
+/// surface of the system
+/// @param lhs left hand side matrix
+/// @param colloc collocation points for all surfaces
+/// @param normals normals of all surfaces
+/// @param verts_wing vertices of the wing surfaces
+/// @param verts_wake vertices of the wake surfaces
+/// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
+void BackendCPU::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) {    tiny::ScopedTimer timer("LHS");
+    assert(condition.size() == colloc.layout.surfaces().size());
+    std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
 
-    dim3 block_size(BlockSizeX, BlockSizeY);
-    dim3 grid_size(get_grid_size(mesh.nb_panels_wing(), block_size.x), get_grid_size((mesh.nc - 1) * mesh.ns, block_size.y));
-    kernel_influence_cuda<<<grid_size, block_size>>>(d_mesh, d_lhs, 0, (mesh.nc - 1) * mesh.ns, 0, sigma_vatistas);
-    
-    // cudaError_t error = cudaGetLastError();
-    // if (error != cudaSuccess) {
-    //     fprintf(stderr, "CUDA Error after kernel launch: %s\n", cudaGetErrorString(error));
-    // }
-    
-    // CHECK_CUDA(cudaDeviceSynchronize());
+    for (u32 i = 0; i < colloc.layout.surfaces().size(); i++) {
+        f32* lhs_section = lhs.ptr + colloc.layout.offset(i) * lhs.layout.stride();
+        
+        f32* vwing_section = verts_wing.ptr + verts_wing.layout.offset(i);
+        f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(i);
+        const u64 zero = 0;
+        const u64 end_wing = (colloc.layout.nc(i) - 1) * colloc.layout.ns(i);
+        
+        constexpr Dim3<u32> block{32, 16};
+        const Dim3<u64> n{lhs.layout.m(), end_wing};
+        // wing pass
+        kernel_influence<block><<<grid_size(block, n)(), block()>>>(n.x, n.y, lhs_section, colloc.ptr, colloc.layout.stride(), vwing_section, verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
+        CHECK_CUDA(cudaGetLastError());
 
-    dim3 grid_size2(get_grid_size(mesh.nb_panels_wing(), block_size.x), get_grid_size(mesh.ns, block_size.y));
-    for (u64 offset = 0; offset < mesh.current_nw + 1; offset++) {
-        kernel_influence_cuda<<<grid_size2, block_size>>>(d_mesh, d_lhs, (mesh.nc - 1) * mesh.ns, mesh.ns, offset*mesh.ns, sigma_vatistas);
-        // cudaError_t error = cudaGetLastError();
-        // if (error != cudaSuccess) {
-        //     fprintf(stderr, "CUDA Error after kernel launch: %s\n", cudaGetErrorString(error));
-        // }
-        CHECK_CUDA(cudaDeviceSynchronize());
+        const Dim3<u64> n2{lhs.layout.m(), colloc.layout.ns(i)};
+        // last wing row
+        kernel_influence<block><<<grid_size(block, n2)(), block()>>>(n2.x, n2.y, lhs_section + end_wing * lhs.layout.stride(), colloc.ptr, colloc.layout.stride(), vwing_section + (verts_wing.layout.nc(i)-1)*verts_wing.layout.ns(i), verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
+        CHECK_CUDA(cudaGetLastError());
+
+        while (condition[i] < iteration) {
+            const Dim3<u64> n3{lhs.layout.m(), colloc.layout.ns(i)};
+            // each wake row
+            kernel_influence<block><<<grid_size(block, n3)(), block()>>>(
+                n3.x,
+                n3.y,
+                lhs_section + end_wing * lhs.layout.stride(),
+                colloc.ptr, colloc.layout.stride(),
+                vwake_section + (verts_wake.layout.nc(i) - condition[i] - 2) * verts_wake.layout.ns(i),
+                verts_wake.layout.stride(), verts_wake.layout.ns(i), 
+                normals.ptr, normals.layout.stride(),
+                sigma_vatistas
+            );
+            condition[i]++;
+        }
     }
 }
 
