@@ -1,5 +1,5 @@
-#include "vlm_backend_cpu.hpp"
 #include "vlm_backend_cuda.hpp"
+#include "vlm_backend_cuda_kernels.cuh"
 
 #include "tinytimer.hpp"
 
@@ -106,77 +106,66 @@ private:
     ~CtxManager() = default;
 };
 
-BackendCUDA::BackendCUDA(Mesh& mesh) : default_backend(mesh), Backend(mesh) {
+/// @brief Memory manager implementation for the CPU backend
+class MemoryCUDA final : public Memory {
+    public:
+        MemoryCUDA() : Memory(false) {}
+        ~MemoryCUDA() = default;
+        void* alloc(MemoryLocation location, std::size_t size) const override {
+            void* res = nullptr;
+            switch (location) {
+                case MemoryLocation::Device: CHECK_CUDA(cudaMalloc(&res, size)); break;
+                case MemoryLocation::Host: CHECK_CUDA(cudaMallocHost(&res, size)); break;
+            }
+            return res;
+        }
+
+        void free(MemoryLocation location, void* ptr) const override {
+            switch (location) {
+                case MemoryLocation::Device: CHECK_CUDA(cudaFree(ptr)); break;
+                case MemoryLocation::Host: CHECK_CUDA(cudaFreeHost(ptr)); break;
+            }
+        }
+
+        void copy(MemoryTransfer transfer, void* dst, const void* src, std::size_t size) const override {
+            switch (transfer) {
+                case MemoryTransfer::HostToDevice: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyHostToDevice)); break;
+                case MemoryTransfer::DeviceToHost: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost)); break;
+                case MemoryTransfer::HostToHost: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyHostToHost)); break;
+                case MemoryTransfer::DeviceToDevice: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToDevice)); break;
+            }
+        }
+        void fill_f32(MemoryLocation location, float* ptr, float value, std::size_t size) const override {
+            switch (location) {
+                case MemoryLocation::Device: {
+                    constexpr Dim3<u32> block{1024};
+                    const Dim3<u64> n{size};
+                    kernel_fill_f32<block><<<grid_size(block, n)(), block()>>>(ptr, value, size);
+                    CHECK_CUDA(cudaGetLastError());
+                    break;
+                }
+                case MemoryLocation::Host: {
+                    std::fill(ptr, ptr + size, value);
+                    break;
+                }
+            }
+        };
+};
+
+BackendCUDA::BackendCUDA() : Backend(std::make_unique<MemoryCUDA>())  {
     printCudaInfo();
-    auto& ctx = CtxManager::getInstance();
-    ctx.create();
-
-    u64 n = mesh.nb_panels_wing();
-    u64 npt = mesh.nb_panels_total();
-    u64 nvt = mesh.nb_vertices_total();
-    
-    h_mesh.nb_panels = n;
-    h_mesh.ns = mesh.ns;
-    h_mesh.nc = mesh.nc;
-
-    // Allocate device memory
-    CHECK_CUDA(cudaMalloc((void**)&d_lhs, n*n * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&d_rhs, n * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&d_gamma, n * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&d_delta_gamma, n * sizeof(float)));
-
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.v.x, nvt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.v.y, nvt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.v.z, nvt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.colloc.x, npt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.colloc.y, npt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.colloc.z, npt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.normal.x, npt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.normal.y, npt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&h_mesh.normal.z, npt * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&d_mesh, sizeof(MeshProxy)));
+    CtxManager::getInstance().create();
 
     // Prepare LU solver buffers
-    int bufsize = 0;
-    CHECK_CUSOLVER(cusolverDnSgetrf_bufferSize(ctx.cusolver(), n, n, d_lhs, n, &bufsize));
-    CHECK_CUDA(cudaMalloc((void**)&d_solver_info, sizeof(int)));
-    CHECK_CUDA(cudaMalloc((void**)&d_solver_buffer, sizeof(float) * bufsize));
-    CHECK_CUDA(cudaMalloc((void**)&d_solver_ipiv, sizeof(int) * n));
+    // int bufsize = 0;
+    // CHECK_CUSOLVER(cusolverDnSgetrf_bufferSize(ctx.cusolver(), n, n, d_lhs, n, &bufsize));
+    // CHECK_CUDA(cudaMalloc((void**)&d_solver_info, sizeof(int)));
+    // CHECK_CUDA(cudaMalloc((void**)&d_solver_buffer, sizeof(float) * bufsize));
+    // CHECK_CUDA(cudaMalloc((void**)&d_solver_ipiv, sizeof(int) * n));
 }
 
 BackendCUDA::~BackendCUDA() {
-    auto& ctx = CtxManager::getInstance();
-    ctx.destroy();
-
-    CHECK_CUDA(cudaFree(d_lhs));
-    CHECK_CUDA(cudaFree(d_rhs));
-    CHECK_CUDA(cudaFree(d_gamma));
-    CHECK_CUDA(cudaFree(d_delta_gamma));
-    CHECK_CUDA(cudaFree(h_mesh.v.x));
-    CHECK_CUDA(cudaFree(h_mesh.v.y));
-    CHECK_CUDA(cudaFree(h_mesh.v.z));
-    CHECK_CUDA(cudaFree(h_mesh.colloc.x));
-    CHECK_CUDA(cudaFree(h_mesh.colloc.y)); 
-    CHECK_CUDA(cudaFree(h_mesh.colloc.z));
-    CHECK_CUDA(cudaFree(h_mesh.normal.x));
-    CHECK_CUDA(cudaFree(h_mesh.normal.y));
-    CHECK_CUDA(cudaFree(h_mesh.normal.z));
-    CHECK_CUDA(cudaFree(d_mesh));
-    CHECK_CUDA(cudaFree(d_solver_info));
-    CHECK_CUDA(cudaFree(d_solver_buffer));
-    CHECK_CUDA(cudaFree(d_solver_ipiv));
-}
-
-// For the moment, cuda backend just falls back to cpu backend
-
-void BackendCUDA::reset() {
-    default_backend.reset();
-    u64 n = mesh.nb_panels_wing();
-
-    CHECK_CUDA(cudaMemset(d_lhs, 0, n * n * sizeof(float)));
-    CHECK_CUDA(cudaMemset(d_rhs, 0, n * sizeof(float)));
-    CHECK_CUDA(cudaMemset(d_gamma, 0, n * sizeof(float)));
-    CHECK_CUDA(cudaDeviceSynchronize());
+    CtxManager::getInstance().destroy();
 }
 
 #define RCUT 1e-10f
@@ -277,10 +266,6 @@ __global__ void kernel_influence_cuda(
         const float3 normal = {sharedNormalX[threadIdx.x], sharedNormalY[threadIdx.x], sharedNormalZ[threadIdx.x]};
         d_lhs[(start + j) * m->nb_panels + i] += dot(inf, normal);
     }
-}
-
-constexpr u64 get_grid_size(u64 length, u64 block_size) {
-    return (length + block_size - 1) / block_size;
 }
 
 void BackendCUDA::lhs_assemble(const FlowData& flow) {

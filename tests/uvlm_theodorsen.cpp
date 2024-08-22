@@ -51,7 +51,7 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 10.0f;
+    const f32 cycles = 5.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
     const f32 k = 0.5; // reduced frequency
@@ -95,13 +95,6 @@ int main() {
             -u_inf*std::sin(alpha)*t
         });
     });
-    // kinematics.add([=](const fwd::Float& t) {
-    //     return translation_matrix<fwd::Float>({
-    //         -u_inf*t,
-    //         0.0f,
-    //         0.0f
-    //     });
-    // });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
         UVLM simulation{backend_name, {mesh_name}};
