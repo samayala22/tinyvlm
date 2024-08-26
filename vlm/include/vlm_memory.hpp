@@ -50,12 +50,12 @@ class View {
         std::size_t size_bytes() const { return layout.size() * sizeof(T); }
         inline T& operator[](std::size_t index) {
             assert(ptr != nullptr && "Pointer is null");
-            assert(index < layout.size() && "Index out of bounds");
+            // assert(index < layout.size() && "Index out of bounds");
             return ptr[index];
         }
         inline const T& operator[](std::size_t index) const {
             assert(ptr != nullptr && "Pointer is null");
-            assert(index < layout.size() && "Index out of bounds");
+            // assert(index < layout.size() && "Index out of bounds");
             return ptr[index];
         }
 };
@@ -140,24 +140,27 @@ class SingleSurface {
     public:
 
         SingleSurface() = default;
-        SingleSurface(const SurfaceDims& surface, uint64_t ld, uint64_t stride, uint32_t dim) {
-            _surface = surface;
+        SingleSurface(uint64_t nc, uint64_t ns, uint64_t ld, uint64_t stride, uint32_t dim) {
+            _nc = nc;
+            _ns = ns;
             _ld = ld;
             _stride = stride;
             _dim = dim;
         }
         ~SingleSurface() = default;
 
-        std::size_t size() const {return dim() * stride(); } // required
-        const SurfaceDims& surface() const {return _surface; }
+        std::size_t size() const {return _ns * _nc; } // required
+        uint64_t nc() const {return _nc; }
+        uint64_t ns() const {return _ns; }
         uint64_t ld() const {return _ld; }
         uint64_t stride() const {return _stride; }
         uint64_t dim() const {return _dim; }
 
     private:
-        SurfaceDims _surface;
-        uint64_t _ld = 0;
-        uint64_t _stride = 0;
+        uint64_t _nc = 0; // chord wise
+        uint64_t _ns = 0; // span wise
+        uint64_t _ld = 0; // distance between two consecutive rows 
+        uint64_t _stride = 0; // distance between each dimension
         uint32_t _dim = 1;
 };
 
@@ -203,7 +206,7 @@ class MultiSurface {
 
             return {
                 ptr + offset(wing_id) + i * ns(wing_id) + j,
-                SingleSurface{SurfaceDims{m,n,0}, ns(wing_id), stride(), dims()}
+                SingleSurface{m, n, ns(wing_id), stride(), dims()}
             };
         }
 

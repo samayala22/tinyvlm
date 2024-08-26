@@ -1,10 +1,8 @@
 #pragma once 
 
-#include "vlm_backend.hpp"
-#include "vlm_mesh.hpp"
-#include "vlm_data.hpp"
-
-#include "vlm_backend_cpu.hpp" // temporary
+#include "vlm_backend.hpp" // base class
+#include "vlm_data.hpp" // TODO: remove ?
+#include "vlm_memory.hpp" // View, Layouts
 
 namespace vlm {
 

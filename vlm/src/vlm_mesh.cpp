@@ -18,10 +18,10 @@ void mesh_quarterchord(View<f32, SingleSurface>& vertices) {
     f32* vz = vertices.ptr + 2 * vertices.layout.stride();
 
 
-    for (u64 i = 0; i < vertices.layout.surface().nc - 1; i++) {
-        for (u64 j = 0; j < vertices.layout.surface().ns; j++) {
-            const u64 v0 = (i+0) * vertices.layout.surface().ns + j;
-            const u64 v3 = (i+1) * vertices.layout.surface().ns + j;
+    for (u64 i = 0; i < vertices.layout.nc() - 1; i++) {
+        for (u64 j = 0; j < vertices.layout.ns(); j++) {
+            const u64 v0 = (i+0) * vertices.layout.ns() + j;
+            const u64 v3 = (i+1) * vertices.layout.ns() + j;
 
             vx[v0] = 0.75f * vx[v0] + 0.25f * vx[v3];
             vy[v0] = 0.75f * vy[v0] + 0.25f * vy[v3];
@@ -30,10 +30,10 @@ void mesh_quarterchord(View<f32, SingleSurface>& vertices) {
     }
 
     // Trailing edge vertices
-    const u64 i = vertices.layout.surface().nc - 2;
-    for (u64 j = 0; j < vertices.layout.surface().ns; j++) {
-        const u64 v0 = (i+0) * vertices.layout.surface().ns + j;
-        const u64 v3 = (i+1) * vertices.layout.surface().ns + j;
+    const u64 i = vertices.layout.nc() - 2;
+    for (u64 j = 0; j < vertices.layout.ns(); j++) {
+        const u64 v0 = (i+0) * vertices.layout.ns() + j;
+        const u64 v3 = (i+1) * vertices.layout.ns() + j;
         
         vx[v3] = (4.f/3.f) * vx[v3] - (1.f/3.f) * vx[v0];
         vy[v3] = (4.f/3.f) * vy[v3] - (1.f/3.f) * vy[v0];
@@ -61,8 +61,8 @@ public:
         f32 x, y, z;
         f >> blocks;
         f >> ni >> nj >> nk;
-        assert(vertices.layout.surface().ns == nj);
-        assert(vertices.layout.surface().nc == ni);
+        assert(vertices.layout.ns() == nj);
+        assert(vertices.layout.nc() == ni);
         assert(vertices.layout.dim() == 4);
         
         for (u64 j = 0; j < nj; j++) {

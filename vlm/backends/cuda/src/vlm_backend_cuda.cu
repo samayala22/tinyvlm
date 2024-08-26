@@ -1,18 +1,22 @@
+// VLM
 #include "vlm_backend_cuda.hpp"
 #include "vlm_backend_cuda_kernels.cuh"
 #include "vlm_executor.hpp"
 
+// External
 #include "tinytimer.hpp"
-
 #include <taskflow/cuda/cudaflow.hpp>
+
+// CUDA
 #include <cusolverDn.h>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include "helper_math.cuh"
-
-#include <cstdio>
-#include <stdlib.h>
 #include <vector_types.h>
+
+// C++ STD
+#include <cstdio>
+#include <memory>
 
 using namespace vlm;
 
@@ -98,6 +102,7 @@ public:
     cusolverDnHandle_t cusolver() {return(m_cusolver);}
     cudaStream_t stream() {return(m_stream);}
     cublasHandle_t cublas() {return(m_cublas);}
+    void sync() {CHECK_CUDA(cudaStreamSynchronize(m_stream));}
 
 private:
     cusolverDnHandle_t m_cusolver = nullptr;
@@ -108,7 +113,7 @@ private:
     ~CtxManager() = default;
 };
 
-/// @brief Memory manager implementation for the CPU backend
+/// @brief Memory manager implementation for the CUDA backend
 class MemoryCUDA final : public Memory {
     public:
         MemoryCUDA() : Memory(false) {}
@@ -142,7 +147,7 @@ class MemoryCUDA final : public Memory {
                 case MemoryLocation::Device: {
                     constexpr Dim3<u32> block{1024};
                     const Dim3<u64> n{size};
-                    kernel_fill_f32<block><<<grid_size(block, n)(), block()>>>(ptr, value, size);
+                    kernel_fill_f32<block.x><<<grid_size(block, n)(), block()>>>(ptr, value, size);
                     CHECK_CUDA(cudaGetLastError());
                     break;
                 }
@@ -157,13 +162,6 @@ class MemoryCUDA final : public Memory {
 BackendCUDA::BackendCUDA() : Backend(std::make_unique<MemoryCUDA>())  {
     printCudaInfo();
     CtxManager::getInstance().create();
-
-    // Prepare LU solver buffers
-    // int bufsize = 0;
-    // CHECK_CUSOLVER(cusolverDnSgetrf_bufferSize(ctx.cusolver(), n, n, d_lhs, n, &bufsize));
-    // CHECK_CUDA(cudaMalloc((void**)&d_solver_info, sizeof(int)));
-    // CHECK_CUDA(cudaMalloc((void**)&d_solver_buffer, sizeof(float) * bufsize));
-    // CHECK_CUDA(cudaMalloc((void**)&d_solver_ipiv, sizeof(int) * n));
 }
 
 BackendCUDA::~BackendCUDA() {
@@ -181,7 +179,7 @@ void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f
         
         constexpr Dim3<u32> block{32, 32};
         const Dim3<u64> n{surf.nc-1, surf.ns};
-        kernel_gamma_delta<block><<<grid_size(block, n)(), block()>>>(n.x, n.y, s_gamma_delta + surf.ns, s_gamma + surf.ns);
+        kernel_gamma_delta<block.x, block.y><<<grid_size(block, n)(), block()>>>(n.x, n.y, s_gamma_delta + surf.ns, s_gamma + surf.ns);
         CHECK_CUDA(cudaGetLastError());
     };
 
@@ -216,7 +214,7 @@ void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCPU::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) {    tiny::ScopedTimer timer("LHS");
+void BackendCUDA::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) {    tiny::ScopedTimer timer("LHS");
     assert(condition.size() == colloc.layout.surfaces().size());
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
 
@@ -225,99 +223,259 @@ void BackendCPU::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, co
         
         f32* vwing_section = verts_wing.ptr + verts_wing.layout.offset(i);
         f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(i);
-        const u64 zero = 0;
         const u64 end_wing = (colloc.layout.nc(i) - 1) * colloc.layout.ns(i);
         
         constexpr Dim3<u32> block{32, 16};
         const Dim3<u64> n{lhs.layout.m(), end_wing};
         // wing pass
-        kernel_influence<block><<<grid_size(block, n)(), block()>>>(n.x, n.y, lhs_section, colloc.ptr, colloc.layout.stride(), vwing_section, verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
+        kernel_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+            n.x,
+            n.y,
+            lhs_section,
+            colloc.ptr,
+            colloc.layout.stride(),
+            vwing_section,
+            verts_wing.layout.stride(),
+            verts_wing.layout.ns(i),
+            normals.ptr, normals.layout.stride(),
+            sigma_vatistas
+        );
         CHECK_CUDA(cudaGetLastError());
 
         const Dim3<u64> n2{lhs.layout.m(), colloc.layout.ns(i)};
         // last wing row
-        kernel_influence<block><<<grid_size(block, n2)(), block()>>>(n2.x, n2.y, lhs_section + end_wing * lhs.layout.stride(), colloc.ptr, colloc.layout.stride(), vwing_section + (verts_wing.layout.nc(i)-1)*verts_wing.layout.ns(i), verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
+        kernel_influence<block.x, block.y><<<grid_size(block, n2)(), block()>>>(
+            n2.x,
+            n2.y, 
+            lhs_section + end_wing * lhs.layout.stride(),
+            colloc.ptr,
+            colloc.layout.stride(),
+            vwing_section + (verts_wing.layout.nc(i)-2)*verts_wing.layout.ns(i),
+            verts_wing.layout.stride(),
+            verts_wing.layout.ns(i),
+            normals.ptr,
+            normals.layout.stride(),
+            sigma_vatistas
+        );
         CHECK_CUDA(cudaGetLastError());
 
         while (condition[i] < iteration) {
             const Dim3<u64> n3{lhs.layout.m(), colloc.layout.ns(i)};
             // each wake row
-            kernel_influence<block><<<grid_size(block, n3)(), block()>>>(
+            kernel_influence<block.x, block.y><<<grid_size(block, n3)(), block()>>>(
                 n3.x,
                 n3.y,
                 lhs_section + end_wing * lhs.layout.stride(),
-                colloc.ptr, colloc.layout.stride(),
+                colloc.ptr,
+                colloc.layout.stride(),
                 vwake_section + (verts_wake.layout.nc(i) - condition[i] - 2) * verts_wake.layout.ns(i),
-                verts_wake.layout.stride(), verts_wake.layout.ns(i), 
-                normals.ptr, normals.layout.stride(),
+                verts_wake.layout.stride(),
+                verts_wake.layout.ns(i), 
+                normals.ptr,
+                normals.layout.stride(),
                 sigma_vatistas
             );
+            CHECK_CUDA(cudaGetLastError());
             condition[i]++;
         }
     }
 }
 
-void BackendCUDA::compute_rhs(const FlowData& flow) {
-    default_backend.compute_rhs(flow);
+/// @brief Add velocity contributions to the right hand side vector
+/// @details
+/// Add velocity contributions to the right hand side vector of the VLM system
+/// @param rhs right hand side vector
+/// @param normals normals of all surfaces
+/// @param velocities displacement velocities of all surfaces
+void BackendCUDA::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) {
+    // const tiny::ScopedTimer timer("RHS");
+    assert(rhs.layout.stride() == rhs.size()); // single dim
+    assert(rhs.layout.stride() == normals.layout.stride());
+    assert(rhs.layout.stride() == velocities.layout.stride());
+    assert(rhs.layout.dims() == 1);
+
+    constexpr Dim3<u32> block{768};
+    const Dim3<u64> n{rhs.size()};
+    kernel_rhs_assemble_velocities<block.x><<<grid_size(block, n)(), block()>>>(n.x, rhs.ptr, velocities.ptr, velocities.layout.stride(), normals.ptr, normals.layout.stride());
 }
 
-void BackendCUDA::compute_rhs(const FlowData& flow, const std::vector<f32>& section_alphas) {
-    default_backend.compute_rhs(flow, section_alphas);
+void BackendCUDA::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
+    // TODO
 }
 
-void BackendCUDA::lu_factor() {
-    tiny::ScopedTimer timer("Factor");
-    int n = (int)mesh.nb_panels_wing();
+void BackendCUDA::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) {
+    // TODO
+}
+
+void BackendCUDA::gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) {
+    // const tiny::ScopedTimer timer("Shed Gamma");
+
+    memory->copy(MemoryTransfer::DeviceToDevice, gamma_wing_prev.ptr, gamma_wing.ptr, gamma_wing.size_bytes());
+    for (u64 i = 0; i < gamma_wake.layout.surfaces().size(); i++) {
+        assert(iteration < gamma_wake.layout.nc(i));
+        f32* gamma_wake_ptr = gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration - 1) * gamma_wake.layout.ns(i);
+        f32* gamma_wing_ptr = gamma_wing.ptr + gamma_wing.layout.offset(i) + (gamma_wing.layout.nc(i) - 1) * gamma_wing.layout.ns(i); // last row
+        memory->copy(MemoryTransfer::DeviceToDevice, gamma_wake_ptr, gamma_wing_ptr, gamma_wing.layout.ns(i) * sizeof(f32));
+    }
+}
+
+void BackendCUDA::lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
+    int bufsize = 0;
+    CHECK_CUSOLVER(cusolverDnSgetrf_bufferSize(CtxManager::getInstance().cusolver(), lhs.layout.m(), lhs.layout.n(), lhs.ptr, lhs.layout.stride(), &bufsize));
+    d_solver_info = (i32*)memory->alloc(MemoryLocation::Device, sizeof(i32));
+    d_solver_buffer = (f32*)memory->alloc(MemoryLocation::Device, sizeof(f32) * bufsize);
+    d_solver_ipiv = (i32*)memory->alloc(MemoryLocation::Device, sizeof(i32) * lhs.layout.n());
+}
+
+void BackendCUDA::lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
+    // const tiny::ScopedTimer timer("Factor");
+    assert(lhs.layout.m() == lhs.layout.n()); // square matrix
+    const int32_t n = static_cast<int32_t>(lhs.layout.n());
     int h_info = 0;
 
-    CHECK_CUSOLVER(cusolverDnSgetrf(CtxManager::getInstance().cusolver(), n, n, d_lhs, n, d_solver_buffer, d_solver_ipiv, d_solver_info));
-    CHECK_CUDA(cudaMemcpy(&h_info, d_solver_info, sizeof(int), cudaMemcpyDeviceToHost)); // sync
+    CHECK_CUSOLVER(cusolverDnSgetrf(CtxManager::getInstance().cusolver(), n, n, lhs.ptr, n, d_solver_buffer, d_solver_ipiv, d_solver_info));
+    memory->copy(MemoryTransfer::DeviceToHost, &h_info, d_solver_info, sizeof(int));
     if (h_info != 0) printf("Error: LU factorization failed\n");
 };
 
-void BackendCUDA::lu_solve() {
+void BackendCUDA::lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) {
     tiny::ScopedTimer timer("Solve");
     //default_backend.solve();
-    int n = (int)mesh.nb_panels_wing();
-    int h_info = 0;
+    const i32 n = static_cast<int32_t>(lhs.layout.n());
+    i32 h_info = 0;
 
-    // copy data to device (temporary)
-    CHECK_CUDA(cudaMemcpy(d_rhs, default_backend.rhs.data(), n * sizeof(float), cudaMemcpyHostToDevice));
-    
-    // Solve on device
-    CHECK_CUSOLVER(cusolverDnSgetrs(CtxManager::getInstance().cusolver(), CUBLAS_OP_N, n, 1, d_lhs, n, d_solver_ipiv, d_rhs, n, d_solver_info));
-    CHECK_CUDA(cudaMemcpy(&h_info, d_solver_info, sizeof(int), cudaMemcpyDeviceToHost)); // sync
+    memory->copy(MemoryTransfer::DeviceToDevice, gamma.ptr, rhs.ptr, rhs.size_bytes());
+    CHECK_CUSOLVER(cusolverDnSgetrs(CtxManager::getInstance().cusolver(), CUBLAS_OP_N, n, 1, lhs.ptr, n, d_solver_ipiv, gamma.ptr, n, d_solver_info));
+    memory->copy(MemoryTransfer::DeviceToHost, &h_info, d_solver_info, sizeof(int));
     if (h_info != 0) printf("Error: LU solve failed\n");
-
-    // copy data back to host
-    CHECK_CUDA(cudaMemcpy(default_backend.gamma.data(), d_rhs, n * sizeof(float), cudaMemcpyDeviceToHost));
 }
 
-f32 BackendCUDA::compute_coefficient_cl(
-    const FlowData& flow,
-    const f32 area,
-    const u64 j,
-    const u64 n) {
-    return default_backend.compute_coefficient_cl(flow, area, j, n);
+f32 BackendCUDA::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const FlowData& flow, f32 area) {
+    f32 h_cl = 0.0f;
+    cudaMemset(d_val, 0, sizeof(f32));
+    constexpr Dim3<u32> block{32, 16};
+    const Dim3<u64> n{gamma_delta.layout.ns(), gamma_delta.layout.nc()};
+    kernel_coeff_steady_cl_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+        n.y,
+        n.x,
+        verts_wing.ptr,
+        verts_wing.layout.ld(),
+        verts_wing.layout.stride(),
+        gamma_delta.ptr,
+        gamma_delta.layout.ld(),
+        float3{flow.freestream.x, flow.freestream.y, flow.freestream.z},
+        float3{flow.lift_axis.x, flow.lift_axis.y, flow.lift_axis.z},
+        flow.rho,
+        d_val
+    );
+    CHECK_CUDA(cudaGetLastError());
+    memory->copy(MemoryTransfer::DeviceToHost, &h_cl, d_val, sizeof(f32));
+    CtxManager::getInstance().sync();
+    
+    return h_cl / (0.5f * flow.rho * linalg::length2(flow.freestream) * area);
 }
 
-f32 BackendCUDA::compute_coefficient_cd(
-    const FlowData& flow,
-    const f32 area,
-    const u64 j,
-    const u64 n) {
-    return default_backend.compute_coefficient_cd(flow, area, j, n);
+f32 BackendCUDA::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow, const View<f32, MultiSurface>& areas) {
+    f32 cl = 0.0f;
+    f32 total_area = 0.0f;
+    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
+        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
+        const auto gamma_delta_local = gamma_delta.layout.subview(gamma_delta.ptr, i);
+        const auto areas_local = areas.layout.subview(areas.ptr, i);
+        const f32 area_local = mesh_area(areas_local);
+        const f32 wing_cl = coeff_steady_cl_single(verts_wing_local, gamma_delta_local, flow, area_local);
+        cl += wing_cl * area_local;
+        total_area += area_local;
+    }
+    cl /= total_area;
+    return cl;
 }
 
-linalg::alias::float3 BackendCUDA::compute_coefficient_cm(
-    const FlowData& flow,
-    const f32 area,
-    const f32 chord,
-    const u64 j,
-    const u64 n) {
-    return default_backend.compute_coefficient_cm(flow, area, chord, j, n);
+f32 BackendCUDA::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const View<f32, SingleSurface>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
+    // TODO
+    return 0.0f;
 }
 
-void BackendCUDA::compute_delta_gamma() {
-    default_backend.compute_delta_gamma();
+f32 BackendCUDA::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, const linalg::alias::float3& freestream, f32 dt) {
+    // TODO
+    return 0.0f;
+}
+
+f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) {
+    return 0.0f;
+}
+
+f32 BackendCUDA::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& gamma_wake, const FlowData& flow, const View<f32, MultiSurface>& areas) {
+    return 0.0f;
+}
+
+void BackendCUDA::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) {
+    for (int m = 0; m < colloc.layout.surfaces().size(); m++) {
+        const f32* verts_wing_ptr = verts_wing.ptr + verts_wing.layout.offset(m);
+        f32* colloc_ptr = colloc.ptr + colloc.layout.offset(m);
+        f32* normals_ptr = normals.ptr + normals.layout.offset(m);
+        f32* areas_ptr = areas.ptr + areas.layout.offset(m);
+
+        constexpr Dim3<u32> block{24, 32}; // ns, nc
+        const Dim3<u64> n{colloc.layout.ns(m), colloc.layout.nc(m)};
+        kernel_mesh_metrics<block.x, block.y><<<grid_size(block, n)(), block()>>>(n.y, n.x, colloc_ptr, colloc.layout.stride(), normals_ptr, normals.layout.stride(), areas_ptr, verts_wing_ptr, verts_wing.layout.stride(), alpha_rad);
+    }
+}
+
+f32 BackendCUDA::mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) {
+    // TODO
+    return 0.0f;
+}
+
+void BackendCUDA::displace_wing(const View<f32, Tensor<3>>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) {
+    // const tiny::ScopedTimer t("Mesh::move");
+    assert(transforms.layout.shape(2) == verts_wing.layout.surfaces().size());
+    assert(verts_wing.layout.size() == verts_wing_init.layout.size());
+
+    const f32 alpha = 1.0f;
+    const f32 beta = 0.0f;
+
+    // TODO: parallel for
+    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
+        CHECK_CUBLAS(cublasSgemm(
+            CtxManager::getInstance().cublas(),
+            CUBLAS_OP_N,
+            CUBLAS_OP_T,
+            static_cast<int>(verts_wing.layout.surface(i).size()),
+            4,            
+            4,
+            &alpha,
+            verts_wing_init.ptr + verts_wing_init.layout.offset(i),
+            static_cast<int>(verts_wing_init.layout.stride()),
+            transforms.ptr + transforms.layout.stride(2)*i,
+            4,
+            &beta,
+            verts_wing.ptr + verts_wing.layout.offset(i),
+            static_cast<int>(verts_wing.layout.stride())
+        ));
+    }
+}
+
+void BackendCUDA::wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, u32 iteration) {
+    assert(verts_wing.layout.surfaces().size() == verts_wake.layout.surfaces().size());
+    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
+        assert(iteration < verts_wake.layout.nc(i));
+        f32* vwing = verts_wing.ptr + verts_wing.layout.offset(i) + (verts_wing.layout.nc(i) - 1) * verts_wing.layout.ns(i);
+        f32* vwake = verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i);
+
+        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 0*verts_wake.layout.stride(), vwing + 0*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
+        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 1*verts_wake.layout.stride(), vwing + 1*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
+        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 2*verts_wake.layout.stride(), vwing + 2*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
+    }
+}
+
+f32 BackendCUDA::mesh_area(const View<f32, SingleSurface>& areas) {
+    cudaMemset(d_val, 0, sizeof(f32));
+    constexpr Dim3<u32> block{512}; // ns, nc
+    const Dim3<u64> n{areas.layout.size()};
+    kernel_reduce<<<grid_size(block, n)(), block()>>>(n.x, areas.ptr, d_val);
+    CHECK_CUDA(cudaGetLastError());
+    f32 h_area;
+    memory->copy(MemoryTransfer::DeviceToHost, &h_area, d_val, sizeof(f32));
+    return h_area;
 }
