@@ -252,8 +252,8 @@ f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_win
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cl = 0.0f;
 
-    const u64 nc = gamma_delta.layout.surface().nc;
-    const u64 ns = gamma_delta.layout.surface().ns;
+    const u64 nc = gamma_delta.layout.nc();
+    const u64 ns = gamma_delta.layout.ns();
     for (u64 i = 0; i < nc; i++) {
         for (u64 j = 0; j < ns; j++) {
             const u64 v0 = (i+0) * verts_wing.layout.ld() + j;
@@ -303,8 +303,8 @@ f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_w
     const linalg::alias::float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
     const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
 
-    const u64 nc = gamma_delta.layout.surface().nc;
-    const u64 ns = gamma_delta.layout.surface().ns;
+    const u64 nc = gamma_delta.layout.nc();
+    const u64 ns = gamma_delta.layout.ns();
     for (u64 i = 0; i < nc; i++) {
         for (u64 j = 0; j < ns; j++) {
             const u64 idx = i * ns + j; // linear index
@@ -373,7 +373,7 @@ f32 BackendCPU::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_win
 // linalg::alias::float3 BackendCPU::coeff_steady_cm(
 //     const FlowData& flow,
 //     const f32 area,
-//     const f32 chord,
+//     const f32 mac,
 //     const u64 j,
 //     const u64 n)
 // {
@@ -403,13 +403,13 @@ f32 BackendCPU::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_win
 //             cm += linalg::cross(force, dst_to_ref);
 //         }
 //     }
-//     cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * chord;
+//     cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * mac;
 //     return cm;
 // }
 
 f32 BackendCPU::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) {
     // tiny::ScopedTimer timer("Compute CD");
-    f32 cd = ispc::kernel_trefftz_cd(verts_wake.ptr, verts_wake.layout.stride(), verts_wake.layout.surface().nc, verts_wake.layout.surface().ns, gamma_wake.ptr, sigma_vatistas);
+    f32 cd = ispc::kernel_trefftz_cd(verts_wake.ptr, verts_wake.layout.stride(), verts_wake.layout.nc(), verts_wake.layout.ns(), gamma_wake.ptr, sigma_vatistas);
     cd /= linalg::length2(flow.freestream) * area;
     return cd;
 }
@@ -516,12 +516,12 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>
 f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) {
     // Leading edge vertex
     f32* leading_edge_ptr = verts_wing.ptr;
-    f32* trailing_edge_ptr = verts_wing.ptr + (verts_wing.layout.surface().nc - 1) * verts_wing.layout.surface().ns;
+    f32* trailing_edge_ptr = verts_wing.ptr + (verts_wing.layout.nc() - 1) * verts_wing.layout.ns();
 
     f32 mac = 0.0f;
     // loop over panel chordwise sections in spanwise direction
     // Note: can be done optimally with vertical fused simd
-    for (u64 v = 0; v < areas.layout.surface().ns; v++) {
+    for (u64 v = 0; v < areas.layout.ns(); v++) {
         // left and right chord lengths
         const f32 dx0 = trailing_edge_ptr[0*verts_wing.layout.stride() + v + 0] - leading_edge_ptr[0*verts_wing.layout.stride() + v + 0];
         const f32 dy0 = trailing_edge_ptr[1*verts_wing.layout.stride() + v + 0] - leading_edge_ptr[1*verts_wing.layout.stride() + v + 0];
@@ -542,7 +542,7 @@ f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<
     // Since we divide by half the total wing area (both sides) we dont need to multiply by 2
 
     f32 wing_area = 0.0f;
-    for (u64 i = 0; i < areas.layout.surface().size(); i++) {
+    for (u64 i = 0; i < areas.layout.size(); i++) {
         wing_area += areas[i];
     }
     return mac / wing_area;
@@ -556,7 +556,7 @@ void BackendCPU::displace_wing(const View<f32, Tensor<3>>& transforms, View<f32,
     // TODO: parallel for
     for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
         f32* vwing_ptr = verts_wing.ptr + verts_wing.layout.offset(i);
-        f32* vwing_init_ptr = verts_wing_init.ptr + verts_wing.layout.offset(i);
+        f32* vwing_init_ptr = verts_wing_init.ptr + verts_wing_init.layout.offset(i);
 
         cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, 4, static_cast<i32>(verts_wing.layout.surface(i).size()), 4, 1.0f, transforms.ptr + transforms.layout.stride(2)*i, 4, vwing_init_ptr, static_cast<i32>(verts_wing_init.layout.stride()), 0.0f, vwing_ptr, static_cast<i32>(verts_wing.layout.stride()));
     }
@@ -576,9 +576,11 @@ void BackendCPU::wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, 
     }
 }
 
+// TODO: this is wrong, wont work if the surface is a slice of non uniform surface
+// need to do a proper 2D loop and using the local ld
 f32 BackendCPU::mesh_area(const View<f32, SingleSurface>& areas) {
     f32 wing_area = 0.0f;
-    for (u64 i = 0; i < areas.layout.surface().size(); i++) {
+    for (u64 i = 0; i < areas.layout.size(); i++) {
         wing_area += areas[i];
     }
     return wing_area;

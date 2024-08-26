@@ -11,10 +11,10 @@ namespace vlm {
 class Simulation {
     public:
         std::unique_ptr<Backend> backend;
-
+        std::unique_ptr<Backend> backend_cpu; // TEMPORARY
         u32 nb_meshes;
         // Common geometry buffers
-        Mesh mesh;
+        Mesh mesh{*backend->memory};
         // Dimensions of the buffers
         std::vector<SurfaceDims> wing_panels;
         std::vector<SurfaceDims> wing_vertices;
@@ -37,14 +37,23 @@ class VLM final: public Simulation {
         std::vector<u32> condition0;
         
         // Pulic for output purposes (eg dump gamma to file)
-        Buffer<f32, MemoryLocation::Device, Matrix<MatrixLayout::ColMajor>> lhs; // (ns*nc)^2
-        Buffer<f32, MemoryLocation::Device, MultiSurface> rhs; // ns*nc
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing; // nc*ns
-        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wake; // nw*ns
-        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev; // nc*ns
-        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta; // nc*ns
-        Buffer<f32, MemoryLocation::Device, MultiSurface> local_velocities; // ns*nc*3
-        Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms;
+        // Buffer<f32, MemoryLocation::Device, Matrix<MatrixLayout::ColMajor>> lhs{*backend->memory}; // (ns*nc)^2
+        // Buffer<f32, MemoryLocation::Device, MultiSurface> rhs{*backend->memory}; // ns*nc
+        // Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
+        // Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
+        // Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
+        // Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
+        // Buffer<f32, MemoryLocation::Device, MultiSurface> local_velocities{*backend->memory}; // ns*nc*3
+        // Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms{*backend->memory};
+
+        Buffer<f32, MemoryLocation::HostDevice, Matrix<MatrixLayout::ColMajor>> lhs{*backend->memory}; // (ns*nc)^2
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> rhs{*backend->memory}; // ns*nc
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> local_velocities{*backend->memory}; // ns*nc*3
+        Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms{*backend->memory};
 
     private:
         void alloc_buffers();

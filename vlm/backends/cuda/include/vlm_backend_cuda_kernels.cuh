@@ -2,6 +2,7 @@
 #include "helper_math.cuh"
 #include <cooperative_groups.h>
 #include <cstdint>
+#include <stdio.h> // printf debugging
 
 namespace vlm {
 
@@ -14,8 +15,8 @@ template<typename T = u32>
 struct Dim3 {
     T x, y, z;
     __host__ __device__ constexpr Dim3(T x_, T y_= 1, T z_= 1) : x(x_), y(y_), z(z_) {}
-    __host__ __device__ constexpr T size() const {return x * y * z;}
-    __host__ __device__ constexpr dim3 operator()() const { return dim3(static_cast<u32>(x), static_cast<u32>(y), static_cast<u32>(z)); }
+    __host__ __device__ __inline__ constexpr T size() const {return x * y * z;}
+    __host__ __device__ __inline__ dim3 operator()() const { return dim3(static_cast<u32>(x), static_cast<u32>(y), static_cast<u32>(z)); }
 };
 
 template<typename T>
@@ -27,17 +28,63 @@ constexpr Dim3<u32> grid_size(const Dim3<u32>& block, const Dim3<T>& size) {
     };
 }
 
-template<Dim3 BlockSize>
-__global__ void __launch_bounds__(BlockSize.size()) kernel_fill_f32(float* buffer, float value, size_t n) {
+template<typename T>
+__inline__ __device__ T warp_reduce_sum(T val) {
+    cg::coalesced_group active = cg::coalesced_threads();
+    #pragma unroll
+    for (u32 offset = active.size() / 2; offset > 0; offset /= 2) {
+        val += active.shfl_down(val, offset);
+    }
+    return val;
+}
+
+template<typename T>
+__inline__ __device__ T block_reduce_sum(T val) {
+    static __shared__ T shared[32]; // Shared mem for 32 partial sums
+    u32 lane = threadIdx.x % warpSize;
+    u32 wid = threadIdx.x / warpSize;
+
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
+
+    val = warp_reduce_sum(val);     // reduce over warps of a block
+
+    if (lane == 0) shared[wid] = val; // Write reduced value to shared memory
+
+    block.sync();              // Wait for all partial reductions
+
+    //read from shared memory only if that warp existed
+    val = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0;
+
+    if (wid == 0) val = warp_reduce_sum(val); // Reduce the 32 sums of the block into a single value
+
+    return val;
+}
+
+template<typename T>
+__global__ void kernel_reduce(u64 N, T* buf, T* val) {
+    T sum = 0;
+    u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    // Grid-stride loop
+    for (u32 i = tid; i < N; i += blockDim.x * gridDim.x) {
+        sum += buf[i];
+    }
+    
+    sum = block_reduce_sum(sum); // reduce over threads of a block
+        
+    if (threadIdx.x == 0) {
+        atomicAdd(val, sum); // reduce over blocks
+    }
+}
+
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_fill_f32(float* buffer, float value, size_t n) {
     const u64 tid = cg::this_grid().thread_rank();
     
     if (tid >= n) return;
     buffer[tid] = value;
 }
-
-
-// #define BlockSizeX 32
-// #define BlockSizeY 16
 
 __device__ inline float3 kernel_biosavart(float3 colloc, const float3 vertex1, const float3 vertex2, const float sigma) {
     float3 r0 = vertex2 - vertex1;
@@ -79,20 +126,20 @@ __device__ inline void kernel_symmetry(float3* inf, float3 colloc, const float3 
 
 
 /// @param v ptr to a upper left vertex of a panel that is along the chord root
-template<Dim3 BlockSize>
-__global__ void __launch_bounds__(BlockSize.size()) kernel_influence(u64 m, u64 n, f32* lhs, f32* collocs, u64 collocs_ld, f32* v, u64 v_ld, u64 v_n, f32* normals, u64 normals_ld, f32 sigma) {
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_influence(u64 m, u64 n, f32* lhs, f32* collocs, u64 collocs_ld, f32* v, u64 v_ld, u64 v_n, f32* normals, u64 normals_ld, f32 sigma) {
     assert(n % (v_n-1) == 0); // kernel runs on a span wise section of the surface
     const u64 j = blockIdx.y * blockDim.y + threadIdx.y;
     const u64 i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (j >= n || i >= m) return;
 
-    __shared__ float sharedCollocX[BlockSize.x];
-    __shared__ float sharedCollocY[BlockSize.x];
-    __shared__ float sharedCollocZ[BlockSize.x];
-    __shared__ float sharedNormalX[BlockSize.x];
-    __shared__ float sharedNormalY[BlockSize.x];
-    __shared__ float sharedNormalZ[BlockSize.x];
+    __shared__ float sharedCollocX[X];
+    __shared__ float sharedCollocY[X];
+    __shared__ float sharedCollocZ[X];
+    __shared__ float sharedNormalX[X];
+    __shared__ float sharedNormalY[X];
+    __shared__ float sharedNormalZ[X];
 
     // Load memory along warp onto the shared memory
     if (threadIdx.y == 0) {
@@ -134,8 +181,8 @@ __global__ void __launch_bounds__(BlockSize.size()) kernel_influence(u64 m, u64 
     }
 }
 
-template<Dim3 BlockSize>
-__global__ void __launch_bounds__(BlockSize.size()) kernel_gamma_delta(u64 m, u64 n, f32* gamma_wing_delta, const f32* gamma_wing) {
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_gamma_delta(u64 m, u64 n, f32* gamma_wing_delta, const f32* gamma_wing) {
     const u64 i = blockIdx.x * blockDim.x + threadIdx.x;
     const u64 j = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -144,4 +191,95 @@ __global__ void __launch_bounds__(BlockSize.size()) kernel_gamma_delta(u64 m, u6
     gamma_wing_delta[i * n + j] = gamma_wing[i * n + j] - gamma_wing[(i-1) * n + j];
 }
 
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_rhs_assemble_velocities(u64 n, f32* rhs, const f32* velocities, u64 velocities_ld, const f32* normals, u64 normals_ld) {
+    const u64 i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (i >= n) return;
+
+    rhs[i] += - (
+        velocities[i + 0 * velocities_ld] * normals[i + 0 * normals_ld] +
+        velocities[i + 1 * velocities_ld] * normals[i + 1 * normals_ld] +
+        velocities[i + 2 * velocities_ld] * normals[i + 2 * normals_ld]
+    );
 }
+
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_mesh_metrics(u64 m, u64 n, f32* colloc, u64 colloc_ld, f32* normals, u64 normals_ld, f32* areas, const f32* verts_wing, u64 verts_wing_ld, f32 alpha_rad) {
+    const u64 j = blockIdx.x * blockDim.x + threadIdx.x;
+    const u64 i = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (j >= n || i >= m) return;
+
+    const u64 lidx =  i * n + j;
+    const u64 v0 = (i+0) * (n+1) + j;
+    const u64 v1 = (i+0) * (n+1) + j + 1;
+    const u64 v2 = (i+1) * (n+1) + j + 1;
+    const u64 v3 = (i+1) * (n+1) + j;
+
+    const float3 vertex0{verts_wing[0*verts_wing_ld + v0], verts_wing[1*verts_wing_ld + v0], verts_wing[2*verts_wing_ld + v0]}; // upper left
+    const float3 vertex1{verts_wing[0*verts_wing_ld + v1], verts_wing[1*verts_wing_ld + v1], verts_wing[2*verts_wing_ld + v1]}; // upper right
+    const float3 vertex2{verts_wing[0*verts_wing_ld + v2], verts_wing[1*verts_wing_ld + v2], verts_wing[2*verts_wing_ld + v2]}; // lower right
+    const float3 vertex3{verts_wing[0*verts_wing_ld + v3], verts_wing[1*verts_wing_ld + v3], verts_wing[2*verts_wing_ld + v3]}; // lower left
+
+    const float3 normal_vec = normalize(cross(vertex3 - vertex1, vertex2 - vertex0));
+    normals[0*normals_ld + lidx] = normal_vec.x;
+    normals[1*normals_ld + lidx] = normal_vec.y;
+    normals[2*normals_ld + lidx] = normal_vec.z;
+
+    // 3 vectors f (P0P3), b (P0P2), e (P0P1) to compute the area:
+    // area = 0.5 * (||f x b|| + ||b x e||)
+    // this formula might also work: area = || 0.5 * ( f x b + b x e ) ||
+    const float3 vec_f = vertex3 - vertex0;
+    const float3 vec_b = vertex2 - vertex0;
+    const float3 vec_e = vertex1 - vertex0;
+
+    areas[lidx] = 0.5f * (length(cross(vec_f, vec_b)) + length(cross(vec_b, vec_e)));
+
+    // High AoA correction (Aerodynamic Optimization of Aircraft Wings Using a Coupled VLM2.5D RANS Approach) Eq 3.4 p21
+    // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf
+    const f32 factor = (alpha_rad < EPS_f) ? 0.5f : 0.5f * (alpha_rad / (sin(alpha_rad) + EPS_f));
+    const float3 chord_vec = 0.5f * (vertex2 + vertex3 - vertex0 - vertex1);
+    const float3 colloc_pt = 0.5f * (vertex0 + vertex1) + factor * chord_vec;
+    
+    colloc[0*colloc_ld + lidx] = colloc_pt.x;
+    colloc[1*colloc_ld + lidx] = colloc_pt.y;
+    colloc[2*colloc_ld + lidx] = colloc_pt.z;
+}
+
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cl_single(u64 m, u64 n, const f32* verts_wing, u64 verts_wing_surface_ld, u64 verts_wing_ld, const f32* gamma_delta, u64 gamma_delta_surface_ld, float3 freestream, float3 lift_axis, f32 rho, f32* cl) {
+    static_assert(X == 32);
+
+    cg::thread_block block = cg::this_thread_block();
+
+    const u64 j = blockIdx.x * blockDim.x + threadIdx.x;
+    const u64 i = blockIdx.y * blockDim.y + threadIdx.y;
+    const u32 wid = block.thread_rank() / warpSize;
+    const u32 lane = block.thread_rank() % warpSize;
+
+    __shared__ f32 shared[32];
+
+    if (wid == 0) shared[lane] = 0.0f;
+    block.sync();
+
+    if (j >= n || i >= m) return;
+
+    const u64 v0 = (i+0) * verts_wing_surface_ld + j;
+    const u64 v1 = (i+0) * verts_wing_surface_ld + j + 1;
+    const float3 vertex0{verts_wing[0*verts_wing_ld + v0], verts_wing[1*verts_wing_ld + v0], verts_wing[2*verts_wing_ld + v0]}; // upper left
+    const float3 vertex1{verts_wing[0*verts_wing_ld + v1], verts_wing[1*verts_wing_ld + v1], verts_wing[2*verts_wing_ld + v1]}; // upper right
+    // Leading edge vector pointing outward from wing root
+    const float3 dl = vertex1 - vertex0;
+    const float3 force = cross(freestream, dl) * rho * gamma_delta[i * gamma_delta_surface_ld + j];
+
+    f32 cl_local = dot(force, lift_axis);
+
+    // atomicAdd(cl, cl_local); // naive reduction (works but 50x slower)
+    cl_local = warp_reduce_sum(cl_local); // reduce of the warp
+    if (lane == 0) shared[wid] = cl_local; // write to smem
+    block.sync(); // wait for threads to write to smem
+    if (wid == 0) cl_local = warp_reduce_sum(shared[lane]);// reduce of the block
+    if (block.thread_rank() == 0) atomicAdd(cl, cl_local); // reduce of the grid
+}
+} // namespace vlm
