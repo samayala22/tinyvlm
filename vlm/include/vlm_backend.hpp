@@ -15,9 +15,12 @@ class Backend {
         i32* d_solver_info = nullptr;
         i32* d_solver_ipiv = nullptr;
         f32* d_solver_buffer = nullptr;
+        f32* d_val = nullptr; // intermediate value used for reduction
 
         f32 sigma_vatistas = 0.0f;
-        Backend(std::unique_ptr<Memory> memory) : memory(std::move(memory)) {}
+        Backend(std::unique_ptr<Memory> memory_) : memory(std::move(memory_)) {
+            d_val = (f32*)memory->alloc(MemoryLocation::Device, sizeof(f32));
+        }
         virtual ~Backend();
 
         // Kernels that run for all the meshes

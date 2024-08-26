@@ -15,9 +15,9 @@ class Mesh {
     Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing_init; // (nc+1)*(ns+1)*3
     Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing; // (nc+1)*(ns+1)*3
     Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wake; // (nw+1)*(ns+1)*3
-    Buffer<f32, MemoryLocation::Device, MultiSurface> normals; // nc*ns*3
-    Buffer<f32, MemoryLocation::Device, MultiSurface> colloc; // nc*ns*3
-    Buffer<f32, MemoryLocation::Device, MultiSurface> area; // nc*ns
+    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> normals; // nc*ns*3
+    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> colloc; // nc*ns*3
+    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> area; // nc*ns
 
     f32 frame[16] = {
         1.0f, 0.0f, 0.0f, 0.0f,

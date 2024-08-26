@@ -25,13 +25,13 @@ namespace linalg
     template<class T> struct vec<T,3>
     {
         T                           x,y,z;
-                                    vec()                           : x(), y(), z() {}
-                                    vec(T x, T y, T z)              : x(x), y(y), z(z) {}
+        constexpr                            vec()                           : x(), y(), z() {}
+        constexpr                            vec(T x, T y, T z)              : x(x), y(y), z(z) {}
         explicit                    vec(T s)                        : x(s), y(s), z(s) {}
         explicit                    vec(const T * p)                : vec(p[0], p[1], p[2]) {}
         template<class U> explicit  vec(const vec<U,3> & v)         : vec(static_cast<T>(v.x), static_cast<T>(v.y), static_cast<T>(v.z)) {}
                                     vec(const vec<T,2> & xy, T z)   : vec(xy.x, xy.y, z) {}
-        const T &                   operator[] (int i) const        { return (&x)[i]; }
+        constexpr T &                   operator[] (int i) const        { return (&x)[i]; }
         T &                         operator[] (int i)              { return (&x)[i]; }
         vec<T,2>                    xy() const                      { return {x,y}; }
     };

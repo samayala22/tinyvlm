@@ -27,7 +27,7 @@ std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name) {
         return std::make_unique<BackendCUDA>();
     }
     #endif
-    throw std::runtime_error("Unsupported backend: " + backend_name);
+    throw std::runtime_error("Unsupported backend: " + backend_name); // TODO: remove
 }
 
 std::vector<std::string> vlm::get_available_backends() {
@@ -46,4 +46,5 @@ Backend::~Backend() {
     memory->free(MemoryLocation::Device, d_solver_info);
     memory->free(MemoryLocation::Device, d_solver_ipiv);
     memory->free(MemoryLocation::Device, d_solver_buffer);
+    memory->free(MemoryLocation::Device, d_val);
 }
