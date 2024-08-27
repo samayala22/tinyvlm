@@ -1,4 +1,4 @@
-name: linux
+name: linux-gpu
 on:
   workflow_dispatch:
   pull_request:
@@ -19,15 +19,19 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest]
         arch: [x86_64]
         mode: [release, debug]
         compiler: [clang, gcc]
-        sanitizer: [address, undefined] # thread removed due to bugs
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Display NVIDIA SMI details
+        run: |
+          nvidia-smi
+          nvidia-smi -L
+          nvidia-smi -q -d Memory
 
       - name: Download ISPC
         run: |
@@ -63,7 +67,7 @@ jobs:
       - name: Set cache env vars
         run: |
           echo "CACHE_PATH=${{ env.XMAKE_GLOBALDIR }}/.xmake/packages" >> $GITHUB_ENV
-          echo "CACHE_KEY=Linux-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ matrix.sanitizer }}-${{ steps.dep_hash.outputs.hash }}" >> $GITHUB_ENV
+          echo "CACHE_KEY=Linux-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-GPU-${{ steps.dep_hash.outputs.hash }}" >> $GITHUB_ENV
 
       # Cache xmake dependencies
       - name: Restore cached xmake dependencies
@@ -75,7 +79,7 @@ jobs:
       # Config xmake
       - name: Config
         run: |
-          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --policies=build.sanitizer.${{ matrix.sanitizer }}
+          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --build-cuda=y
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4
