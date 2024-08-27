@@ -166,7 +166,6 @@ AeroCoefficients VLM::run(const FlowData& flow) {
 
     return AeroCoefficients{
         backend->coeff_steady_cl_multi(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), flow, mesh.area.d_view()),
-        // backend_cpu->coeff_steady_cd_multi(mesh.verts_wake.h_view(), gamma_wake.h_view(), flow, mesh.area.h_view()),
         backend->coeff_steady_cd_multi(mesh.verts_wake.d_view(), gamma_wake.d_view(), flow, mesh.area.d_view()),
         {0.0f, 0.0f, 0.0f} // todo implement cm
     };
