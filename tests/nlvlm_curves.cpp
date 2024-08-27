@@ -65,7 +65,8 @@ void write_vector_pair(const std::string& filename, const std::vector<T>& vec1, 
 
 int main(int  /*argc*/, char** /*argv*/) {
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x200.x"};
-    const std::vector<std::string> backends = get_available_backends();
+    // const std::vector<std::string> backends = get_available_backends();
+    const std::vector<std::string> backends = {"cpu"};
     std::vector<std::pair<std::string, std::unique_ptr<LiftCurveFunctor>>> lift_curves;
     lift_curves.emplace_back(std::make_pair("spallart1", std::make_unique<SpallartLiftCurve>(1.2f, 0.28f, 0.02f, 2.f*PI_f, 2.f*PI_f)));
     lift_curves.emplace_back(std::make_pair("spallart2", std::make_unique<SpallartLiftCurve>(0.72f, 0.28f, 0.04f, 2.f*PI_f, 1.5f*PI_f)));

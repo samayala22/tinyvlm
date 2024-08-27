@@ -272,6 +272,7 @@ export uniform float kernel_trefftz_cd(uniform f32* uniform v_wake, uniform u64 
         const uniform float3 vertex3 = {v_wake[0*v_wake_ld + v3], v_wake[1*v_wake_ld + v3], v_wake[2*v_wake_ld + v3]};
 
         const uniform float3 colloc = 0.25f * (vertex0 + vertex1 + vertex2 + vertex3); // 3*(3 add + 1 mul)
+        const uniform float3 normal = quad_normal(vertex0, vertex1, vertex2, vertex3);
 
         varying float3 inf = {0.0f, 0.0f, 0.0f};
 
@@ -293,9 +294,11 @@ export uniform float kernel_trefftz_cd(uniform f32* uniform v_wake, uniform u64 
 
             varying float gammaw = gamma_wake[i * (v_wake_n-1) + jj];
             inf += gammaw * inf2;
+
+            // const varying float induced_vel = dot(gammaw * inf2, normal);
+            // cd -= gamma_wake[i * (v_wake_n-1) + j] * induced_vel * length(vertex1 - vertex0);
         }
 
-        const uniform float3 normal = quad_normal(vertex0, vertex1, vertex2, vertex3);
         const varying float induced_vel = dot(inf, normal);
         cd -= gamma_wake[i * (v_wake_n-1) + j] * induced_vel * length(vertex1 - vertex0);
     }
