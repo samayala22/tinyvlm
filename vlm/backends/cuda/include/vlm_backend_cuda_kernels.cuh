@@ -86,7 +86,7 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_fill_f32(float* buffer, float va
     buffer[tid] = value;
 }
 
-__device__ inline float3 kernel_biosavart(float3 colloc, const float3 vertex1, const float3 vertex2, const float sigma) {
+__inline__ __device__ float3 kernel_biosavart(float3 colloc, const float3 vertex1, const float3 vertex2, const float sigma) {
     float3 r0 = vertex2 - vertex1;
     float3 r1 = colloc - vertex1;
     float3 r2 = colloc - vertex2;
@@ -107,7 +107,7 @@ __device__ inline float3 kernel_biosavart(float3 colloc, const float3 vertex1, c
     return r1r2cross * coeff;
 }
 
-__device__ inline void kernel_symmetry(float3* inf, float3 colloc, const float3 vertex0, const float3 vertex1, const float sigma) {
+__inline__ __device__ void kernel_symmetry(float3* inf, float3 colloc, const float3 vertex0, const float3 vertex1, const float sigma) {
     float3 induced_speed = kernel_biosavart(colloc, vertex0, vertex1, sigma);
     inf->x += induced_speed.x;
     inf->y += induced_speed.y;
@@ -275,11 +275,72 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cl_single(u64 m, u6
 
     f32 cl_local = dot(force, lift_axis);
 
-    // atomicAdd(cl, cl_local); // naive reduction (works but 50x slower)
-    cl_local = warp_reduce_sum(cl_local); // reduce of the warp
-    if (lane == 0) shared[wid] = cl_local; // write to smem
-    block.sync(); // wait for threads to write to smem
-    if (wid == 0) cl_local = warp_reduce_sum(shared[lane]);// reduce of the block
-    if (block.thread_rank() == 0) atomicAdd(cl, cl_local); // reduce of the grid
+    atomicAdd(cl, cl_local); // naive reduction (works but 50x slower)
+    // cl_local = warp_reduce_sum(cl_local); // reduce of the warp
+    // if (lane == 0) shared[wid] = cl_local; // write to smem
+    // block.sync(); // wait for threads to write to smem
+    // if (wid == 0) cl_local = warp_reduce_sum(shared[lane]);// reduce of the block
+    // if (block.thread_rank() == 0) atomicAdd(cl, cl_local); // reduce of the grid
 }
+
+inline __device__ float3 quad_normal(const float3 v0, const float3 v1, const float3 v2, const float3 v3) {
+    return normalize(cross(v3-v1, v2-v0));
+}
+
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* verts_wake, u64 verts_wake_ld, u64 verts_wake_m, u64 verts_wake_n, float* gamma_wake, f32 sigma, f32* cd) {
+    cg::thread_block block = cg::this_thread_block();
+
+    const u64 i = blockIdx.x * blockDim.x + threadIdx.x; // jj
+    const u64 j = blockIdx.y * blockDim.y + threadIdx.y; // j
+    const u32 wid = block.thread_rank() / warpSize;
+    const u32 lane = block.thread_rank() % warpSize;
+
+    __shared__ f32 shared[32];
+    if (wid == 0) shared[lane] = 0.0f;
+    block.sync();
+ 
+    if (i >= verts_wake_n - 1 || j >= verts_wake_n - 1) return;
+    
+    const u64 vi = verts_wake_m - 2;
+
+    u64 v0 = (vi+0) * (verts_wake_n) + j;
+    u64 v1 = (vi+0) * (verts_wake_n) + j + 1;
+    u64 v2 = (vi+1) * (verts_wake_n) + j + 1;
+    u64 v3 = (vi+1) * (verts_wake_n) + j;
+
+    const float3 vertex0 = {verts_wake[0*verts_wake_ld + v0], verts_wake[1*verts_wake_ld + v0], verts_wake[2*verts_wake_ld + v0]};
+    const float3 vertex1 = {verts_wake[0*verts_wake_ld + v1], verts_wake[1*verts_wake_ld + v1], verts_wake[2*verts_wake_ld + v1]};
+    const float3 vertex2 = {verts_wake[0*verts_wake_ld + v2], verts_wake[1*verts_wake_ld + v2], verts_wake[2*verts_wake_ld + v2]};
+    const float3 vertex3 = {verts_wake[0*verts_wake_ld + v3], verts_wake[1*verts_wake_ld + v3], verts_wake[2*verts_wake_ld + v3]};
+
+    const float3 colloc = 0.25f * (vertex0 + vertex1 + vertex2 + vertex3); // 3*(3 add + 1 mul)
+    const float3 normal = quad_normal(vertex0, vertex1, vertex2, vertex3);
+
+    u64 vv0 = (vi+0) * (verts_wake_n) + i;
+    u64 vv1 = (vi+0) * (verts_wake_n) + i + 1;
+    u64 vv2 = (vi+1) * (verts_wake_n) + i + 1;
+    u64 vv3 = (vi+1) * (verts_wake_n) + i;
+
+    const float3 vvertex0 = {verts_wake[0*verts_wake_ld + vv0], verts_wake[1*verts_wake_ld + vv0], verts_wake[2*verts_wake_ld + vv0]};
+    const float3 vvertex1 = {verts_wake[0*verts_wake_ld + vv1], verts_wake[1*verts_wake_ld + vv1], verts_wake[2*verts_wake_ld + vv1]};
+    const float3 vvertex2 = {verts_wake[0*verts_wake_ld + vv2], verts_wake[1*verts_wake_ld + vv2], verts_wake[2*verts_wake_ld + vv2]};
+    const float3 vvertex3 = {verts_wake[0*verts_wake_ld + vv3], verts_wake[1*verts_wake_ld + vv3], verts_wake[2*verts_wake_ld + vv3]};
+
+    float3 inf = {0.0f, 0.0f, 0.0f};
+
+    kernel_symmetry(&inf, colloc, vvertex1, vvertex2, sigma);
+    kernel_symmetry(&inf, colloc, vvertex3, vvertex0, sigma);
+
+    float gammaw = gamma_wake[vi * (verts_wake_n-1) + i];
+    f32 cd_local = - gamma_wake[vi * (verts_wake_n-1) + j] * dot(gammaw * inf, normal) * length(vertex1 - vertex0);
+    
+    atomicAdd(cd, cd_local);
+    // cd_local = warp_reduce_sum(cd_local);
+    // if (lane == 0) shared[wid] = cd_local;
+    // block.sync();
+    // if (wid == 0) cd_local = warp_reduce_sum(shared[lane]);
+    // if (block.thread_rank() == 0) atomicAdd(cd, cd_local);
+}
+
 } // namespace vlm
