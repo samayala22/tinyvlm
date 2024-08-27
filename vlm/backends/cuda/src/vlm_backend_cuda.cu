@@ -214,7 +214,7 @@ void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCUDA::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) {    tiny::ScopedTimer timer("LHS");
+void BackendCUDA::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) {
     assert(condition.size() == colloc.layout.surfaces().size());
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
 
@@ -339,7 +339,7 @@ void BackendCUDA::lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
 };
 
 void BackendCUDA::lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) {
-    tiny::ScopedTimer timer("Solve");
+    // tiny::ScopedTimer timer("Solve");
     //default_backend.solve();
     const i32 n = static_cast<int32_t>(lhs.layout.n());
     i32 h_info = 0;
@@ -402,11 +402,41 @@ f32 BackendCUDA::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wi
 }
 
 f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) {
-    return 0.0f;
+    f32 h_cd = 0.0f;
+    cudaMemset(d_val, 0, sizeof(f32));
+    constexpr Dim3<u32> block{64, 8};
+    const Dim3<u64> n{verts_wake.layout.ns()-1, verts_wake.layout.ns()-1};
+    kernel_coeff_steady_cd_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+        verts_wake.ptr,
+        verts_wake.layout.stride(),
+        verts_wake.layout.nc(),
+        verts_wake.layout.ns(),
+        gamma_wake.ptr,
+        sigma_vatistas,
+        d_val
+    );
+    CHECK_CUDA(cudaGetLastError());
+    memory->copy(MemoryTransfer::DeviceToHost, &h_cd, d_val, sizeof(f32));
+    CtxManager::getInstance().sync();
+    return h_cd / (linalg::length2(flow.freestream) * area);
 }
 
+// TODO: move in backend.cpp ?
 f32 BackendCUDA::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& gamma_wake, const FlowData& flow, const View<f32, MultiSurface>& areas) {
-    return 0.0f;
+    // const tiny::ScopedTimer timer("Compute CL");
+    f32 cd = 0.0f;
+    f32 total_area = 0.0f;
+    for (u64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
+        const auto verts_wake_local = verts_wake.layout.subview(verts_wake.ptr, i);
+        const auto gamma_wake_local = gamma_wake.layout.subview(gamma_wake.ptr, i);
+        const auto areas_local = areas.layout.subview(areas.ptr, i);
+        const f32 area_local = mesh_area(areas_local);
+        const f32 wing_cd = coeff_steady_cd_single(verts_wake_local, gamma_wake_local, flow, area_local);
+        cd += wing_cd * area_local;
+        total_area += area_local;
+    }
+    cd /= total_area;
+    return cd;
 }
 
 void BackendCUDA::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) {
