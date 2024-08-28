@@ -47,26 +47,9 @@ void linspace(T start, T end, u64 n, std::vector<T>& out) {
     }
 }
 
-template<typename T>
-void write_vector_pair(const std::string& filename, const std::vector<T>& vec1, const std::vector<T>& vec2) {
-    assert(vec1.size() == vec2.size());
-    std::ofstream outFile(filename + ".dat");
-
-    // Check if file is open
-    if (!outFile.is_open()) throw std::runtime_error("Failed to open file: " + filename);
-
-    const u64 n = vec1.size();
-    outFile << n << '\n';
-    for (u64 i = 0; i < n; i++) {
-        outFile << vec1[i] << ' ' << vec2[i] << '\n';
-    }
-    outFile.close();
-}
-
 int main(int  /*argc*/, char** /*argv*/) {
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x200.x"};
-    // const std::vector<std::string> backends = get_available_backends();
-    const std::vector<std::string> backends = {"cpu"};
+    const std::vector<std::string> backends = get_available_backends();
     std::vector<std::pair<std::string, std::unique_ptr<LiftCurveFunctor>>> lift_curves;
     lift_curves.emplace_back(std::make_pair("spallart1", std::make_unique<SpallartLiftCurve>(1.2f, 0.28f, 0.02f, 2.f*PI_f, 2.f*PI_f)));
     lift_curves.emplace_back(std::make_pair("spallart2", std::make_unique<SpallartLiftCurve>(0.72f, 0.28f, 0.04f, 2.f*PI_f, 1.5f*PI_f)));
@@ -75,7 +58,6 @@ int main(int  /*argc*/, char** /*argv*/) {
     std::vector<f32> test_alphas = {0, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
 
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);
-    std::vector<f32> test_cl(test_alphas.size());
 
     std::vector<f32> db_alphas;
     linspace(to_radians(0.f), to_radians(20.f), 100, db_alphas);
@@ -87,8 +69,9 @@ int main(int  /*argc*/, char** /*argv*/) {
         NLVLM simulation{backend_name, {mesh_name}};
 
         for (const auto& lift_curve : lift_curves) {
+            std::printf("LIFT CURVE: %s\n", lift_curve.first.c_str());
+
             std::transform(db_alphas.begin(), db_alphas.end(), db_cl.begin(), [&lift_curve](float alpha){ return (*lift_curve.second)(alpha); });
-            write_vector_pair(lift_curve.first + "_analytical_cl", db_alphas, db_cl);
 
             Database db;
             db.profiles.emplace_back(
@@ -103,18 +86,29 @@ int main(int  /*argc*/, char** /*argv*/) {
             );
             db.profiles_pos.emplace_back(0.0f);
             
+            std::printf("\n|    Alpha   |     CL     |     CD     |    CMx     |    CMy     |    CMz     |  CL Error   |  CD Error   |\n");
+            std::printf("|------------|------------|------------|------------|------------|------------|-------------|-------------|\n");
             for (u64 i = 0; i < test_alphas.size(); i++) {
                 const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
                 auto coeffs = simulation.run(flow, db);
-                test_cl[i] = coeffs.cl;
-                std::printf(">>> Alpha: %.1f | CL = %.6f CD = %.6f CMx = %.6f CMy = %.6f CMz = %.6f\n", to_degrees(test_alphas[i]), coeffs.cl, coeffs.cd, coeffs.cm.x, coeffs.cm.y, coeffs.cm.z);
+
                 const f32 analytical_cl = (*lift_curve.second)(flow.alpha);
-                const f32 abs_error = std::abs(coeffs.cl - analytical_cl);
-                const f32 rel_error = abs_error / (analytical_cl + std::numeric_limits<f32>::epsilon());
-                std::printf(">>> Analytical: %.6f | Abs Error: %.3E | Relative Error: %.5f%% \n", analytical_cl, abs_error, rel_error*100.f);
-                if (rel_error > 0.01f) return 1; // Failure
+                const f32 cl_aerr = std::abs(coeffs.cl - analytical_cl);
+                const f32 cl_rerr = cl_aerr / (analytical_cl + std::numeric_limits<f32>::epsilon());
+                std::printf("| %10.1f | %10.6f | %10.7f | %10.6f | %10.6f | %10.6f | %10.3f%% | %10.3f%% |\n",
+                    to_degrees(flow.alpha),
+                    coeffs.cl,
+                    coeffs.cd,
+                    coeffs.cm.x,
+                    coeffs.cm.y,
+                    coeffs.cm.z,
+                    cl_rerr * 100.0f,
+                    0.0f
+                );
+                
+                if (cl_rerr > 0.01f) return 1; // Failure
             }
-            write_vector_pair(lift_curve.first + "_nonlinear_cl", test_alphas, test_cl);
+            std::printf("\n");
         }
     }
 
