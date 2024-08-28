@@ -3,6 +3,7 @@
 
 #include "linalg.h"
 #include "tinytimer.hpp"
+#include "tinycpuid2.hpp"
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
 #include "vlm_types.hpp"
@@ -12,8 +13,8 @@
 #include <algorithm> // std::fill
 #include <iostream> // std::cout
 #include <cstdio> // std::printf
+#include <thread> // std::hardware_concurrency()
 
-#include <stdint.h>
 #include <taskflow/algorithm/for_each.hpp>
 
 #include <lapacke.h>
@@ -33,7 +34,15 @@ class MemoryCPU final : public Memory {
         void fill_f32(MemoryLocation location, float* ptr, float value, std::size_t size) const override {std::fill(ptr, ptr + size, value);}
 };
 
-BackendCPU::BackendCPU() : Backend(std::make_unique<MemoryCPU>()) {}
+void print_cpu_info() {
+    tiny::CPUID2 cpuid;
+    std::printf("DEVICE: %s (%d threads)\n", cpuid.full_name.c_str(), std::thread::hardware_concurrency());
+}
+
+BackendCPU::BackendCPU() : Backend(std::make_unique<MemoryCPU>()) {
+    print_cpu_info();
+}
+
 BackendCPU::~BackendCPU() {}
 
 /// @brief Compute the gamma_delta vector

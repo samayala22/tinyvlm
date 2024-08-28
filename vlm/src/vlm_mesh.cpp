@@ -113,9 +113,7 @@ SurfDims MeshIO::get_dims(const std::string& filename) const {
         throw std::runtime_error("Failed to open mesh file");
     }
     auto dims = _file->get_dims(file);
-    std::cout << "Number of panels: " << dims.first * dims.second << "\n";
-    std::cout << "nc: " << dims.first << "\n";
-    std::cout << "ns: " << dims.second << "\n";
+    std::printf("MESH: %s (%llu x %llu)\n", filename.c_str(), dims.first, dims.second);
     return dims;
 }
 

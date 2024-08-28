@@ -149,20 +149,20 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     backend->gamma_shed(gamma_wing.d_view(), gamma_wing_prev.d_view(), gamma_wake.d_view(), 0);
     backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
 
-    mesh.verts_wing_init.to_host();
-    mesh.verts_wing.to_host();
-    mesh.verts_wake.to_host();
-    mesh.normals.to_host();
-    mesh.colloc.to_host();
-    mesh.area.to_host();
-    lhs.to_host();
-    rhs.to_host();
-    gamma_wing.to_host();
-    gamma_wake.to_host();
-    gamma_wing_prev.to_host();
-    gamma_wing_delta.to_host();
-    local_velocities.to_host();
-    transforms.to_host();
+    // mesh.verts_wing_init.to_host();
+    // mesh.verts_wing.to_host();
+    // mesh.verts_wake.to_host();
+    // mesh.normals.to_host();
+    // mesh.colloc.to_host();
+    // mesh.area.to_host();
+    // lhs.to_host();
+    // rhs.to_host();
+    // gamma_wing.to_host();
+    // gamma_wake.to_host();
+    // gamma_wing_prev.to_host();
+    // gamma_wing_delta.to_host();
+    // local_velocities.to_host();
+    // transforms.to_host();
 
     return AeroCoefficients{
         backend->coeff_steady_cl_multi(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), flow, mesh.area.d_view()),

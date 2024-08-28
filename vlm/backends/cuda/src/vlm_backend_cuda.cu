@@ -50,27 +50,11 @@ using namespace vlm;
         } \
     } while (0)
 
-void printCudaInfo() {
-    int deviceCount = 0;
-    cudaError_t err = cudaGetDeviceCount(&deviceCount);
 
-    std::printf("----- CUDA Device information -----\n");
-    std::printf("Found %d device(s)\n", deviceCount);
-    // Get CUDA Runtime version
-    int cudaRuntimeVersion = 0;
-    cudaRuntimeGetVersion(&cudaRuntimeVersion);
-    std::printf("CUDA Runtime: %d.%d\n", cudaRuntimeVersion / 1000, (cudaRuntimeVersion % 100) / 10);
-    
-    for (int i=0; i<deviceCount; i++) {
-        cudaDeviceProp deviceProps;
-        cudaGetDeviceProperties(&deviceProps, i);
-        std::printf("Device %d: %s\n", i, deviceProps.name);
-        std::printf("   SMs:        %d\n", deviceProps.multiProcessorCount);
-        std::printf("   Global mem: %.0f MB\n",
-               static_cast<float>(deviceProps.totalGlobalMem) / (1024 * 1024));
-        std::printf("   CUDA Cap:   %d.%d\n", deviceProps.major, deviceProps.minor);
-    }
-    std::printf("-----------------------------------\n");
+void print_cuda_info() {
+    cudaDeviceProp device_props;
+    cudaGetDeviceProperties(&device_props, 0);
+    std::printf("DEVICE: %s (%d SMs, %llu MB, CUDA %d.%d)\n", device_props.name, device_props.multiProcessorCount, device_props.totalGlobalMem / (1024ull * 1024ull), device_props.major, device_props.minor);
 }
 
 // Singleton class to manage CUDA context (handle)
@@ -160,7 +144,7 @@ class MemoryCUDA final : public Memory {
 };
 
 BackendCUDA::BackendCUDA() : Backend(std::make_unique<MemoryCUDA>())  {
-    printCudaInfo();
+    print_cuda_info();
     CtxManager::getInstance().create();
 }
 

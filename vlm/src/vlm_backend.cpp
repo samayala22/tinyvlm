@@ -1,6 +1,5 @@
 #include "vlm_backend.hpp"
 #include "vlm_mesh.hpp"
-#include "tinycpuid.hpp"
 
 #include <string>
 
@@ -14,9 +13,6 @@
 using namespace vlm;
 
 std::unique_ptr<Backend> vlm::create_backend(const std::string& backend_name) {
-    //tiny::CPUID cpuid;
-    //cpuid.print_info();
-
     #ifdef VLM_CPU
     if (backend_name == "cpu") {
         return std::make_unique<BackendCPU>();
