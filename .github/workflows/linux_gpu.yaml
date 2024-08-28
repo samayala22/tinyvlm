@@ -30,11 +30,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Display NVIDIA SMI details
-        run: |
-          nvidia-smi
-          nvidia-smi -L
-          nvidia-smi -q -d Memory
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.16
+          id: cuda-toolkit
+          with:
+            cuda: '12.4.0'
 
       - name: Download ISPC
         run: |
