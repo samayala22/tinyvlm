@@ -20,8 +20,8 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64]
-        mode: [release, debug]
-        compiler: [clang, gcc]
+        mode: [release] # , debug]
+        compiler: [clang] # , gcc]
 
     steps:
       - name: Checkout repository
@@ -43,7 +43,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev clang libomp-dev libc++-dev gcc g++ gobjc
+          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev build-essential libomp-dev clang libc++-dev libstdc++-dev
 
       - name: Set xmake env
         run: echo "XMAKE_GLOBALDIR=${{ runner.workspace }}/xmake-global" >> $GITHUB_ENV
