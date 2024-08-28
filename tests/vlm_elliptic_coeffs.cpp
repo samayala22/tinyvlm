@@ -47,9 +47,6 @@ int main(int  /*argc*/, char ** /*argv*/) {
 
     auto solvers = tiny::make_combination(meshes, backends);
     for (const auto& [mesh_name, backend_name] : solvers) {
-        std::printf("\nBACKEND: %s\n", backend_name.get().c_str());
-        std::printf("MESH: %s\n", mesh_name.get().c_str());
-
         VLM simulation{backend_name, {mesh_name}};
 
         std::printf("\n|    Alpha   |     CL     |     CD     |    CMx     |    CMy     |    CMz     |  CL Error   |  CD Error   |\n");

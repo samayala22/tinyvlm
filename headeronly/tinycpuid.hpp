@@ -6,10 +6,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdint.h>
-#include <string_view>
+#include <string>
 #include <map>
-
-#include "tinycmap.hpp"
 
 namespace tiny {
 
@@ -113,7 +111,7 @@ static bool set_cpu_affinity(int logical_cpu) {
 #error "Unsupported platform"
 #endif
 
-#define EXTRACTS_BITS(reg, highbit, lowbit) ((reg >> lowbit) & ((1ULL << (highbit - lowbit + 1)) - 1))
+#define EXTRACTS_BITS(reg, highbit, lowbit) (((reg) >> (lowbit)) & ((1ULL << ((highbit) - (lowbit) + 1)) - 1))
 
 bool HWMTSupported() {
     unsigned int e_x[4];
@@ -145,7 +143,7 @@ class CPUID {
         CPUID();
         ~CPUID() = default;
         void print_info() noexcept;
-        constexpr bool has(const std::string_view feature) noexcept;
+        constexpr bool has(const std::string& feature) noexcept;
     private:
         unsigned int instr_set = 0u; // bitfield of supported instruction sets
 
@@ -168,7 +166,7 @@ struct Bytes {
     };
 };
 
-static constexpr auto InstrSets = tiny::make_map<std::string_view, unsigned int>({
+static auto InstrSets = std::map<std::string, unsigned int>({
     {"MMX", 1u << 0},
     {"SSE", 1u << 1},
     {"SSE2", 1u << 2},
@@ -343,7 +341,7 @@ void CPUID::get_instr_set() noexcept {
     if (eax & (1 << 5)) instr_set |= InstrSets["AVX512_BF16"];
 }
 
-constexpr bool CPUID::has(std::string_view feature) noexcept {
+constexpr bool CPUID::has(const std::string& feature) noexcept {
     return (instr_set & InstrSets[feature]);
 }
 
@@ -396,7 +394,7 @@ void CPUID::print_info() noexcept {
     std::cout << "Logical cores: " << threads << "\n";
 
     std::cout << "Instruction sets: ";
-    for (auto& [key, value] : InstrSets.data) {
+    for (auto& [key, value] : InstrSets) {
         if (instr_set & value) {
             std::cout << key << " ";
         }
