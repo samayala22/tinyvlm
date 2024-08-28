@@ -43,7 +43,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev build-essential libomp-dev clang libc++-dev libstdc++-dev
+          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev build-essential libomp-dev clang libc++-dev libstdc++-10-dev
 
       - name: Set xmake env
         run: echo "XMAKE_GLOBALDIR=${{ runner.workspace }}/xmake-global" >> $GITHUB_ENV
