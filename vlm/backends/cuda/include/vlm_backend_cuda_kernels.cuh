@@ -304,10 +304,10 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* vert
     
     const u64 vi = verts_wake_m - 2;
 
-    u64 v0 = (vi+0) * (verts_wake_n) + j;
-    u64 v1 = (vi+0) * (verts_wake_n) + j + 1;
-    u64 v2 = (vi+1) * (verts_wake_n) + j + 1;
-    u64 v3 = (vi+1) * (verts_wake_n) + j;
+    const u64 v0 = (vi+0) * (verts_wake_n) + j;
+    const u64 v1 = (vi+0) * (verts_wake_n) + j + 1;
+    const u64 v2 = (vi+1) * (verts_wake_n) + j + 1;
+    const u64 v3 = (vi+1) * (verts_wake_n) + j;
 
     const float3 vertex0 = {verts_wake[0*verts_wake_ld + v0], verts_wake[1*verts_wake_ld + v0], verts_wake[2*verts_wake_ld + v0]};
     const float3 vertex1 = {verts_wake[0*verts_wake_ld + v1], verts_wake[1*verts_wake_ld + v1], verts_wake[2*verts_wake_ld + v1]};
@@ -317,10 +317,10 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* vert
     const float3 colloc = 0.25f * (vertex0 + vertex1 + vertex2 + vertex3); // 3*(3 add + 1 mul)
     const float3 normal = quad_normal(vertex0, vertex1, vertex2, vertex3);
 
-    u64 vv0 = (vi+0) * (verts_wake_n) + i;
-    u64 vv1 = (vi+0) * (verts_wake_n) + i + 1;
-    u64 vv2 = (vi+1) * (verts_wake_n) + i + 1;
-    u64 vv3 = (vi+1) * (verts_wake_n) + i;
+    const u64 vv0 = (vi+0) * (verts_wake_n) + i;
+    const u64 vv1 = (vi+0) * (verts_wake_n) + i + 1;
+    const u64 vv2 = (vi+1) * (verts_wake_n) + i + 1;
+    const u64 vv3 = (vi+1) * (verts_wake_n) + i;
 
     const float3 vvertex0 = {verts_wake[0*verts_wake_ld + vv0], verts_wake[1*verts_wake_ld + vv0], verts_wake[2*verts_wake_ld + vv0]};
     const float3 vvertex1 = {verts_wake[0*verts_wake_ld + vv1], verts_wake[1*verts_wake_ld + vv1], verts_wake[2*verts_wake_ld + vv1]};
@@ -332,8 +332,8 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* vert
     kernel_symmetry(&inf, colloc, vvertex1, vvertex2, sigma);
     kernel_symmetry(&inf, colloc, vvertex3, vvertex0, sigma);
 
-    float gammaw = gamma_wake[vi * (verts_wake_n-1) + i];
-    f32 cd_local = - gamma_wake[vi * (verts_wake_n-1) + j] * dot(gammaw * inf, normal) * length(vertex1 - vertex0);
+    const float gammaw = gamma_wake[vi * (verts_wake_n-1) + i];
+    const f32 cd_local = - gamma_wake[vi * (verts_wake_n-1) + j] * dot(gammaw * inf, normal) * length(vertex1 - vertex0);
     
     atomicAdd(cd, cd_local);
     // cd_local = warp_reduce_sum(cd_local);
@@ -343,4 +343,86 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* vert
     // if (block.thread_rank() == 0) atomicAdd(cd, cd_local);
 }
 
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(u64 wake_m, u64 wake_n, u64 wing_mn, const f32* colloc, const u64 colloc_ld, const f32* normals, const u64 normals_ld, const f32* verts_wake, const u64 verts_wake_ld, const f32* gamma_wake, f32* rhs, f32 sigma) {
+    static_assert(X == 32);
+    const cg::thread_block block = cg::this_thread_block();
+    const u64 i = blockIdx.x * blockDim.x + threadIdx.x; // wake_verts
+    const u64 j = blockIdx.y * blockDim.y + threadIdx.y; // colloc
+    const u32 wid = block.thread_rank() / warpSize;
+    const u32 lane = block.thread_rank() % warpSize;
+
+    if (i >= wake_m * wake_n || j >= wing_mn) return;
+
+    const u64 v0 = i + i / wake_n;
+    const u64 v1 = v0 + 1;
+    const u64 v3 = v0 + wake_n+1;
+    const u64 v2 = v3 + 1;
+
+    const float3 colloc_influenced = {colloc[0*colloc_ld + j], colloc[1*colloc_ld + j], colloc[2*colloc_ld + j]};
+    const float3 normal = {normals[0*normals_ld + j], normals[1*normals_ld + j], normals[2*normals_ld + j]};
+
+    const float3 vertex0 = {verts_wake[0*verts_wake_ld + v0], verts_wake[1*verts_wake_ld + v0], verts_wake[2*verts_wake_ld + v0]};
+    const float3 vertex1 = {verts_wake[0*verts_wake_ld + v1], verts_wake[1*verts_wake_ld + v1], verts_wake[2*verts_wake_ld + v1]};
+    const float3 vertex2 = {verts_wake[0*verts_wake_ld + v2], verts_wake[1*verts_wake_ld + v2], verts_wake[2*verts_wake_ld + v2]};
+    const float3 vertex3 = {verts_wake[0*verts_wake_ld + v3], verts_wake[1*verts_wake_ld + v3], verts_wake[2*verts_wake_ld + v3]};
+
+    float3 ind = {0.0f, 0.0f, 0.0f};
+
+    kernel_symmetry(&ind, colloc_influenced, vertex0, vertex1, sigma);
+    kernel_symmetry(&ind, colloc_influenced, vertex1, vertex2, sigma);
+    kernel_symmetry(&ind, colloc_influenced, vertex2, vertex3, sigma);
+    kernel_symmetry(&ind, colloc_influenced, vertex3, vertex0, sigma);
+
+    float induced_vel = dot(ind * gamma_wake[i], normal);
+
+    // atomicAdd(rhs + j, -induced_vel); // naive reduction
+    induced_vel = warp_reduce_sum(induced_vel); // Y warp reductions
+
+    if (threadIdx.x == 0) {
+        atomicAdd(rhs + j, -induced_vel);
+    }
+}
+
+template<u32 X, u32 Y = 1, u32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_unsteady_cl_single(u64 m, u64 n, u64 ld, const f32* verts_wing, u64 verts_wing_ld, const f32* gamma_wing_delta, const f32* gamma_wing, const f32* gamma_wing_prev, const f32* velocities, u64 velocities_ld, const f32* areas, const f32* normals, u64 normals_ld, float3 freestream, f32 dt, f32* cl) {
+    const cg::thread_block block = cg::this_thread_block();
+    const u64 j = blockIdx.x * blockDim.x + threadIdx.x; // wake_verts
+    const u64 i = blockIdx.y * blockDim.y + threadIdx.y; // colloc
+    const u32 wid = block.thread_rank() / warpSize;
+    const u32 lane = block.thread_rank() % warpSize;
+
+    if (i >= m|| j >= n) return;
+    
+    const f32 rho = 1.0f; // TODO: remove hardcoded rho
+    const float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
+    const float3 lift_axis = normalize(cross(freestream, span_axis));
+
+    const u64 lidx = i * ld + j;
+
+    const float3 vel{velocities[0*velocities_ld + lidx], velocities[1*velocities_ld + lidx], velocities[2*velocities_ld + lidx]};
+
+    const u64 v0 = (i+0) * (ld + 1) + j;
+    const u64 v1 = (i+0) * (ld + 1) + j + 1;
+
+    const float3 vertex0{verts_wing[0*verts_wing_ld + v0], verts_wing[1*verts_wing_ld + v0], verts_wing[2*verts_wing_ld + v0]}; // upper left
+    const float3 vertex1{verts_wing[0*verts_wing_ld + v1], verts_wing[1*verts_wing_ld + v1], verts_wing[2*verts_wing_ld + v1]}; // upper right
+    const float3 normal{normals[0*normals_ld + lidx], normals[1*normals_ld + lidx], normals[2*normals_ld + lidx]};
+    
+    float3 force{0.f, 0.f, 0.f};
+    const f32 gamma_dt = (gamma_wing[lidx] - gamma_wing_prev[lidx]) / dt; // backward difference
+    
+    // Joukowski method
+    force += rho * gamma_wing_delta[lidx] * cross(vel, vertex1 - vertex0); // steady contribution
+    // printf("i: %lld | j: %lld | force: %f %f %f\n", i, j,force.x, force.y, force.z);
+    force += rho * gamma_dt * areas[lidx] * normal; // unsteady contribution
+    std::printf("i: %lld | j: %lld | gamma_dt: %f | area: %f \n", i, j, gamma_dt, areas[lidx]);
+    float cl_local = dot(force, lift_axis);
+
+    atomicAdd(cl, cl_local);
+    // cl_local = warp_reduce_sum(cl_local);
+    // if (lane == 0) {
+    //     atomicAdd(cl, cl_local);
+    // }
+}
 } // namespace vlm
