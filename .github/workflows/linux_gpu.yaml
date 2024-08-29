@@ -36,11 +36,6 @@ jobs:
         with:
           cuda: '12.4.0'
 
-      - name: Debug
-        run: |
-          nvcc --version
-          whereis nvcc
-
       - name: Download ISPC
         run: |
           curl -L "https://github.com/ispc/ispc/releases/download/v1.22.0/ispc-v1.22.0-linux.tar.gz" -o ispc.tar.gz
@@ -87,7 +82,7 @@ jobs:
       # Config xmake
       - name: Config
         run: |
-          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --build-cuda=y
+          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --cuda=12.4 --build-cuda=y
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4
