@@ -36,6 +36,11 @@ jobs:
         with:
           cuda: '12.4.0'
 
+      - name: Debug
+        run: |
+          nvcc --version
+          whereis nvcc
+
       - name: Download ISPC
         run: |
           curl -L "https://github.com/ispc/ispc/releases/download/v1.22.0/ispc-v1.22.0-linux.tar.gz" -o ispc.tar.gz
