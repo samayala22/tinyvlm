@@ -316,7 +316,7 @@ f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_w
     const u64 ns = gamma_delta.layout.ns();
     for (u64 i = 0; i < nc; i++) {
         for (u64 j = 0; j < ns; j++) {
-            const u64 idx = i * ns + j; // linear index
+            const u64 idx = i * gamma.layout.ld() + j; // linear index
 
             linalg::alias::float3 V{
                 velocities[0*velocities.layout.stride() + idx],
@@ -337,6 +337,7 @@ f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_w
             // Joukowski method
             force += rho * gamma_delta[idx] * linalg::cross(V, vertex1 - vertex0); // steady contribution
             force += rho * gamma_dt * areas[idx] * normal; // unsteady contribution
+            std::printf("i: %lld | j: %lld | gamma_dt: %f | area: %f \n", i, j, gamma_dt, areas[idx]);
 
             // Katz Plotkin method
             // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};

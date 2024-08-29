@@ -22,7 +22,7 @@ using namespace vlm;
 
 #define CHECK_CUDA(call) \
     do { \
-        cudaError_t err = (call); \
+        const cudaError_t err = (call); \
         if (err != cudaSuccess) { \
             fprintf(stderr, "CUDA Error in %s at line %d: %s\n", \
                     __FILE__, __LINE__, cudaGetErrorString(err)); \
@@ -32,7 +32,7 @@ using namespace vlm;
 
 #define CHECK_CUSOLVER(call) \
     do { \
-        cusolverStatus_t err = (call); \
+        const cusolverStatus_t err = (call); \
         if (err != CUSOLVER_STATUS_SUCCESS) { \
             fprintf(stderr, "cuSolver Error in %s at line %d: %d\n", \
                     __FILE__, __LINE__, err); \
@@ -42,7 +42,7 @@ using namespace vlm;
 
 #define CHECK_CUBLAS(call) \
     do { \
-        cublasStatus_t err = (call); \
+        const cublasStatus_t err = (call); \
         if (err != CUBLAS_STATUS_SUCCESS) { \
             fprintf(stderr, "cuBLAS Error in %s at line %d: %d\n", \
                     __FILE__, __LINE__, err); \
@@ -284,7 +284,29 @@ void BackendCUDA::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const Vi
 }
 
 void BackendCUDA::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
-    // TODO
+    if (iteration == 0) return; // cuda doesnt support 0 sized domain
+    constexpr Dim3<u32> block{32, 16};
+
+    for (u32 i = 0; i < rhs.layout.surfaces().size(); i++) {
+        const u64 wake_m  = iteration;
+        const u64 wake_n  = verts_wake.layout.ns(i) - 1;
+        const Dim3<u64> n{wake_m * wake_n, rhs.layout.size()};
+        kernel_wake_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+            wake_m, 
+            wake_n,
+            rhs.layout.size(),
+            colloc.ptr,
+            colloc.layout.stride(),
+            normals.ptr,
+            normals.layout.stride(),
+            verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i),
+            verts_wake.layout.stride(),
+            gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration) * gamma_wake.layout.ns(i),
+            rhs.ptr,
+            sigma_vatistas
+        );
+        CHECK_CUDA(cudaGetLastError());
+    }
 }
 
 void BackendCUDA::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) {
@@ -319,7 +341,7 @@ void BackendCUDA::lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
 
     CHECK_CUSOLVER(cusolverDnSgetrf(CtxManager::getInstance().cusolver(), n, n, lhs.ptr, n, d_solver_buffer, d_solver_ipiv, d_solver_info));
     memory->copy(MemoryTransfer::DeviceToHost, &h_info, d_solver_info, sizeof(int));
-    if (h_info != 0) printf("Error: LU factorization failed\n");
+    if (h_info != 0) std::printf("Error: LU factorization failed\n");
 };
 
 void BackendCUDA::lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) {
@@ -331,7 +353,7 @@ void BackendCUDA::lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<
     memory->copy(MemoryTransfer::DeviceToDevice, gamma.ptr, rhs.ptr, rhs.size_bytes());
     CHECK_CUSOLVER(cusolverDnSgetrs(CtxManager::getInstance().cusolver(), CUBLAS_OP_N, n, 1, lhs.ptr, n, d_solver_ipiv, gamma.ptr, n, d_solver_info));
     memory->copy(MemoryTransfer::DeviceToHost, &h_info, d_solver_info, sizeof(int));
-    if (h_info != 0) printf("Error: LU solve failed\n");
+    if (h_info != 0) std::printf("Error: LU solve failed\n");
 }
 
 f32 BackendCUDA::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const FlowData& flow, f32 area) {
@@ -376,13 +398,55 @@ f32 BackendCUDA::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing
 }
 
 f32 BackendCUDA::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const View<f32, SingleSurface>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
-    // TODO
-    return 0.0f;
+    const f32 rho = 1.0f; // TODO: remove hardcoded rho
+    f32 h_cl = 0.0f;
+    cudaMemset(d_val, 0, sizeof(f32));
+    constexpr Dim3<u32> block{32, 16};
+    const Dim3<u64> n{gamma.layout.ns(), gamma.layout.nc()};
+    kernel_coeff_unsteady_cl_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+        n.y,
+        n.x,
+        gamma.layout.ld(),
+        verts_wing.ptr,
+        verts_wing.layout.stride(),
+        gamma_delta.ptr,
+        gamma.ptr,
+        gamma_prev.ptr,
+        velocities.ptr,
+        velocities.layout.stride(),
+        areas.ptr,
+        normals.ptr,
+        normals.layout.stride(),
+        float3{freestream.x, freestream.y, freestream.z},
+        dt,
+        d_val
+    );
+    CHECK_CUDA(cudaGetLastError());
+    memory->copy(MemoryTransfer::DeviceToHost, &h_cl, d_val, sizeof(f32));
+    CtxManager::getInstance().sync();
+    
+    return h_cl / (0.5f * rho * linalg::length2(freestream) * area);
 }
 
 f32 BackendCUDA::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, const linalg::alias::float3& freestream, f32 dt) {
-    // TODO
-    return 0.0f;
+        f32 cl = 0.0f;
+    f32 total_area = 0.0f;
+    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
+        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
+        const auto areas_local = areas.layout.subview(areas.ptr, i);
+        const auto gamma_delta_local = gamma_wing_delta.layout.subview(gamma_wing_delta.ptr, i);
+        const auto gamma_wing_local = gamma_wing.layout.subview(gamma_wing.ptr, i);
+        const auto gamma_wing_prev_local = gamma_wing_prev.layout.subview(gamma_wing_prev.ptr, i);
+        const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
+        const auto normals_local = normals.layout.subview(normals.ptr, i);
+
+        const f32 area_local = mesh_area(areas_local);
+        const f32 wing_cl = coeff_unsteady_cl_single(verts_wing_local, gamma_delta_local, gamma_wing_local, gamma_wing_prev_local, velocities_local, areas_local, normals_local, freestream, dt, area_local);
+        cl += wing_cl * area_local;
+        total_area += area_local;
+    }
+    cl /= total_area;
+    return cl;
 }
 
 f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) {
