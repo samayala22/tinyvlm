@@ -74,7 +74,6 @@ void VLM::alloc_buffers() {
     transforms.alloc(Tensor<3>({4,4,nb_meshes}));
 
     backend->lu_allocate(lhs.d_view());
-    backend_cpu->lu_allocate(lhs.h_view()); // TEMPORARY
 }
 
 // AeroCoefficients VLM::run(const FlowData& flow) {
@@ -292,9 +291,7 @@ AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
     };
 }
 
-UVLM::UVLM(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes),
-colloc_pos(*backend->memory), lhs(*backend->memory), rhs(*backend->memory), gamma_wing(*backend->memory), gamma_wake(*backend->memory), gamma_wing_prev(*backend->memory), gamma_wing_delta(*backend->memory), velocities(*backend->memory), transforms(*backend->memory) {
-    
+UVLM::UVLM(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes) {
     alloc_buffers();
 }
 
@@ -427,13 +424,30 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
         velocities.to_device();
         backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
         backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), velocities.d_view());
-        backend->rhs_assemble_wake_influence(rhs.d_view(), gamma_wake.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wake.d_view(), i);
+        
+        rhs.to_host();
+        gamma_wake.to_host();
+        mesh.colloc.to_host();
+        mesh.normals.to_host();
+        mesh.verts_wake.to_host();
+        // backend->rhs_assemble_wake_influence(rhs.d_view(), gamma_wake.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wake.d_view(), i);
+        backend_cpu->rhs_assemble_wake_influence(rhs.h_view(), gamma_wake.h_view(), mesh.colloc.h_view(), mesh.normals.h_view(), mesh.verts_wake.h_view(), i);
+        rhs.to_device();
+        
         backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
         backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
         
         // skip cl computation for the first iteration
         if (i > 0) {
-            const f32 cl_unsteady = backend->coeff_unsteady_cl_multi(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), gamma_wing.d_view(), gamma_wing_prev.d_view(), velocities.d_view(), mesh.area.d_view(), mesh.normals.d_view(), freestream, dt);
+            mesh.verts_wing.to_host(); // temporary 
+            gamma_wing_delta.to_host(); // temporary 
+            gamma_wing.to_host(); // temporary 
+            gamma_wing_prev.to_host(); // temporary 
+            velocities.to_host(); // temporary 
+            mesh.area.to_host(); // temporary 
+            mesh.normals.to_host(); // temporary 
+            // const f32 cl_unsteady = backend->coeff_unsteady_cl_multi(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), gamma_wing.d_view(), gamma_wing_prev.d_view(), velocities.d_view(), mesh.area.d_view(), mesh.normals.d_view(), freestream, dt);
+            const f32 cl_unsteady = backend_cpu->coeff_unsteady_cl_multi(mesh.verts_wing.h_view(), gamma_wing_delta.h_view(), gamma_wing.h_view(), gamma_wing_prev.h_view(), velocities.h_view(), mesh.area.h_view(), mesh.normals.h_view(), freestream, dt);
 
             std::printf("t: %f, CL: %f\n", t, cl_unsteady);
             mesh.verts_wing.to_host();
