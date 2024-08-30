@@ -351,7 +351,7 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(u64 wake_m, u64 w
     const u64 j = blockIdx.y * blockDim.y + threadIdx.y; // colloc
     const u32 wid = block.thread_rank() / warpSize;
     const u32 lane = block.thread_rank() % warpSize;
-
+    
     if (i >= wake_m * wake_n || j >= wing_mn) return;
 
     const u64 v0 = i + i / wake_n;
@@ -376,12 +376,12 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(u64 wake_m, u64 w
 
     float induced_vel = dot(ind * gamma_wake[i], normal);
 
-    // atomicAdd(rhs + j, -induced_vel); // naive reduction
-    induced_vel = warp_reduce_sum(induced_vel); // Y warp reductions
+    atomicAdd(rhs + j, -induced_vel); // naive reduction
+    // induced_vel = warp_reduce_sum(induced_vel); // Y warp reductions
 
-    if (threadIdx.x == 0) {
-        atomicAdd(rhs + j, -induced_vel);
-    }
+    // if (threadIdx.x == 0) {
+    //     atomicAdd(rhs + j, -induced_vel);
+    // }
 }
 
 template<u32 X, u32 Y = 1, u32 Z = 1>
@@ -414,9 +414,7 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_unsteady_cl_single(u64 m, 
     
     // Joukowski method
     force += rho * gamma_wing_delta[lidx] * cross(vel, vertex1 - vertex0); // steady contribution
-    // printf("i: %lld | j: %lld | force: %f %f %f\n", i, j,force.x, force.y, force.z);
     force += rho * gamma_dt * areas[lidx] * normal; // unsteady contribution
-    std::printf("i: %lld | j: %lld | gamma_dt: %f | area: %f \n", i, j, gamma_dt, areas[lidx]);
     float cl_local = dot(force, lift_axis);
 
     atomicAdd(cl, cl_local);

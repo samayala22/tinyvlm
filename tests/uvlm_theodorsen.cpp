@@ -43,8 +43,7 @@ int main() {
     const u64 nj = 2;
     vlm::Executor::instance(1);
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
-    // const std::vector<std::string> backends = get_available_backends();
-    const std::vector<std::string> backends = {"cuda"};
+    const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
 
