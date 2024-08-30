@@ -3,6 +3,7 @@
 #include "vlm_backend.hpp"
 #include "tinytimer.hpp"
 #include "tinyconfig.hpp"
+#include "tinypbar.hpp"
 
 #include "vlm_data.hpp"
 #include "vlm_mesh.hpp"
@@ -16,7 +17,7 @@
 
 using namespace vlm;
 
-Simulation::Simulation(const std::string& backend_name, const std::vector<std::string>& meshes) : backend(create_backend(backend_name)), backend_cpu(create_backend("cpu")) {
+Simulation::Simulation(const std::string& backend_name, const std::vector<std::string>& meshes) : backend(create_backend(backend_name)) {
     // Read the sizes of all the meshes
     u64 off_wing_p = 0;
     u64 off_wing_v = 0;
@@ -279,6 +280,7 @@ void UVLM::alloc_buffers() {
 }
 
 void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final) {
+    const tiny::ScopedTimer timer("UVLM");
     mesh.verts_wing_init.to_device(); // raw mesh vertices from file
     for (u64 m = 0; m < kinematics.size(); m++) {
         initial_pose[m].store(transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), transforms.h_view().layout.stride(1));
@@ -289,7 +291,7 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
     backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, verts_wing_pos.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
     backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
     backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
- 
+
     // 1.  Compute the dynamic time steps for the simulation
     verts_wing_pos.to_host();
     vec_t.clear();
@@ -354,7 +356,8 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
     cl_data << "0.5" << "\n";
 
     // 4. Transient simulation loop
-    for (u32 i = 0; i < vec_t.size()-1; i++) {
+    // for (u32 i = 0; i < vec_t.size()-1; i++) {
+    for (const i32 i : tiny::pbar<i32>(0, vec_t.size()-1)) {
         const f32 t = vec_t[i];
         const f32 dt = vec_t[i+1] - t;
 
@@ -398,9 +401,10 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
         // skip cl computation for the first iteration
         if (i > 0) {
             const f32 cl_unsteady = backend->coeff_unsteady_cl_multi(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), gamma_wing.d_view(), gamma_wing_prev.d_view(), velocities.d_view(), mesh.area.d_view(), mesh.normals.d_view(), freestream, dt);
-            std::printf("t: %f, CL: %f\n", t, cl_unsteady);
-            mesh.verts_wing.to_host();
-            cl_data << t << " " << *(mesh.verts_wing.h_view().ptr + 2*mesh.verts_wing.h_view().layout.stride()) << " " << cl_unsteady << " " << 0.f << "\n";
+            // if (i == vec_t.size()-2) std::printf("t: %f, CL: %f\n", t, cl_unsteady);
+            // std::printf("t: %f, CL: %f\n", t, cl_unsteady);
+            // mesh.verts_wing.to_host();
+            // cl_data << t << " " << *(mesh.verts_wing.h_view().ptr + 2*mesh.verts_wing.h_view().layout.stride()) << " " << cl_unsteady << " " << 0.f << "\n";
         }
 
         // backend->displace_wake_rollup(wake_rollup.d_view(), mesh.verts_wake.d_view(), mesh.verts_wing.d_view(), gamma_wing.d_view(), gamma_wake.d_view(), dt, i);

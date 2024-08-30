@@ -20,7 +20,9 @@ int main(int  /*argc*/, char ** /*argv*/) {
         {
             "../../../../mesh/infinite_rectangular_2x2_part0.x",
             "../../../../mesh/infinite_rectangular_2x2_part1.x"
-        }
+        },
+        { "../../../../mesh/infinite_rectangular_10x5.x" },
+        { "../../../../mesh/infinite_rectangular_20x5.x" }
     };
 
     // const std::vector<std::vector<std::string>> meshes = {

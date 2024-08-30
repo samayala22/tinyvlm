@@ -352,36 +352,37 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(u64 wake_m, u64 w
     const u32 wid = block.thread_rank() / warpSize;
     const u32 lane = block.thread_rank() % warpSize;
     
-    if (i >= wake_m * wake_n || j >= wing_mn) return;
+    float induced_vel = 0.0f;
+    if (i < wake_m * wake_n || j < wing_mn) {
+        const u64 v0 = i + i / wake_n;
+        const u64 v1 = v0 + 1;
+        const u64 v3 = v0 + wake_n+1;
+        const u64 v2 = v3 + 1;
 
-    const u64 v0 = i + i / wake_n;
-    const u64 v1 = v0 + 1;
-    const u64 v3 = v0 + wake_n+1;
-    const u64 v2 = v3 + 1;
+        const float3 colloc_influenced = {colloc[0*colloc_ld + j], colloc[1*colloc_ld + j], colloc[2*colloc_ld + j]};
+        const float3 normal = {normals[0*normals_ld + j], normals[1*normals_ld + j], normals[2*normals_ld + j]};
 
-    const float3 colloc_influenced = {colloc[0*colloc_ld + j], colloc[1*colloc_ld + j], colloc[2*colloc_ld + j]};
-    const float3 normal = {normals[0*normals_ld + j], normals[1*normals_ld + j], normals[2*normals_ld + j]};
+        const float3 vertex0 = {verts_wake[0*verts_wake_ld + v0], verts_wake[1*verts_wake_ld + v0], verts_wake[2*verts_wake_ld + v0]};
+        const float3 vertex1 = {verts_wake[0*verts_wake_ld + v1], verts_wake[1*verts_wake_ld + v1], verts_wake[2*verts_wake_ld + v1]};
+        const float3 vertex2 = {verts_wake[0*verts_wake_ld + v2], verts_wake[1*verts_wake_ld + v2], verts_wake[2*verts_wake_ld + v2]};
+        const float3 vertex3 = {verts_wake[0*verts_wake_ld + v3], verts_wake[1*verts_wake_ld + v3], verts_wake[2*verts_wake_ld + v3]};
 
-    const float3 vertex0 = {verts_wake[0*verts_wake_ld + v0], verts_wake[1*verts_wake_ld + v0], verts_wake[2*verts_wake_ld + v0]};
-    const float3 vertex1 = {verts_wake[0*verts_wake_ld + v1], verts_wake[1*verts_wake_ld + v1], verts_wake[2*verts_wake_ld + v1]};
-    const float3 vertex2 = {verts_wake[0*verts_wake_ld + v2], verts_wake[1*verts_wake_ld + v2], verts_wake[2*verts_wake_ld + v2]};
-    const float3 vertex3 = {verts_wake[0*verts_wake_ld + v3], verts_wake[1*verts_wake_ld + v3], verts_wake[2*verts_wake_ld + v3]};
+        float3 ind = {0.0f, 0.0f, 0.0f};
 
-    float3 ind = {0.0f, 0.0f, 0.0f};
+        kernel_symmetry(&ind, colloc_influenced, vertex0, vertex1, sigma);
+        kernel_symmetry(&ind, colloc_influenced, vertex1, vertex2, sigma);
+        kernel_symmetry(&ind, colloc_influenced, vertex2, vertex3, sigma);
+        kernel_symmetry(&ind, colloc_influenced, vertex3, vertex0, sigma);
 
-    kernel_symmetry(&ind, colloc_influenced, vertex0, vertex1, sigma);
-    kernel_symmetry(&ind, colloc_influenced, vertex1, vertex2, sigma);
-    kernel_symmetry(&ind, colloc_influenced, vertex2, vertex3, sigma);
-    kernel_symmetry(&ind, colloc_influenced, vertex3, vertex0, sigma);
+        induced_vel = dot(ind * gamma_wake[i], normal);
+    }
 
-    float induced_vel = dot(ind * gamma_wake[i], normal);
+    // atomicAdd(rhs + j, -induced_vel); // naive reduction
+    induced_vel = warp_reduce_sum(induced_vel); // Y warp reductions
 
-    atomicAdd(rhs + j, -induced_vel); // naive reduction
-    // induced_vel = warp_reduce_sum(induced_vel); // Y warp reductions
-
-    // if (threadIdx.x == 0) {
-    //     atomicAdd(rhs + j, -induced_vel);
-    // }
+    if (threadIdx.x == 0) {
+        atomicAdd(rhs + j, -induced_vel);
+    }
 }
 
 template<u32 X, u32 Y = 1, u32 Z = 1>
