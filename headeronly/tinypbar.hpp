@@ -63,12 +63,12 @@ private:
     // XXX.XXS\0 (X number, S char)
     void SI(double x, char* out) {
         if (x == 0) {
-            std::strcpy(out, "0.00");
+            std::snprintf(out, 8, "0.00");
             return;
         }
         const int g = static_cast<int>(std::log10(x) / 3);
         const double scaled = x / std::pow(1000, g);
-        snprintf(out, 8, "%.2f%c", scaled, " kMGTPEZY"[g]);
+        std::snprintf(out, 8, "%.2f%c", scaled, " kMGTPEZY"[g]);
     }
 
 public:
