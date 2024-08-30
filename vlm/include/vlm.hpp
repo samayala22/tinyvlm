@@ -11,7 +11,7 @@ namespace vlm {
 class Simulation {
     public:
         std::unique_ptr<Backend> backend;
-        std::unique_ptr<Backend> backend_cpu; // TEMPORARY
+        // std::unique_ptr<Backend> backend_cpu; // TEMPORARY
         u32 nb_meshes;
         // Common geometry buffers
         Mesh mesh{*backend->memory};

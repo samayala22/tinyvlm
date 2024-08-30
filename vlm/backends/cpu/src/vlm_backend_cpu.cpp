@@ -165,13 +165,15 @@ void BackendCPU::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const Vie
     assert(rhs.layout.stride() == velocities.layout.stride());
     assert(rhs.layout.dims() == 1);
 
-    // todo: parallelize
-    for (u64 i = 0; i < rhs.size(); i++) {
+    tf::Taskflow taskflow;
+
+    taskflow.for_each_index((u64)0, (u64)rhs.size(), [&] (u64 i) {
         rhs[i] += - (
             velocities[i + 0 * velocities.layout.stride()] * normals[i + 0 * normals.layout.stride()] +
             velocities[i + 1 * velocities.layout.stride()] * normals[i + 1 * normals.layout.stride()] +
             velocities[i + 2 * velocities.layout.stride()] * normals[i + 2 * normals.layout.stride()]);
-    }
+    });
+    Executor::get().run(taskflow).wait();
 }
 
 // TODO: this doesnt work with multi-mesh rn
@@ -188,7 +190,7 @@ void BackendCPU::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const
         for (u32 i = 0; i < rhs.layout.surfaces().size(); i++) {
             ispc::kernel_wake_influence(colloc.ptr + idx, colloc.layout.stride(), normals.ptr + idx, normals.layout.stride(), verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), gamma_wake.ptr + gamma_wake.layout.offset(i), rhs.ptr + idx, sigma_vatistas, iteration);
         }
-    }).name("RHS Wake Influence");
+    });
 
     begin.precede(wake_influence);
     wake_influence.precede(end);

@@ -8,6 +8,7 @@
 #include "tinycombination.hpp"
 #include "tinyad.hpp"
 #include "tinytimer.hpp"
+#include "tinypbar.hpp"
 
 #include "vlm.hpp"
 #include "vlm_data.hpp"
@@ -39,9 +40,9 @@ void print_buffer(const T* start, u64 size) {
 }
 
 int main() {
-    const u64 ni = 2;
-    const u64 nj = 2;
-    vlm::Executor::instance(1);
+    const u64 ni = 20;
+    const u64 nj = 5;
+    // vlm::Executor::instance(1);
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
     const std::vector<std::string> backends = get_available_backends();
 
@@ -51,7 +52,7 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 1.0f;
+    const f32 cycles = 10.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
     const f32 k = 0.5; // reduced frequency
@@ -100,6 +101,5 @@ int main() {
         UVLM simulation{backend_name, {mesh_name}};
         simulation.run({kinematics}, {initial_pose}, t_final);
     }
-
     return 0;
 }
