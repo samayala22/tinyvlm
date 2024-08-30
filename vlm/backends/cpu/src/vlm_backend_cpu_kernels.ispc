@@ -175,7 +175,6 @@ export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 collo
 
     const uniform float3 normal = {normals[0*normals_ld], normals[1*normals_ld], normals[2*normals_ld]};
     const float induced_vel_dot_normal = dot(induced_vel, normal); // vertical 2 fma + mul
-    print("induced_vel: %\n", -reduce_add(induced_vel_dot_normal));
     *rhs -= reduce_add(induced_vel_dot_normal);
 }
 
