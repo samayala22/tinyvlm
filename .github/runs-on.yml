@@ -10,3 +10,7 @@ runners:
     family: ["g4dn.xlarge"]
     # image: ubuntu22-full-x64
     image: dlami-x64
+
+  gpu-nvidia-raw:
+    family: ["g4dn.xlarge"]
+    image: ubuntu22-full-x64

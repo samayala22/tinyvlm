@@ -6,9 +6,8 @@ on:
       - opened
   push:
     paths-ignore:
-      - '.github/workflows/windows.yaml'
-      - '.github/workflows/linux_gpu.yaml'
-      # - '.github/workflows/macos.yaml'
+      - '.github/workflows/**'
+      - '!.github/workflows/linux_ro.yaml'
       - 'README.md'
 
 jobs:
