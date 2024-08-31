@@ -5,6 +5,12 @@ images:
     owner: "898082745236" # AWS
     name: "Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04)*"
 
+images:
+  rtx-workstation:
+    platform: "linux"
+    arch: "x64"
+    name: "NVIDIA RTX Virtual Workstation - Ubuntu 22.04*"
+
 runners:
   gpu-nvidia:
     family: ["g4dn.xlarge"]
@@ -14,3 +20,7 @@ runners:
   gpu-nvidia-raw:
     family: ["g4dn.xlarge"]
     image: ubuntu22-full-x64
+
+  gpu-nvidia-rtx:
+    family: ["g4dn.xlarge"]
+    image: rtx-workstation
