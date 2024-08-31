@@ -1,4 +1,4 @@
-name: linux-gpu
+name: linux-gpu2
 on:
   workflow_dispatch:
   pull_request:
@@ -50,7 +50,8 @@ jobs:
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update
+          sudo apt-get purge -y '*nvidia*'
+          sudo apt-get purge -y '*cuda*'
+          sudo apt-get autoremove -y
           sudo apt install -y ubuntu-drivers-common && sudo ubuntu-drivers autoinstall
-          sudo modprobe nvidia
-          sudo apt-get -y install cuda-toolkit-12-4
           nvidia-smi
