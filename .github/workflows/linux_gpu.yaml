@@ -23,7 +23,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64]
-        mode: [release] # , debug]
+        mode: [release, debug]
 
     steps:
       - name: Checkout repository
