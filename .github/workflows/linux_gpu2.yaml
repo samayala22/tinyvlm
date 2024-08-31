@@ -45,13 +45,13 @@ jobs:
       #     sudo modprobe nvidia-uvm
       #     sudo apt-get -y install cuda-toolkit-12-4
       #     nvidia-smi
-      - name: Install CUDA Driver + Toolkit
+      - name: Install CUDA Driver
         run: |
+          cd /tmp/
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update
-          sudo apt-get purge -y '*nvidia*'
-          sudo apt-get purge -y '*cuda*'
-          sudo apt-get autoremove -y
-          sudo apt install -y ubuntu-drivers-common && sudo ubuntu-drivers autoinstall
-          nvidia-smi
+          sudo apt-get install -y cuda-drivers-545 nvidia-container-toolkit
+          sudo nvidia-ctk runtime configure --runtime=docker
+          sudo systemctl restart docker
+          docker run --rm --runtime=nvidia --gpus all ubuntu nvidia-smi
