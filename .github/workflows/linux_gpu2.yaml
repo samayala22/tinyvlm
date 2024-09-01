@@ -51,6 +51,7 @@ jobs:
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           wget https://us.download.nvidia.com/tesla/550.90.07/NVIDIA-Linux-x86_64-550.90.07.run
+          chmod +x NVIDIA-Linux-x86_64-550.90.07.run
           sudo ./NVIDIA-Linux-x86_64-550.90.07.run --silent
           lsmod | grep nvidia
           nvidia-smi
