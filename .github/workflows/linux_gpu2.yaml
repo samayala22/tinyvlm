@@ -48,10 +48,6 @@ jobs:
       - name: Install CUDA Driver
         run: |
           cd /tmp/
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_1.1-1_all.deb
-          sudo apt-get update
-          sudo apt-get install -y cuda-drivers-545 nvidia-container-toolkit
-          sudo nvidia-ctk runtime configure --runtime=docker
-          sudo systemctl restart docker
-          docker run --rm --runtime=nvidia --gpus all ubuntu nvidia-smi
+          wget https://us.download.nvidia.com/tesla/550.90.07/nvidia-driver-local-repo-ubuntu2204-550.90.07_1.0-1_amd64.deb
+          sudo dpkg -i --silent nvidia-driver-local-repo-ubuntu2204-550.90.07_1.0-1_amd64.deb
+          nvidia-smi
