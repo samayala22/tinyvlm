@@ -47,7 +47,11 @@ jobs:
       #     nvidia-smi
       - name: Install CUDA Driver
         run: |
+          sudo dnf install kernel-modules-extra
           cd /tmp/
-          wget https://us.download.nvidia.com/tesla/550.90.07/nvidia-driver-local-repo-ubuntu2204-550.90.07_1.0-1_amd64.deb
-          sudo dpkg -i nvidia-driver-local-repo-ubuntu2204-550.90.07_1.0-1_amd64.deb
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          wget https://us.download.nvidia.com/tesla/550.90.07/NVIDIA-Linux-x86_64-550.90.07.run
+          sudo ./NVIDIA-Linux-x86_64-550.90.07.run --silent
+          lsmod | grep nvidia
           nvidia-smi
