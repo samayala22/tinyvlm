@@ -49,5 +49,5 @@ jobs:
         run: |
           cd /tmp/
           wget https://us.download.nvidia.com/tesla/550.90.07/nvidia-driver-local-repo-ubuntu2204-550.90.07_1.0-1_amd64.deb
-          sudo dpkg -i --silent nvidia-driver-local-repo-ubuntu2204-550.90.07_1.0-1_amd64.deb
+          sudo dpkg -i nvidia-driver-local-repo-ubuntu2204-550.90.07_1.0-1_amd64.deb
           nvidia-smi
