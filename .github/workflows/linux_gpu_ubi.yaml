@@ -1,0 +1,110 @@
+name: linux-gpu-ubi
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - opened
+  push:
+    paths-ignore:
+      - '.github/workflows/**'
+      - '!.github/workflows/linux_gpu_ubi.yaml'
+      - 'README.md'
+
+jobs:
+  build:
+    runs-on: ubicloud-gpu
+    env: 
+      CACHE_PATH:
+      CACHE_KEY:
+
+    strategy:
+      matrix:
+        arch: [x86_64]
+        mode: [release, debug]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # - name: Install CUDA Toolkit
+      #   uses: Jimver/cuda-toolkit@v0.2.16
+      #   id: cuda-toolkit
+      #   with:
+      #     cuda: '12.4.0'
+      # - name: Install CUDA Driver + Toolkit
+      #   run: |
+      #     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+      #     sudo dpkg -i cuda-keyring_1.1-1_all.deb
+      #     sudo apt-get update
+      #     sudo apt-get -y install nvidia-open
+      #     sudo modprobe nvidia
+      #     sudo modprobe nvidia-drm
+      #     sudo modprobe nvidia-uvm
+      #     sudo apt-get -y install cuda-toolkit-12-4
+      #     nvidia-smi
+
+      - name: NVIDIA-SMI
+        run: nvidia-smi
+
+      - name: Download ISPC
+        run: |
+          curl -L "https://github.com/ispc/ispc/releases/download/v1.22.0/ispc-v1.22.0-linux.tar.gz" -o ispc.tar.gz
+          tar -xzf ispc.tar.gz
+          echo "${PWD}/ispc-v1.22.0-linux/bin" >> $GITHUB_PATH
+
+      # Install system dependencies (opengl)
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev build-essential libomp-dev clang libc++-dev libstdc++-10-dev
+
+      - name: Set xmake env
+        run: echo "XMAKE_GLOBALDIR=${{ runner.workspace }}/xmake-global" >> $GITHUB_ENV
+
+      # Install xmake
+      - name: Setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: branch@master
+          actions-cache-folder: .xmake-cache
+
+      # Update xmake repository
+      - name: Update xmake repository
+        run: xmake repo --update
+
+      # Create xmake dependencies hash
+      - name: Retrieve dependencies hash
+        id: dep_hash
+        run: echo "hash=$(xmake l utils.ci.packageskey)" >> $GITHUB_OUTPUT
+
+      - name: Set cache env vars
+        run: |
+          echo "CACHE_PATH=${{ env.XMAKE_GLOBALDIR }}/.xmake/packages" >> $GITHUB_ENV
+          echo "CACHE_KEY=Linux-${{ matrix.arch }}-${{ matrix.mode }}-GPU_UBI-${{ steps.dep_hash.outputs.hash }}" >> $GITHUB_ENV
+
+      # Cache xmake dependencies
+      - name: Restore cached xmake dependencies
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CACHE_PATH }}
+          key: ${{ env.CACHE_KEY }}
+
+      # Config xmake
+      - name: Config
+        run: |
+          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --build-cuda=y
+
+      - name: Cache xmake dependencies
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CACHE_PATH }}
+          key: ${{ env.CACHE_KEY }}
+          
+      # Build
+      - name: Build
+        run: |
+          xmake -vD
+
+      - name: Test
+        run: |
+          xmake test -j1 -v
