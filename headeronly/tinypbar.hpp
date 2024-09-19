@@ -26,20 +26,19 @@ inline int get_terminal_width() {
 //     }
 // #endif
     // Return a default value if unable to get the terminal size
-    return 80;
+    return 100;
 }
 
-template<typename T>
 class pbar {
 private:
-    T start_, end_, step_; // idx range
+    int start_, end_, step_; // idx range
     bool disable; // disable pbar
     double rate; // update freq in Hz
     std::chrono::steady_clock::time_point start_time;
-    T i; // current idx value
-    T n; // current iteration
-    long long skip; // Skip displaying pbar
-    size_t total; // total iterations
+    int i; // current idx value
+    int n; // current iteration
+    int skip; // Skip displaying pbar
+    int total; // total iterations
     const char* desc_; // pbar description
 
     // must have 9 bytes of space
@@ -66,18 +65,18 @@ private:
             std::snprintf(out, 8, "0.00");
             return;
         }
-        const int g = static_cast<int>(std::log10(x) / 3);
+        const int g = (x==0) ? 0 : static_cast<int>(std::log10(x) / 3);
         const double scaled = x / std::pow(1000, g);
         std::snprintf(out, 8, "%.2f%c", scaled, " kMGTPEZY"[g]);
     }
 
 public:
-    pbar(T start, T end, T step = 1, const char* desc = "", 
-         bool disable = false, double rate = 100.0)
+    pbar(int start, int end, int step = 1, const char* desc = "", 
+         bool disable = false, double rate = 60.0)
         : start_(start), end_(end), step_(step), disable(disable), rate(rate), 
           i(start-step), n(0), skip(1ull), desc_(desc) {
-        start_time = std::chrono::steady_clock::now();
-        total = static_cast<size_t>((end_ - start_ + step_ - 1) / step_);
+        start_time = std::chrono::high_resolution_clock::now();
+        total = (end_ - start_ + step_ - 1) / step_;
         update(0);
     }
 
@@ -85,18 +84,19 @@ public:
         update(0, true);
     }
 
-    void update(T increment = 0, bool close = false) {
+    void update(int increment = 0, bool close = false) {
         n += increment;
         i += step_;
 
         if (disable || (!close && static_cast<int>(i - start_) % skip != 0)) return;
 
-        auto now = std::chrono::steady_clock::now();
-        double elapsed = std::chrono::duration<double>(now - start_time).count();
+        auto now = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double>(now - start_time).count(); // cast to seconds
+        elapsed += 1e-6; // add 1 microsecond to avoid rounding errors
         double progress = static_cast<double>(n) / total;
 
-        if (n / elapsed > rate && n != start_) {
-            skip = static_cast<long long>(n / elapsed / rate);
+        if (n / elapsed > rate && n != 0) {
+            skip = static_cast<int>(n / elapsed / rate);
         }
 
         const int terminal_width = get_terminal_width();
@@ -116,8 +116,8 @@ public:
         HMS(time_remaining, hms_time_remaining);
         SI(static_cast<double>(n) / elapsed, si_speed);
 
-        std::printf("\r%s%3.0f%% [%s] %zu/%zu [%s<%s, %s it/s]",
-                 desc_, progress * 100.0, prog_bar, static_cast<size_t>(n), total,
+        std::printf("\r%s%3.0f%% [%s] %d/%d [%s<%s, %s it/s]",
+                 desc_, progress * 100.0, prog_bar, n, total,
                  hms_time_elapsed, hms_time_remaining, si_speed);
 
         if (close) std::printf("\n");
@@ -126,9 +126,9 @@ public:
     class iterator {
     private:
         pbar& bar;
-        T current;
+        int current;
     public:
-        iterator(pbar& t, T start) : bar(t), current(start) {}
+        iterator(pbar& t, int start) : bar(t), current(start) {}
         iterator& operator++() {
             current += bar.step_;
             bar.update(1);
@@ -137,7 +137,7 @@ public:
         bool operator!=(const iterator& other) const {
             return current < other.current;
         }
-        T operator*() const { return current; }
+        int operator*() const { return current; }
     };
 
     iterator begin() { return iterator(*this, start_); }

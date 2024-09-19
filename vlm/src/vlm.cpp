@@ -110,21 +110,6 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     backend->gamma_shed(gamma_wing.d_view(), gamma_wing_prev.d_view(), gamma_wake.d_view(), 0);
     backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
 
-    // mesh.verts_wing_init.to_host();
-    // mesh.verts_wing.to_host();
-    // mesh.verts_wake.to_host();
-    // mesh.normals.to_host();
-    // mesh.colloc.to_host();
-    // mesh.area.to_host();
-    // lhs.to_host();
-    // rhs.to_host();
-    // gamma_wing.to_host();
-    // gamma_wake.to_host();
-    // gamma_wing_prev.to_host();
-    // gamma_wing_delta.to_host();
-    // local_velocities.to_host();
-    // transforms.to_host();
-
     return AeroCoefficients{
         backend->coeff_steady_cl_multi(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), flow, mesh.area.d_view()),
         backend->coeff_steady_cd_multi(mesh.verts_wake.d_view(), gamma_wake.d_view(), flow, mesh.area.d_view()),
@@ -357,7 +342,7 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
 
     // 4. Transient simulation loop
     // for (u32 i = 0; i < vec_t.size()-1; i++) {
-    for (const i32 i : tiny::pbar<i32>(0, vec_t.size()-1)) {
+    for (const i32 i : tiny::pbar(0, (i32)vec_t.size()-1)) {
         const f32 t = vec_t[i];
         const f32 dt = vec_t[i+1] - t;
 
@@ -388,12 +373,6 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
         velocities.to_device();
         backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
         backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), velocities.d_view());
-        
-        rhs.to_host();
-        gamma_wake.to_host();
-        mesh.colloc.to_host();
-        mesh.normals.to_host();
-        mesh.verts_wake.to_host();
         backend->rhs_assemble_wake_influence(rhs.d_view(), gamma_wake.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wake.d_view(), i);
         backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
         backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
