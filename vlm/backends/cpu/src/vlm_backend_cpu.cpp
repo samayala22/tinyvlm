@@ -39,6 +39,62 @@ void print_cpu_info() {
     std::printf("DEVICE: %s (%d threads)\n", cpuid.full_name.c_str(), std::thread::hardware_concurrency());
 }
 
+CBLAS_TRANSPOSE trans_to_cblas(BLAS_CPU::Trans trans) {
+    switch (trans) {
+        case BLAS_CPU::Trans::No: return CblasNoTrans;
+        case BLAS_CPU::Trans::Yes: return CblasTrans;
+    }
+}
+
+void BLAS_CPU::gemv(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x, const f32 beta, View<f32, Tensor<1>>& y, Trans trans) {
+    assert(A.layout.stride(0) == 1);
+
+    i32 m = (trans == BLAS_CPU::Trans::No) ? A.layout.shape(0) : A.layout.shape(1);
+    i32 n = (trans == BLAS_CPU::Trans::No) ? A.layout.shape(1) : A.layout.shape(0);
+
+    cblas_sgemv(
+        CblasColMajor,
+        trans_to_cblas(trans),
+        m,
+        n,
+        alpha,
+        A.ptr,
+        static_cast<int>(A.layout.stride(1)),
+        x.ptr,
+        static_cast<int>(x.layout.stride(0)),
+        beta,
+        y.ptr,
+        static_cast<int>(y.layout.stride(0))
+    );
+}
+
+void BLAS_CPU::gemm(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<2>>& B, const f32 beta, View<f32, Tensor<2>>& C, Trans trans_a, Trans trans_b) {
+    assert(A.layout.stride(0) == 1);
+    assert(B.layout.stride(0) == 1);
+    assert(C.layout.stride(0) == 1);
+
+    i32 m = (trans_a == BLAS_CPU::Trans::No) ? A.layout.shape(0) : A.layout.shape(1);
+    i32 n = (trans_b == BLAS_CPU::Trans::No) ? B.layout.shape(1) : B.layout.shape(0);
+    i32 k = (trans_a == BLAS_CPU::Trans::No) ? A.layout.shape(1) : A.layout.shape(0);
+
+    cblas_sgemm(
+        CblasColMajor,
+        trans_to_cblas(trans_a),
+        trans_to_cblas(trans_b),
+        m,
+        n,
+        k,
+        alpha,
+        A.ptr,
+        static_cast<int>(A.layout.stride(1)),
+        B.ptr,
+        static_cast<int>(B.layout.stride(1)),
+        beta,
+        C.ptr,
+        static_cast<int>(C.layout.stride(1))
+    );
+}
+
 BackendCPU::BackendCPU() : Backend(std::make_unique<MemoryCPU>()) {
     print_cpu_info();
 }

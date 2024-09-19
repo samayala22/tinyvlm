@@ -35,4 +35,13 @@ class BackendCPU final : public Backend {
         f32 mesh_area(const View<f32, SingleSurface>& areas) override;
 };
 
+class BLAS_CPU final : public BLAS {
+    public:
+        BLAS_CPU() = default;
+        ~BLAS_CPU() = default;
+
+        void gemv(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x, const f32 beta, View<f32, Tensor<1>>& y, Trans trans = Trans::No) override;
+        void gemm(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<2>>& B, const f32 beta, View<f32, Tensor<2>>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
+};
+
 } // namespace vlm

@@ -50,6 +50,16 @@ class Backend {
         virtual f32 mesh_area(const View<f32, SingleSurface>& areas) = 0;
 };
 
+class BLAS {
+    public:
+        enum class Trans { Yes, No };
+        BLAS() = default;
+        virtual ~BLAS() = default;
+
+        virtual void gemv(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x, const f32 beta, View<f32, Tensor<1>>& y, Trans order = Trans::No) = 0;
+        virtual void gemm(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<2>>& B, const f32 beta, View<f32, Tensor<2>>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
+};
+
 std::unique_ptr<Backend> create_backend(const std::string& backend_name);
 std::vector<std::string> get_available_backends();
 

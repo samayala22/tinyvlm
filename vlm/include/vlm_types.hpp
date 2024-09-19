@@ -1,5 +1,6 @@
 #pragma once
 
+// TODO: remove all unnecessary includes, im currently using this header as a pch (it's not)
 #include <utility>
 #include <cstdint>
 #include <vector>
@@ -9,7 +10,7 @@
 #include <memory>
 #include <functional>
 
-#include "linalg.h"
+#include "linalg.h" // TODO: remove
 
 namespace vlm {
 

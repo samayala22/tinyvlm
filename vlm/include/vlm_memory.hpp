@@ -4,6 +4,7 @@
 #include <cassert>
 #include <type_traits>
 #include <vector>
+#include <array>
 
 namespace vlm {
 
@@ -243,12 +244,29 @@ class Matrix {
         uint64_t _stride = 0; // leading dimension
 };
 
+using Range = std::array<int, 2>;
+
+constexpr Range all{0,-1};
+
+template<typename... Args>
+struct CountRanges;
+
+template<>
+struct CountRanges<> {
+    static constexpr std::size_t value = 0;
+};
+
+template<typename First, typename... Rest>
+struct CountRanges<First, Rest...> {
+    static constexpr std::size_t value = std::is_same<Range, std::decay_t<First>>::value + CountRanges<Rest...>::value;
+};
+
 template<int Dim>
 class Tensor {        
     public:
-        Tensor() = default;
-        Tensor(const std::array<uint64_t, Dim>& shape, const std::array<uint64_t, Dim>& strides) : _shape(shape), _strides(strides) {}
-        Tensor(const std::array<uint64_t, Dim>& shape) : _shape(shape) { default_strides(); }
+        constexpr Tensor() = default;
+        constexpr Tensor(const std::array<uint64_t, Dim>& shape, const std::array<uint64_t, Dim>& strides) : _shape(shape), _strides(strides) {}
+        constexpr Tensor(const std::array<uint64_t, Dim>& shape) : _shape(shape) { default_strides(); }
         std::size_t size() const {
             std::size_t size = 1;
             for (std::size_t i = 0; i < Dim; i++) size *= _shape[i];
@@ -257,7 +275,40 @@ class Tensor {
 
         uint64_t stride(int dim) const {return _strides[dim];}
         uint64_t shape(int dim) const {return _shape[dim];}
-        
+
+        template<typename T, typename... Args>
+        inline constexpr auto slice(T* ptr, Args... args) {
+            constexpr uint64_t M = CountRanges<Args...>::value;
+            static_assert(sizeof...(args) == Dim, "The number of indices must match the dimension N.");
+            static_assert(M <= Dim, "Too many ranges provided compared to the view's dimensionality");
+
+            T* newPtr = ptr;
+            std::array<uint64_t, M> newDims{};
+            std::array<uint64_t, M> newStrides{};
+            uint64_t newDimIndex = 0;
+
+            uint64_t argIndex = 0;
+            ([&](auto& arg) {
+                if constexpr (std::is_same<std::decay_t<decltype(arg)>, Range>::value) {
+                    uint64_t first = arg[0]; // Removed 'constexpr'
+                    uint64_t last = (arg[1] < 0) ? _shape[argIndex] + arg[1] + 1 : arg[1];
+                    assert((first >= 0) && (first < _shape[argIndex]));
+                    assert((last >= 0) && (last <= _shape[argIndex])); // Changed '<' to '<=' for upper bound
+                    assert(last - first > 0);
+                    newPtr += first * _strides[argIndex];
+                    newDims[newDimIndex] = last - first;
+                    newStrides[newDimIndex] = _strides[argIndex];
+                    newDimIndex++;
+                } else if constexpr (std::is_integral<std::decay_t<decltype(arg)>>::value) {
+                    uint64_t real_arg = (arg < 0) ? _shape[argIndex] + arg : arg; // Removed '+1' as indexing starts from 0
+                    assert((real_arg >= 0) && (real_arg < _shape[argIndex]));
+                    newPtr += real_arg * _strides[argIndex];
+                }
+                argIndex++;
+            }(args), ...);
+
+            return View<T, Tensor<M>>(newPtr, Tensor<M>{newDims, newStrides});
+        }
     private:
         constexpr void default_strides() {
             _strides[0] = 1;
