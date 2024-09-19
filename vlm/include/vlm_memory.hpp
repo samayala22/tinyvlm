@@ -316,8 +316,8 @@ class Tensor {
                 _strides[i] = _strides[i - 1] * _shape[i - 1];
             }
         }
-        std::array<uint64_t, Dim> _shape;
-        std::array<uint64_t, Dim> _strides;
+        std::array<uint64_t, Dim> _shape{0};
+        std::array<uint64_t, Dim> _strides{0};
 };
 
 } // namespace vlm

@@ -45,4 +45,17 @@ class BLAS_CUDA final : public BLAS {
         void gemm(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<2>>& B, const f32 beta, View<f32, Tensor<2>>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
 };
 
+class LUSolver_CUDA final : public LUSolver {
+    public:
+        LUSolver_CUDA() = default;
+        ~LUSolver_CUDA() = default;
+
+        void factorize(const View<f32, Tensor<2>>& A) = 0;
+        void solve(const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x) = 0;
+    private:
+        Buffer<f32, MemoryLocation::Device, Tensor<1>> ipiv;
+        Buffer<f32, MemoryLocation::Device, Tensor<1>> buffer;
+        f32* info = nullptr;
+};
+
 } // namespace vlm

@@ -16,6 +16,7 @@ class NewmarkBeta {
     private:
         std::unique_ptr<BLAS> m_blas;
         std::unique_ptr<Memory> m_memory;
+        std::unique_ptr<LUSolver> m_solver;
         const f32 m_beta;
         const f32 m_gamma;
 
@@ -37,7 +38,7 @@ void NewmarkBeta::run(View<f32, Tensor<2>>& M, View<f32, Tensor<2>>& C, View<f32
     assert(u0.layout.shape(0) == F.layout.shape(0));
     assert(v0.layout.shape(0) == F.layout.shape(0));
 
-    Tensor<2> time_series{{F.layout.shape(0), t.layout.shape(0)}}; // dofs x timesteps
+    const Tensor<2> time_series{{F.layout.shape(0), t.layout.shape(0)}}; // dofs x timesteps
 
     // TODO: preallocate a number of timesteps and only resize when necessary
     u.dealloc();
@@ -56,6 +57,23 @@ void NewmarkBeta::run(View<f32, Tensor<2>>& M, View<f32, Tensor<2>>& C, View<f32
     m_memory->copy(MemoryTransfer::DeviceToDevice, a0_col0.ptr, F.ptr, F.size_bytes());
     m_blas->gemv(-1.0f, C, v0, 1.0f, a0_col0);
     m_blas->gemv(-1.0f, K, u0, 1.0f, a0_col0);
+    // solver->factorize(M);
+    // solver->solve(M, a0_col0);
+
+    const f32 dt = t[1] - t[0];
+    const f32 x2 = 1;
+    const f32 x1 = m_gamma / (m_beta * dt);
+    const f32 x0 = 1 / (m_beta * dt*dt);
+    const f32 xd0 = 1 / (m_beta * dt);
+    const f32 xd1 = m_gamma / m_beta;
+    const f32 xdd0 = 1/(2*m_beta);
+    const f32 xdd1 = - dt * (1 - m_gamma / (2*m_beta));
+
+    // K_eff = K + a0 * M + a1 * C
+    // This whole thing should be fused into a single kernel...
+    m_memory->copy(MemoryTransfer::DeviceToDevice, K_eff.d_view().ptr, K.ptr, K.size_bytes());
+    // m_blas->axpy(x0, M, K_eff);
+    // m_blas->axpy(x1, C, K_eff);
 }
 
 int main() {

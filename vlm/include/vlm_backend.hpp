@@ -58,6 +58,17 @@ class BLAS {
 
         virtual void gemv(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x, const f32 beta, View<f32, Tensor<1>>& y, Trans order = Trans::No) = 0;
         virtual void gemm(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<2>>& B, const f32 beta, View<f32, Tensor<2>>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
+        virtual void getrf(const View<f32, Tensor<2>>& A, const View<i32, Tensor<1>>& ipiv) = 0;
+        virtual void getrs(const View<f32, Tensor<2>>& A, const View<i32, Tensor<1>>& ipiv, const View<f32, Tensor<1>>& b) = 0;
+};
+
+class LUSolver {
+    public:
+        LUSolver() = default;
+        virtual ~LUSolver() = default;
+
+        virtual void factorize(const View<f32, Tensor<2>>& A) = 0;
+        virtual void solve(const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x) = 0;
 };
 
 std::unique_ptr<Backend> create_backend(const std::string& backend_name);
