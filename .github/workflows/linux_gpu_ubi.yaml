@@ -1,4 +1,4 @@
-name: linux-ro
+name: linux-gpu-ubi
 on:
   workflow_dispatch:
   pull_request:
@@ -7,16 +7,12 @@ on:
   push:
     paths-ignore:
       - '.github/workflows/**'
-      - '!.github/workflows/linux_ro.yaml'
+      - '!.github/workflows/linux_gpu_ubi.yaml'
       - 'README.md'
 
 jobs:
   build:
-    runs-on: 
-      - runs-on
-      - runner=4cpu-linux-x64
-      - run-id=${{ github.run_id }}
-
+    runs-on: ubicloud-gpu
     env: 
       CACHE_PATH:
       CACHE_KEY:
@@ -25,12 +21,13 @@ jobs:
       matrix:
         arch: [x86_64]
         mode: [release, debug]
-        compiler: [clang, gcc]
-        sanitizer: [address, undefined] # thread removed due to bugs
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: NVIDIA-SMI
+        run: nvidia-smi
 
       - name: Download ISPC
         run: |
@@ -42,7 +39,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev clang libomp-dev libc++-dev gcc g++
+          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev build-essential libomp-dev clang libc++-dev libstdc++-10-dev
 
       - name: Set xmake env
         run: echo "XMAKE_GLOBALDIR=${{ runner.workspace }}/xmake-global" >> $GITHUB_ENV
@@ -66,8 +63,9 @@ jobs:
       - name: Set cache env vars
         run: |
           echo "CACHE_PATH=${{ env.XMAKE_GLOBALDIR }}/.xmake/packages" >> $GITHUB_ENV
-          echo "CACHE_KEY=LinuxRO-${{ matrix.compiler }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ matrix.sanitizer }}-${{ steps.dep_hash.outputs.hash }}" >> $GITHUB_ENV
+          echo "CACHE_KEY=Linux-${{ matrix.arch }}-${{ matrix.mode }}-GPU_UBI-${{ steps.dep_hash.outputs.hash }}" >> $GITHUB_ENV
 
+      # Cache xmake dependencies
       - name: Restore cached xmake dependencies
         uses: actions/cache/restore@v4
         with:
@@ -77,7 +75,7 @@ jobs:
       # Config xmake
       - name: Config
         run: |
-          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --policies=build.sanitizer.${{ matrix.sanitizer }}
+          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --build-cuda=y
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4
