@@ -75,7 +75,7 @@ public:
          bool disable = false, double rate = 60.0)
         : start_(start), end_(end), step_(step), disable(disable), rate(rate), 
           i(start-step), n(0), skip(1ull), desc_(desc) {
-        start_time = std::chrono::high_resolution_clock::now();
+        start_time = std::chrono::steady_clock::now();
         total = (end_ - start_ + step_ - 1) / step_;
         update(0);
     }
@@ -90,7 +90,7 @@ public:
 
         if (disable || (!close && static_cast<int>(i - start_) % skip != 0)) return;
 
-        auto now = std::chrono::high_resolution_clock::now();
+        auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - start_time).count(); // cast to seconds
         elapsed += 1e-6; // add 1 microsecond to avoid rounding errors
         double progress = static_cast<double>(n) / total;
