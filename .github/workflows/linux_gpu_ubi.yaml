@@ -26,23 +26,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # - name: Install CUDA Toolkit
-      #   uses: Jimver/cuda-toolkit@v0.2.16
-      #   id: cuda-toolkit
-      #   with:
-      #     cuda: '12.4.0'
-      # - name: Install CUDA Driver + Toolkit
-      #   run: |
-      #     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-      #     sudo dpkg -i cuda-keyring_1.1-1_all.deb
-      #     sudo apt-get update
-      #     sudo apt-get -y install nvidia-open
-      #     sudo modprobe nvidia
-      #     sudo modprobe nvidia-drm
-      #     sudo modprobe nvidia-uvm
-      #     sudo apt-get -y install cuda-toolkit-12-4
-      #     nvidia-smi
-
       - name: NVIDIA-SMI
         run: nvidia-smi
 
