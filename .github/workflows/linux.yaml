@@ -48,7 +48,7 @@ jobs:
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
         with:
-          xmake-version: branch@master
+          xmake-version: 2.9.4
           actions-cache-folder: .xmake-cache
 
       # Update xmake repository
