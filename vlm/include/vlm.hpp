@@ -88,23 +88,14 @@ class UVLM final: public Simulation {
         Buffer<f32, MemoryLocation::Host, MultiSurface> colloc_pos{*backend->memory}; // (nc)*(ns)*3
 
         // Data
-        // Buffer<f32, MemoryLocation::Device, Matrix<MatrixLayout::ColMajor>> lhs; // (ns*nc)^2
-        // Buffer<f32, MemoryLocation::Device, MultiSurface> rhs; // ns*nc
-        // Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing; // nc*ns
-        // Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wake; // nw*ns
-        // Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev; // nc*ns
-        // Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta; // nc*ns
-        // Buffer<f32, MemoryLocation::HostDevice, MultiSurface> velocities; // ns*nc*3
-        // Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms; // 4*4*nb_meshes
-        
-        Buffer<f32, MemoryLocation::HostDevice, Matrix<MatrixLayout::ColMajor>> lhs{*backend->memory}; // (ns*nc)^2
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> rhs{*backend->memory}; // ns*nc
+        Buffer<f32, MemoryLocation::Device, Matrix<MatrixLayout::ColMajor>> lhs{*backend->memory}; // (ns*nc)^2
+        Buffer<f32, MemoryLocation::Device, MultiSurface> rhs{*backend->memory}; // ns*nc
         Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
+        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
         Buffer<f32, MemoryLocation::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
-        Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms{*backend->memory}; // 
+        Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms{*backend->memory}; // 4*4*nb_meshes
         
         std::vector<f32> vec_t; // timesteps
         std::vector<f32> local_dt; // per mesh dt (pre reduction)

@@ -56,10 +56,11 @@ class BLAS {
         BLAS() = default;
         virtual ~BLAS() = default;
 
-        virtual void gemv(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x, const f32 beta, View<f32, Tensor<1>>& y, Trans order = Trans::No) = 0;
+        virtual void gemv(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x, const f32 beta, View<f32, Tensor<1>>& y, Trans trans = Trans::No) = 0;
         virtual void gemm(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<2>>& B, const f32 beta, View<f32, Tensor<2>>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
-        virtual void getrf(const View<f32, Tensor<2>>& A, const View<i32, Tensor<1>>& ipiv) = 0;
-        virtual void getrs(const View<f32, Tensor<2>>& A, const View<i32, Tensor<1>>& ipiv, const View<f32, Tensor<1>>& b) = 0;
+        virtual void axpy(const f32 alpha, const View<f32, Tensor<1>>& x, View<f32, Tensor<1>>& y) = 0;
+        virtual void axpy(const f32 alpha, const View<f32, Tensor<2>>& x, View<f32, Tensor<2>>& y) = 0;
+        virtual void xypz(const f32 alpha, const View<f32, Tensor<1>>& x, const View<f32, Tensor<1>>& y, const f32 beta, View<f32, Tensor<1>>& z) = 0;
 };
 
 class LUSolver {
