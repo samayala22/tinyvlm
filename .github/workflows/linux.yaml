@@ -75,7 +75,7 @@ jobs:
       # Config xmake
       - name: Config
         run: |
-          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --policies=build.sanitizer.${{ matrix.sanitizer }}
+          xmake f -vD -y --toolchain=${{ matrix.compiler }} -a ${{ matrix.arch }} -m ${{ matrix.mode }} --policies=build.sanitizer.${{ matrix.sanitizer }}
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4
