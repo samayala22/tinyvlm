@@ -5,7 +5,11 @@
 #include "tinycombination.hpp"
 #include "tinypbar.hpp"
 
+#include <tuple>
+
 using namespace vlm;
+
+constexpr u32 DOF = 2;
 
 class NewmarkBeta {
     public:
@@ -55,12 +59,12 @@ void NewmarkBeta::init(View<f32, Tensor<2>>& M, View<f32, Tensor<2>>& C, View<f3
     m_memory.fill_f32(MemoryLocation::Device, v.d_view().ptr, 0.0f, v.size());
     m_memory.fill_f32(MemoryLocation::Device, a.d_view().ptr, 0.0f, a.size());
 
-    View<f32, Tensor<1>> a0_col0 = a.d_view().layout.slice(a.d_view().ptr, all, 0);
-    m_memory.copy(MemoryTransfer::DeviceToDevice, a0_col0.ptr, F0.ptr, F0.size_bytes());
-    m_blas->gemv(-1.0f, C, v0, 1.0f, a0_col0);
-    m_blas->gemv(-1.0f, K, u0, 1.0f, a0_col0);
-    m_solver->factorize(M);
-    m_solver->solve(M, a0_col0);
+    // View<f32, Tensor<1>> a0_col0 = a.d_view().layout.slice(a.d_view().ptr, all, 0);
+    // m_memory.copy(MemoryTransfer::DeviceToDevice, a0_col0.ptr, F0.ptr, F0.size_bytes());
+    // m_blas->gemv(-1.0f, C, v0, 1.0f, a0_col0);
+    // m_blas->gemv(-1.0f, K, u0, 1.0f, a0_col0);
+    // m_solver->factorize(M);
+    // m_solver->solve(M, a0_col0);
 }
 
 void NewmarkBeta::step(View<f32, Tensor<2>>& M, View<f32, Tensor<2>>& C, View<f32, Tensor<2>>& K, View<f32, Tensor<1>>& F_now, View<f32, Tensor<1>>& F_next, const f32 dt, const u32 iteration) {
@@ -119,7 +123,7 @@ class UVLM_2DOF final: public Simulation {
         ~UVLM_2DOF() = default;
         void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final);
     
-        // Mesh
+        // Mesh (initial position)
         Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing_pos{*backend->memory}; // (nc+1)*(ns+1)*3
         Buffer<f32, MemoryLocation::Host, MultiSurface> colloc_pos{*backend->memory}; // (nc)*(ns)*3
 
@@ -131,18 +135,22 @@ class UVLM_2DOF final: public Simulation {
         Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
         Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
         Buffer<f32, MemoryLocation::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
+        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> panel_forces{*backend->memory};
         Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms{*backend->memory}; // 4*4*nb_meshes
         
         // Simulation boilerplate
         std::vector<f32> vec_t; // timesteps
         std::vector<f32> local_dt; // per mesh dt (pre reduction)
         std::vector<u32> condition0;
+        std::vector<linalg::alias::float4x4> body_frames;
 
         // Structure 
         Buffer<f32, MemoryLocation::Device, Tensor<2>> M{*backend->memory}; // dof x dof mass matrix
         Buffer<f32, MemoryLocation::Device, Tensor<2>> C{*backend->memory}; // dof x dof damping matrix
         Buffer<f32, MemoryLocation::Device, Tensor<2>> K{*backend->memory}; // dof x dof stiffness matrix
         Buffer<f32, MemoryLocation::Device, Tensor<2>> F{*backend->memory}; // dof x timesteps
+        Buffer<f32, MemoryLocation::Device, Tensor<1>> u0{*backend->memory}; // initial condition
+        Buffer<f32, MemoryLocation::Device, Tensor<1>> v0{*backend->memory}; // initial condition
 
         NewmarkBeta integrator{*backend->memory};
     private:
@@ -167,18 +175,23 @@ void UVLM_2DOF::alloc_buffers() {
     gamma_wing_prev.alloc(MultiSurface{wing_panels, 1});
     gamma_wing_delta.alloc(MultiSurface{wing_panels, 1});
     velocities.alloc(MultiSurface{wing_panels, 3});
+    panel_forces.alloc(MultiSurface{wing_panels, 3});
     transforms.alloc(Tensor<3>({4,4,nb_meshes}));
 
     local_dt.resize(nb_meshes);
     condition0.resize(nb_meshes);
+    body_frames.resize(nb_meshes, linalg::identity);
 
     backend->lu_allocate(lhs.d_view()); // TODO: maybe move this ?
 
-    const u32 dof = 2;
-    const Tensor<2> structure_layout{{dof, dof}};
+    // Structure 
+    const Tensor<2> structure_layout{{DOF, DOF}};
+    const Tensor<1> structure_layout_1d{{DOF}};
     M.alloc(structure_layout);
     C.alloc(structure_layout);
     K.alloc(structure_layout);
+    u0.alloc(structure_layout_1d);
+    v0.alloc(structure_layout_1d);
 }
 
 void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final) {
@@ -253,9 +266,34 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
     backend->lhs_assemble(lhs.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), condition0 , 0);
     backend->lu_factor(lhs.d_view());
 
+    // WARNING: this only works for single body and 2D like movements
+    auto h_alpha = [&]() -> std::tuple<f32, f32> {
+        // auto inv_transform = linalg::inverse(body_frames[0]);
+        linalg::alias::float4x4 inv_transform = linalg::identity;
+        auto& verts = mesh.verts_wing.h_view();
+        u32 p0_idx = 0; // first vertex on chord
+        u32 p1_idx = (verts.layout.nc(0)-1) * verts.layout.ns(0); // last vertex on chord
+        linalg::alias::float4 p0_global = {verts[0*verts.layout.stride() + p0_idx], verts[1*verts.layout.stride() + p0_idx], verts[2*verts.layout.stride() + p0_idx], 1.0f};
+        linalg::alias::float4 p1_global = {verts[0*verts.layout.stride() + p1_idx], verts[1*verts.layout.stride() + p1_idx], verts[2*verts.layout.stride() + p1_idx], 1.0f};
+        auto p0 = linalg::mul(inv_transform, p0_global);
+        auto p1 = linalg::mul(inv_transform, p1_global);
+        f32 x0 = 0.25f; // point at quarter chord
+        f32 t = (x0 - p0.x) / (p1.x - p0.x);
+        f32 z0 = p0.z + t * (p1.z - p0.z);
+
+        return std::tuple<f32, f32>(z0, std::atan2(p1.z - p0.z, p1.x - p0.x));
+    };
+
+    const Tensor<2> force_history_layout{{DOF, vec_t.size()-1}};
+    F.alloc(force_history_layout);
+    backend->memory->fill_f32(MemoryLocation::Device, F.d_view().ptr, 0.0f, F.d_view().size());
+    auto F0 = F.d_view().layout.slice(F.d_view().ptr, all, 0);
+    integrator.init(M.d_view(), C.d_view(), K.d_view(), F0, u0.d_view(), v0.d_view(), vec_t.size()-1);
+
     // 4. Transient simulation loop
-    // for (u32 i = 0; i < vec_t.size()-1; i++) {
-    for (const i32 i : tiny::pbar(0, (i32)vec_t.size()-1)) {
+    for (u32 i = 0; i < vec_t.size()-1; i++) {
+        const auto [h, alpha] = h_alpha();
+        std::printf("t: %f, h: %f, alpha: %f\n", vec_t[i], h, to_degrees(alpha));
         const f32 t = vec_t[i];
         const f32 dt = vec_t[i+1] - t;
 
@@ -292,7 +330,8 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
         
         // skip cl computation for the first iteration
         if (i > 0) {
-            const f32 cl_unsteady = backend->coeff_unsteady_cl_multi(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), gamma_wing.d_view(), gamma_wing_prev.d_view(), velocities.d_view(), mesh.area.d_view(), mesh.normals.d_view(), freestream, dt);
+            backend->coeff_unsteady_cl_multi_forces(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), gamma_wing.d_view(), gamma_wing_prev.d_view(), velocities.d_view(), mesh.area.d_view(), mesh.normals.d_view(), panel_forces.d_view(), freestream, dt);
+            
             // if (i == vec_t.size()-2) std::printf("t: %f, CL: %f\n", t, cl_unsteady);
             // std::printf("t: %f, CL: %f\n", t, cl_unsteady);
             // mesh.verts_wing.to_host();
@@ -305,6 +344,7 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
         // parallel for
         for (u64 m = 0; m < nb_meshes; m++) {
             const auto local_transform = dual_to_float(kinematics[m].displacement(t+dt));
+            body_frames[m] = local_transform; 
             local_transform.store(transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), transforms.h_view().layout.stride(1));
         }
         transforms.to_device();
@@ -344,17 +384,26 @@ int main() {
     );
     
     // Sudden acceleration
-    const f32 alpha = to_radians(5.0f);
+    // const f32 alpha = to_radians(5.0f);
+    // kinematics.add([=](const fwd::Float& t) {
+    //     return translation_matrix<fwd::Float>({
+    //         -u_inf*std::cos(alpha)*t,
+    //         0.0f,
+    //         -u_inf*std::sin(alpha)*t
+    //     });
+    // });
+
+    // Pure pitching
     kinematics.add([=](const fwd::Float& t) {
-        return translation_matrix<fwd::Float>({
-            -u_inf*std::cos(alpha)*t,
-            0.0f,
-            -u_inf*std::sin(alpha)*t
-        });
+        return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
+    });
+    const f32 pitch_amplitude = 1.0f; // 1 to -1 deg pitching
+    kinematics.add([=](const fwd::Float& t) {
+        return rotation_matrix<fwd::Float>({0.25f, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_radians(pitch_amplitude) * fwd::sin(omega * t));
     });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
-        UVLM simulation{backend_name, {mesh_name}};
+        UVLM_2DOF simulation{backend_name, {mesh_name}};
         simulation.run({kinematics}, {initial_pose}, t_final);
     }
     return 0;

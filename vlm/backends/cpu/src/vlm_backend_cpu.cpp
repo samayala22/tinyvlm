@@ -415,6 +415,66 @@ f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_w
     return cl;
 }
 
+void BackendCPU::coeff_unsteady_cl_single_forces(
+    const View<f32, SingleSurface>& verts_wing,
+    const View<f32, SingleSurface>& gamma_delta,
+    const View<f32, SingleSurface>& gamma,
+    const View<f32, SingleSurface>& gamma_prev,
+    const View<f32, SingleSurface>& velocities,
+    const View<f32, SingleSurface>& areas,
+    const View<f32, SingleSurface>& normals,
+    View<f32, SingleSurface>& forces,
+    const linalg::alias::float3& freestream,
+    f32 dt
+    ) {
+    const f32 rho = 1.0f; // TODO: remove hardcoded rho
+    const u64 nc = gamma_delta.layout.nc();
+    const u64 ns = gamma_delta.layout.ns();
+    for (u64 i = 0; i < nc; i++) {
+        for (u64 j = 0; j < ns; j++) {
+            const u64 idx = i * gamma.layout.ld() + j; // linear index
+
+            linalg::alias::float3 V{
+                velocities[0*velocities.layout.stride() + idx],
+                velocities[1*velocities.layout.stride() + idx],
+                velocities[2*velocities.layout.stride() + idx]
+            }; // local velocity (freestream + displacement vel)
+
+            const u64 v0 = (i+0) * verts_wing.layout.ld() + j;
+            const u64 v1 = (i+0) * verts_wing.layout.ld() + j + 1;
+
+            const linalg::alias::float3 vertex0{verts_wing[0*verts_wing.layout.stride() + v0], verts_wing[1*verts_wing.layout.stride() + v0], verts_wing[2*verts_wing.layout.stride() + v0]}; // upper left
+            const linalg::alias::float3 vertex1{verts_wing[0*verts_wing.layout.stride() + v1], verts_wing[1*verts_wing.layout.stride() + v1], verts_wing[2*verts_wing.layout.stride() + v1]}; // upper right
+            const linalg::alias::float3 normal{normals[0*normals.layout.stride() + idx], normals[1*normals.layout.stride() + idx], normals[2*normals.layout.stride() + idx]}; // normal
+
+            linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
+            const f32 gamma_dt = (gamma[idx] - gamma_prev[idx]) / dt; // backward difference
+
+            // Joukowski method
+            force += rho * gamma_delta[idx] * linalg::cross(V, vertex1 - vertex0); // steady contribution
+            force += rho * gamma_dt * areas[idx] * normal; // unsteady contribution
+
+            forces[0*forces.layout.stride() + idx] = force.x;
+            forces[1*forces.layout.stride() + idx] = force.y;
+            forces[2*forces.layout.stride() + idx] = force.z;
+        }
+    }
+}
+
+void BackendCPU::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, View<f32, MultiSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {
+    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
+        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
+        const auto areas_local = areas.layout.subview(areas.ptr, i);
+        const auto gamma_delta_local = gamma_wing_delta.layout.subview(gamma_wing_delta.ptr, i);
+        const auto gamma_wing_local = gamma_wing.layout.subview(gamma_wing.ptr, i);
+        const auto gamma_wing_prev_local = gamma_wing_prev.layout.subview(gamma_wing_prev.ptr, i);
+        const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
+        const auto normals_local = normals.layout.subview(normals.ptr, i);
+        auto forces_local = forces.layout.subview(forces.ptr, i);
+        coeff_unsteady_cl_single_forces(verts_wing_local, gamma_delta_local, gamma_wing_local, gamma_wing_prev_local, velocities_local, areas_local, normals_local, forces_local, freestream, dt);
+    }
+}
+
 f32 BackendCPU::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, const linalg::alias::float3& freestream, f32 dt) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cl = 0.0f;

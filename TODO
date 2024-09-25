@@ -5,5 +5,17 @@
 - Retire Mesh object as it is simply not generic enough, all geometry data is simulation specific
 - Cleanup vlm_types to include the bare minimum headers
 - Use vlm_types in vlm_memory
+- Rework the memory and buffer strategy. Spamming .d_view() is getting on my nerves:
+adopt a conventional 
+
+Buffer<f32, Memory::Device, Tensor<2>>;
+
+but keep the layout parameter as I like it. 
+
+memory class would then be implemented for each backend
+
+memory->copy(MemoryTransfer::DeviceToDevice, dst_ptr, src_ptr); // find a solution to templates for virtual classes..
+
+
 // store kinematics in the backend ??
 // store flow properties in the backend ??
