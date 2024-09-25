@@ -449,6 +449,10 @@ f32 BackendCUDA::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wi
     return cl;
 }
 
+void BackendCUDA::coeff_unsteady_cl_single_forces(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const View<f32, SingleSurface>& normals, View<f32, SingleSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {}
+
+void BackendCUDA::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, View<f32, MultiSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {}
+
 f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) {
     f32 h_cd = 0.0f;
     cudaMemset(d_val, 0, sizeof(f32));
