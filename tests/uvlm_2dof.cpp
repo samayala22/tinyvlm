@@ -6,10 +6,12 @@
 #include "tinypbar.hpp"
 
 #include <tuple>
+#include <fstream>
 
 using namespace vlm;
 
 constexpr u32 DOF = 2;
+// #define DEBUG_DISPLACEMENT_DATA
 
 class NewmarkBeta {
     public:
@@ -135,9 +137,9 @@ class UVLM_2DOF final: public Simulation {
         Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
         Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
         Buffer<f32, MemoryLocation::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> panel_forces{*backend->memory};
         Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms{*backend->memory}; // 4*4*nb_meshes
-        
+        Buffer<f32, MemoryLocation::Device, Tensor<3>> panel_forces{*backend->memory}; // panels x 3 x timesteps
+
         // Simulation boilerplate
         std::vector<f32> vec_t; // timesteps
         std::vector<f32> local_dt; // per mesh dt (pre reduction)
@@ -175,7 +177,6 @@ void UVLM_2DOF::alloc_buffers() {
     gamma_wing_prev.alloc(MultiSurface{wing_panels, 1});
     gamma_wing_delta.alloc(MultiSurface{wing_panels, 1});
     velocities.alloc(MultiSurface{wing_panels, 3});
-    panel_forces.alloc(MultiSurface{wing_panels, 3});
     transforms.alloc(Tensor<3>({4,4,nb_meshes}));
 
     local_dt.resize(nb_meshes);
@@ -192,6 +193,14 @@ void UVLM_2DOF::alloc_buffers() {
     K.alloc(structure_layout);
     u0.alloc(structure_layout_1d);
     v0.alloc(structure_layout_1d);
+}
+
+template<typename T>
+void dump_buffer(std::ofstream& stream, T* start, u32 size) {
+    for (T* it = start; it != start + size; it++) {
+        stream << *it << " ";
+    }
+    stream << "\n";
 }
 
 void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final) {
@@ -262,6 +271,17 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
         mesh.alloc_wake(wake_vertices);
     }
 
+    #ifdef DEBUG_DISPLACEMENT_DATA
+    std::ofstream wing_data("wing_data.txt");
+    std::ofstream wake_data("wake_data.txt");
+
+    wing_data << mesh.verts_wing.d_view().layout.nc(0) << " " << mesh.verts_wing.d_view().layout.ns(0) << "\n";
+    wing_data << vec_t.size() - 1 << "\n\n";
+
+    wake_data << mesh.verts_wake.d_view().layout.ns(0) << "\n";
+    wake_data << vec_t.size() - 1 << "\n\n";
+    #endif
+
     // 3. Precompute constant values for the transient simulation
     backend->lhs_assemble(lhs.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), condition0 , 0);
     backend->lu_factor(lhs.d_view());
@@ -281,10 +301,12 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
         f32 t = (x0 - p0.x) / (p1.x - p0.x);
         f32 z0 = p0.z + t * (p1.z - p0.z);
 
-        return std::tuple<f32, f32>(z0, std::atan2(p1.z - p0.z, p1.x - p0.x));
+        return std::tuple<f32, f32>(p0.z, std::atan2(p1.z - p0.z, p1.x - p0.x));
     };
 
     const Tensor<2> force_history_layout{{DOF, vec_t.size()-1}};
+    const Tensor<3> panel_forces_layout{{wing_panels[0].size(), 3, vec_t.size()}};
+    panel_forces.alloc(panel_forces_layout);
     F.alloc(force_history_layout);
     backend->memory->fill_f32(MemoryLocation::Device, F.d_view().ptr, 0.0f, F.d_view().size());
     auto F0 = F.d_view().layout.slice(F.d_view().ptr, all, 0);
@@ -296,6 +318,12 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
         std::printf("t: %f, h: %f, alpha: %f\n", vec_t[i], h, to_degrees(alpha));
         const f32 t = vec_t[i];
         const f32 dt = vec_t[i+1] - t;
+        
+        auto panel_forces_ip0 = panel_forces.d_view().layout.slice(panel_forces.d_view().ptr, all, all, i);
+        auto panel_forces_ip1 = panel_forces.d_view().layout.slice(panel_forces.d_view().ptr, all, all, i+1);
+
+        // Aero 0
+        {
 
         const linalg::alias::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t,1), {0.f, 0.f, 0.f, 1.0f});
 
@@ -328,28 +356,80 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
         backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
         backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
         
-        // skip cl computation for the first iteration
         if (i > 0) {
-            backend->coeff_unsteady_cl_multi_forces(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), gamma_wing.d_view(), gamma_wing_prev.d_view(), velocities.d_view(), mesh.area.d_view(), mesh.normals.d_view(), panel_forces.d_view(), freestream, dt);
-            
-            // if (i == vec_t.size()-2) std::printf("t: %f, CL: %f\n", t, cl_unsteady);
-            // std::printf("t: %f, CL: %f\n", t, cl_unsteady);
-            // mesh.verts_wing.to_host();
-            // cl_data << t << " " << *(mesh.verts_wing.h_view().ptr + 2*mesh.verts_wing.h_view().layout.stride()) << " " << cl_unsteady << " " << 0.f << "\n";
+            // backend->coeff_unsteady_cl_multi_forces(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), gamma_wing.d_view(), gamma_wing_prev.d_view(), velocities.d_view(), mesh.area.d_view(), mesh.normals.d_view(), panel_forces_ip0, freestream, dt);
         }
 
-        // backend->displace_wake_rollup(wake_rollup.d_view(), mesh.verts_wake.d_view(), mesh.verts_wing.d_view(), gamma_wing.d_view(), gamma_wake.d_view(), dt, i);
         backend->gamma_shed(gamma_wing.d_view(), gamma_wing_prev.d_view(), gamma_wake.d_view(), i);
-        
-        // parallel for
-        for (u64 m = 0; m < nb_meshes; m++) {
-            const auto local_transform = dual_to_float(kinematics[m].displacement(t+dt));
-            body_frames[m] = local_transform; 
-            local_transform.store(transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), transforms.h_view().layout.stride(1));
         }
-        transforms.to_device();
-        backend->displace_wing(transforms.d_view(), mesh.verts_wing.d_view(), verts_wing_pos.d_view());
-        backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
+
+        // Move mesh
+        {
+            // parallel for
+            for (u64 m = 0; m < nb_meshes; m++) {
+                const auto local_transform = dual_to_float(kinematics[m].displacement(t+dt));
+                body_frames[m] = local_transform;
+                local_transform.store(transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), transforms.h_view().layout.stride(1));
+            }
+            transforms.to_device();
+            backend->displace_wing(transforms.d_view(), mesh.verts_wing.d_view(), verts_wing_pos.d_view());
+            backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
+        }
+
+        // Aero 1
+        {
+            const linalg::alias::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t+dt,1), {0.f, 0.f, 0.f, 1.0f});
+            backend->wake_shed(mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), i+1);
+
+            // parallel for
+            for (u64 m = 0; m < nb_meshes; m++) {
+                const auto local_transform = kinematics[m].displacement(t+dt);
+                const f32* local_colloc = colloc_pos.h_view().ptr + colloc_pos.h_view().layout.offset(m);
+                f32* local_velocities = velocities.h_view().ptr + velocities.h_view().layout.offset(m);
+                
+                // parallel for
+                for (u64 idx = 0; idx < colloc_pos.h_view().layout.surface(m).size(); idx++) {
+                    auto local_velocity = -kinematics[m].velocity(local_transform, {
+                        local_colloc[0*colloc_pos.h_view().layout.stride() + idx],
+                        local_colloc[1*colloc_pos.h_view().layout.stride() + idx],
+                        local_colloc[2*colloc_pos.h_view().layout.stride() + idx],
+                        1.0f
+                    });
+                    local_velocities[0*velocities.h_view().layout.stride() + idx] = local_velocity.x;
+                    local_velocities[1*velocities.h_view().layout.stride() + idx] = local_velocity.y;
+                    local_velocities[2*velocities.h_view().layout.stride() + idx] = local_velocity.z;
+                }
+            }
+
+            velocities.to_device();
+            backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
+            backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), velocities.d_view());
+            backend->rhs_assemble_wake_influence(rhs.d_view(), gamma_wake.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wake.d_view(), i+1);
+            backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
+            backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
+            
+            // backend->coeff_unsteady_cl_multi_forces(mesh.verts_wing.d_view(), gamma_wing_delta.d_view(), gamma_wing.d_view(), gamma_wing_prev.d_view(), velocities.d_view(), mesh.area.d_view(), mesh.normals.d_view(), panel_forces_ip1, freestream, dt);
+
+            backend->gamma_shed(gamma_wing.d_view(), gamma_wing_prev.d_view(), gamma_wake.d_view(), i);
+        }
+
+        // Structure
+        {
+            // TODO: map panel_forces_ip0, ip1 to structure domain
+            auto F_ip0 = F.d_view().layout.slice(F.d_view().ptr, all, i);
+            auto F_ip1 = F.d_view().layout.slice(F.d_view().ptr, all, i+1);
+            // integrator.step(M.d_view(), C.d_view(), K.d_view(), F_ip0, F_ip1, dt, i);
+
+            // parallel for
+            for (u64 m = 0; m < nb_meshes; m++) {
+                const auto local_transform = dual_to_float(kinematics[m].displacement(t));
+                body_frames[m] = local_transform;
+                local_transform.store(transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), transforms.h_view().layout.stride(1));
+            }
+            transforms.to_device();
+            backend->displace_wing(transforms.d_view(), mesh.verts_wing.d_view(), verts_wing_pos.d_view());
+
+        }
     }
 }
 
@@ -358,6 +438,8 @@ int main() {
     const u64 nj = 5;
     // vlm::Executor::instance(1);
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
+    // const std::vector<std::string> meshes = {"../../../../mesh/rectangular_4x4.x"};
+    
     const std::vector<std::string> backends = {"cpu"};
 
     auto solvers = tiny::make_combination(meshes, backends);
@@ -403,8 +485,8 @@ int main() {
     });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
-        UVLM_2DOF simulation{backend_name, {mesh_name}};
-        simulation.run({kinematics}, {initial_pose}, t_final);
+        // UVLM_2DOF simulation{backend_name, {mesh_name}};
+        // simulation.run({kinematics}, {initial_pose}, t_final);
     }
     return 0;
 }
