@@ -68,7 +68,7 @@ pa = pitch_axis / b
 
 # Theodorsen numerical simulation param
 dt = 0.01
-t_final = 5 # 30s
+t_final = 30 # 30s
 vec_t = np.arange(0, t_final, dt)
 
 # Aeroelastic model
@@ -92,12 +92,12 @@ vec_x1 = np.zeros(len(vec_t))
 vec_x2 = np.zeros(len(vec_t))
 
 # Initial condition
-u[:, 0] = np.array([-0.5, 0])
+u[:, 0] = np.array([0.0, np.radians(3)])
 v[:, 0] = np.array([0, 0])
 a[:, 0] = np.linalg.solve(M, F[:, 0] - C @ v[:,0] - K @ u[:,0])
 
 fig, axs = plt.subplot_mosaic(
-    [["CL"], ["h"], ["alpha"]],  # Disposition des graphiques
+    [["h"], ["alpha"]],  # Disposition des graphiques
     constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
     figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
 )
@@ -125,52 +125,38 @@ def aero(i):
     F[1,i] = M
     # C_l = L / (0.5 * rho * u_inf * u_inf * c)
 
-def central_difference_step(M, C, K, u_prev, u, F_i, dt):
-    M_inv = np.linalg.inv(M)
-    a = M_inv @ (F_i - C @ ((u - u_prev) / dt) - K @ u)
-    u_next = 2 * u - u_prev + dt**2 * a
-    return u_next
+# def central_difference_step(M, C, K, u_prev, u, F_i, dt):
+#     M_inv = np.linalg.inv(M)
+#     a = M_inv @ (F_i - C @ ((u - u_prev) / dt) - K @ u)
+#     u_next = 2 * u - u_prev + dt**2 * a
+#     return u_next
 
-# Initialize u_prev
-u_prev = u[:,0] - dt * v[:,0] + 0.5 * dt**2 * a[:,0]
-for i in tqdm(range(1, len(vec_t))):
-    F_i = F[:,i-1]
-    u[:,i] = central_difference_step(M, C, K, u_prev, u[:,i-1], F_i, dt)
-    v[:,i] = (u[:,i] - u_prev) / (2 * dt)
-    a[:,i] = (u[:,i] - 2 * u[:,i-1] + u_prev) / dt**2
-    u_prev = u[:,i-1]
-    aero(i)
+# # Initialize u_prev
+# u_prev = u[:,0] - dt * v[:,0] + 0.5 * dt**2 * a[:,0]
+# for i in tqdm(range(1, len(vec_t))):
+#     F_i = F[:,i-1]
+#     u[:,i] = central_difference_step(M, C, K, u_prev, u[:,i-1], F_i, dt)
+#     v[:,i] = (u[:,i] - u_prev) / (2 * dt)
+#     a[:,i] = (u[:,i] - 2 * u[:,i-1] + u_prev) / dt**2
+#     u_prev = u[:,i-1]
+#     aero(i)
 
-# # Newmark
-# for i in tqdm(range(len(vec_t)-1)):
-#     t = vec_t[i]
-
-#     du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i], F[:,i+1], dt)
-#     u[:,i+1] = u[:,i] + du
-#     v[:,i+1] = v[:,i] + dv
-#     a[:,i+1] = a[:,i] + da
-#     if (i != 0):
-#         aero(i)
-
-#     # LOOSE COUPLING
-#     aero(i+1)
-#     du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i], F[:,i+1], dt)
-#     u[:,i+1] = u[:,i] + du
-#     v[:,i+1] = v[:,i] + dv
-#     a[:,i+1] = a[:,i] + da
-    
-#     # ITERATIVE COUPLING
-#     # du_k = np.zeros(2)
-#     # iteration = 0
-#     # while (np.linalg.norm(du_k - du) / 2 > 1e-4):
-#     #     du_k = du[:]
-#     #     aero(i+1)
-#     #     du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i], F[:,i+1], dt)
-#     #     u[:,i+1] = u[:,i] + du
-#     #     v[:,i+1] = v[:,i] + dv
-#     #     a[:,i+1] = a[:,i] + da
-#     #     iteration += 1
-#     # print("iters: ", iteration)
+# Newmark V2
+for i in tqdm(range(len(vec_t)-1)):
+    t = vec_t[i]
+    F[:,i+1] = F[:,i]
+    du = np.zeros(2)
+    du_k = np.zeros(2) + 1
+    iteration = 0
+    while (np.linalg.norm(du_k - du) / len(du) > 1e-7):
+        du_k = du[:]
+        du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i], F[:,i+1], dt)
+        u[:,i+1] = u[:,i] + du
+        v[:,i+1] = v[:,i] + dv
+        a[:,i+1] = a[:,i] + da
+        aero(i+1)
+        iteration += 1
+    # print("iters: ", iteration)
 
 axs["h"].plot(vec_t, u[0, :])
 axs["alpha"].plot(vec_t, u[1, :])
