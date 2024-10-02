@@ -56,15 +56,46 @@ b2 = -0.335
 beta_1 = 0.0455
 beta_2 = 0.3
 
-# UVLM parameters
-rho = 1 # fluid density
-u_inf = 1 # freestream
-ar = 10000 # aspect ratio
-b = 0.5 # half chord
-c = 2*b # chord
-a = ar / c # full span
-pitch_axis = -0.5
-pa = pitch_axis / b
+# Dimensional variables
+class DVars:
+    def __init__(self, rho, u_inf, b, p_axis, m_center, r_a, m, k_h, k_a):
+        # Independent
+        self.rho = rho # fluid density
+        self.u_inf = u_inf # freestream velocity
+        self.b = b # half chord
+        self.p_axis = p_axis # position of elastic / pitch axis (measured from center of wing)
+        self.m_center = m_center # mass center (from pitch axis to center of mass)
+        self.r_a = r_a # radius of gyration around elastic axis
+        self.m = m # mass
+        self.k_h = k_h # linear stiffness
+        self.k_a = k_a # torsional stiffness
+        # Dependent
+        self.c = 2*b
+        self.S_a = m * m_center # first moment of inertia
+        self.I_a = m * m_center**2 # second moment of inertia
+
+class NDVars:
+    def __init__(self, d_vars):
+        self.p_axis = d_vars.p_axis / d_vars.b # dimensionless pitch axis
+        self.omega_a = np.sqrt(d_vars.k_a / (d_vars.m * d_vars.r_a)) # dimensionless torsional stiffness
+        self.omega_h = np.sqrt(d_vars.k_h / d_vars.m) # dimensionless linear stiffness
+        self.U = d_vars.u_inf / (self.omega_a * d_vars.b) # reduced velocity
+        self.mu = d_vars.m / (np.pi * d_vars.rho * d_vars.b**2) # mass ratio
+        self.r_a = d_vars.r_a / d_vars.b # dimensionless radius of gyration
+
+d_vars = DVars(
+    rho = 1, # fluid density
+    u_inf = 1, # freestream
+    b = 0.5, # half chord
+    p_axis = 0.25, # pitch/elastic axis (measured from center of wing)
+    m_center = 0.125, # mass center (from pitch axis to center of mass)
+    r_a = 0.25, # radius of gyration around elastic axis
+    m = 1.0, # mass
+    k_h = 800.0, # linear stiffness
+    k_a = 150.0 # torsional stiffness
+)
+
+nd_vars = NDVars(d_vars)
 
 # Theodorsen numerical simulation param
 dt = 0.01
@@ -72,15 +103,16 @@ t_final = 30 # 30s
 vec_t = np.arange(0, t_final, dt)
 
 # Aeroelastic model
-m = 2.0 # mass
-S_a = 0.2 # first moment of inertia
-I_a = 4.0 # second moment of inertia
-K_h = 800.0 # linear stiffness
-K_a = 150.0 # torsional stiffness
+# m = 2.0 # mass
+# S_a = 0.2 # first moment of inertia
+# I_a = 4.0 # second moment of inertia
+# K_h = 800.0 # linear stiffness
+# K_a = 150.0 # torsional stiffness
 
-M = np.array([[m, S_a],[S_a, I_a]])
+M = np.array([[d_vars.m, d_vars.S_a],[d_vars.S_a, d_vars.I_a]])
+print(M)
 C = np.zeros((2,2))
-K = np.array([[K_h, 0],[0, K_a]])
+K = np.array([[d_vars.k_h, 0],[0, d_vars.k_a]])
 
 u = np.zeros((2, len(vec_t)))
 v = np.zeros((2, len(vec_t)))
@@ -104,10 +136,10 @@ fig, axs = plt.subplot_mosaic(
 
 def w(s: float):
     idx = int(s / dt)
-    return u_inf * u[1, idx] + v[0,idx] + b * (0.5 - pa) * v[1, idx]
+    return d_vars.u_inf * u[1, idx] + v[0,idx] + d_vars.b * (0.5 - nd_vars.p_axis) * v[1, idx]
 
-def dx1ds(s: float, x1: float): return (u_inf / b) * (b1 * beta_1 * w(s) - beta_1 * x1)
-def dx2ds(s: float, x2: float): return (u_inf / b) * (b2 * beta_2 * w(s) - beta_2 * x2)
+def dx1ds(s: float, x1: float): return (d_vars.u_inf / d_vars.b) * (b1 * beta_1 * w(s) - beta_1 * x1)
+def dx2ds(s: float, x2: float): return (d_vars.u_inf / d_vars.b) * (b2 * beta_2 * w(s) - beta_2 * x2)
 
 def aero(i):
     t = vec_t[i]
@@ -117,10 +149,10 @@ def aero(i):
     x1 = vec_x1[i]
     x2 = vec_x2[i]
 
-    L_m = rho * b * b * np.pi * (u_inf * v[1,i] + a[0,i] - b * pa * a[1,i])
-    L_c = -2 * np.pi * rho * u_inf * b * (-(b0 + b1 + b2) * w(t) + x1 + x2)
+    L_m = d_vars.rho * d_vars.b * d_vars.b * np.pi * (d_vars.u_inf * v[1,i] + a[0,i] - d_vars.b * nd_vars.p_axis * a[1,i])
+    L_c = -2 * np.pi * d_vars.rho * d_vars.u_inf * d_vars.b * (-(b0 + b1 + b2) * w(t) + x1 + x2)
     L = L_m + L_c
-    M = (0.25 + pitch_axis) * np.cos(u[1,i]) * L
+    M = (nd_vars.p_axis + 0.5) * d_vars.b * np.cos(u[1,i]) * L
     F[0,i] = -L
     F[1,i] = M
     # C_l = L / (0.5 * rho * u_inf * u_inf * c)

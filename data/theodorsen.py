@@ -54,7 +54,7 @@ ar = 10000 # aspect ratio
 b = 0.5 # half chord
 c = 2*b # chord
 a = ar / c # full span
-pitch_axis = -0.5 # leading edge
+pitch_axis = -0.5 # quarter chord
 
 # Theodorsen numerical simulation param
 cycles = 5 # number of periods

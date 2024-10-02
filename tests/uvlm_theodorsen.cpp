@@ -56,7 +56,7 @@ int main() {
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
     const f32 k = 0.5; // reduced frequency
-    const f32 omega = k * 2.0f * u_inf / (2*b);
+    const f32 omega = k * u_inf / b;
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
 
