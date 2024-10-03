@@ -58,50 +58,68 @@ beta_2 = 0.3
 
 # Dimensional variables
 class DVars:
-    def __init__(self, rho, u_inf, b, p_axis, m_center, r_a, m, k_h, k_a):
+    def __init__(self, rho, u_inf, b, p_axis, x_a, r_a, m, k_h, k_a):
         # Independent
         self.rho = rho # fluid density
         self.u_inf = u_inf # freestream velocity
         self.b = b # half chord
         self.p_axis = p_axis # position of elastic / pitch axis (measured from center of wing)
-        self.m_center = m_center # mass center (from pitch axis to center of mass)
+        self.x_a = x_a # mass center (from pitch axis to center of mass)
         self.r_a = r_a # radius of gyration around elastic axis
         self.m = m # mass
         self.k_h = k_h # linear stiffness
         self.k_a = k_a # torsional stiffness
         # Dependent
         self.c = 2*b
-        self.S_a = m * m_center # first moment of inertia
-        self.I_a = m * m_center**2 # second moment of inertia
+        self.S_a = m * x_a # first moment of inertia
+        self.I_a = m * x_a**2 # second moment of inertia
 
 class NDVars:
-    def __init__(self, d_vars):
+    @classmethod
+    def from_dvars(self, d_vars):
         self.p_axis = d_vars.p_axis / d_vars.b # dimensionless pitch axis
         self.omega_a = np.sqrt(d_vars.k_a / (d_vars.m * d_vars.r_a)) # dimensionless torsional stiffness
         self.omega_h = np.sqrt(d_vars.k_h / d_vars.m) # dimensionless linear stiffness
         self.U = d_vars.u_inf / (self.omega_a * d_vars.b) # reduced velocity
         self.mu = d_vars.m / (np.pi * d_vars.rho * d_vars.b**2) # mass ratio
         self.r_a = d_vars.r_a / d_vars.b # dimensionless radius of gyration
+        self.x_a = d_vars.x_a / d_vars.b # dimensionless mass center
+        self.eta_omega = self.omega_h / self.omega_a # dimensionless ratio of torsional stiffness to linear stiffness
+
+    def __init__(self, a_h, omega, x_a, mu, r_a, U):
+        self.a_h = a_h # dimensionless pitch axis
+        self.omega = omega # dimensionless ratio of torsional stiffness to linear stiffness
+        self.x_a = x_a # dimensionless mass center
+        self.mu = mu # mass ratio
+        self.r_a = r_a # dimensionless radius of gyration
+        self.U = U # reduced velocity
 
 d_vars = DVars(
     rho = 1, # fluid density
     u_inf = 1, # freestream
     b = 0.5, # half chord
-    p_axis = 0.25, # pitch/elastic axis (measured from center of wing)
-    m_center = 0.125, # mass center (from pitch axis to center of mass)
+    p_axis = -0.25, # pitch/elastic axis (measured from center of wing)
+    x_a = 0.125, # mass center (from pitch axis to center of mass)
     r_a = 0.25, # radius of gyration around elastic axis
     m = 1.0, # mass
     k_h = 800.0, # linear stiffness
     k_a = 150.0 # torsional stiffness
 )
 
-nd_vars = NDVars(d_vars)
+# Zhao 2004 params
+nd_vars = NDVars(
+    a_h = -0.5,
+    omega = 0.2,
+    x_a = 0.25,
+    mu = 100.0,
+    r_a = 0.5
+)
 
 # Theodorsen numerical simulation param
 dt = 0.01
 t_final = 30 # 30s
 vec_t = np.arange(0, t_final, dt)
-
+vec_t_nd = vec_t * 
 # Aeroelastic model
 # m = 2.0 # mass
 # S_a = 0.2 # first moment of inertia
@@ -109,10 +127,13 @@ vec_t = np.arange(0, t_final, dt)
 # K_h = 800.0 # linear stiffness
 # K_a = 150.0 # torsional stiffness
 
-M = np.array([[d_vars.m, d_vars.S_a],[d_vars.S_a, d_vars.I_a]])
+M = np.array([
+    [1/(nd_vars.r_a**2), nd_vars.x_a/(nd_vars.r_a**2)],
+    [nd_vars.x_a, 1.0]
+])
 print(M)
 C = np.zeros((2,2))
-K = np.array([[d_vars.k_h, 0],[0, d_vars.k_a]])
+K = np.array([[nd_vars.eta_omega, 0],[0, 1]])
 
 u = np.zeros((2, len(vec_t)))
 v = np.zeros((2, len(vec_t)))
