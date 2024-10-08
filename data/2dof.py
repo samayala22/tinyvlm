@@ -1,7 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy as sp
 from scipy.fft import fft, fftfreq
 from scipy.integrate import solve_ivp
+from scipy.signal import find_peaks
+from scipy.optimize import curve_fit
+from csaps import csaps
 from tqdm import tqdm
 
 EPS_sqrt_f = np.sqrt(1.19209e-07)
@@ -169,23 +173,112 @@ def monolithic_aeroelastic_system(ndv: NDVars):
 #     k_a = 150.0 # torsional stiffness
 # )
 
+def compute_logarithmic_decrement(signal):
+    peaks_idx, _ = find_peaks(signal)
+    num_peaks = len(peaks_idx)
+    peak_values = signal[peaks_idx]
+    
+    decrements = np.log((peak_values[:-1]+EPS_sqrt_f) / (peak_values[1:num_peaks+1]+EPS_sqrt_f))
+    delta = np.mean(decrements)
+    return delta
+
+def compute_damping_ratio(log_decrement):
+    return log_decrement / np.sqrt(4 * np.pi**2 + log_decrement**2)
+
+def get_damping_ratio(signal):
+    delta = compute_logarithmic_decrement(signal)
+    zeta = compute_damping_ratio(delta)
+    return zeta
+
+def get_peaks(time, signal):
+    peaks_idx, _ = find_peaks(signal)
+    return time[peaks_idx], signal[peaks_idx]
+
+def damped_oscillation(t, A, gamma, omega, phi, C):
+    """
+    Damped or amplified oscillatory function.
+
+    Parameters:
+        t (np.ndarray): Time vector.
+        A (float): Amplitude.
+        gamma (float): Growth (positive) or damping (negative) rate.
+        omega (float): Angular frequency.
+        phi (float): Phase shift.
+        C (float): Constant offset.
+
+    Returns:
+        np.ndarray: Oscillatory signal at time t.
+    """
+    return A * np.exp(gamma * t) * np.sin(omega * t + phi) + C
+
+def fit_oscillatory_signal(time, signal):
+    """
+    Fits a damped or amplified oscillatory model to the provided signal.
+
+    Parameters:
+        time (np.ndarray): 1D array of time points.
+        signal (np.ndarray): 1D array of signal values.
+
+    Returns:
+        popt (tuple): Optimal values for the parameters.
+        pcov (2D array): Covariance of popt.
+    """
+    # Initial parameter guesses
+    A_guess = (np.max(signal) - np.min(signal)) / 2
+    C_guess = np.mean(signal)
+    gamma_guess = -0.1 if np.all(np.diff(signal) < 0) else 0.1
+    # Estimate frequency using FFT
+    fft_vals = np.fft.fft(signal - C_guess)
+    freqs = np.fft.fftfreq(len(time), d=(time[1] - time[0]))
+    positive_freqs = freqs[freqs > 0]
+    fft_magnitude = np.abs(fft_vals[freqs > 0])
+    omega_guess = 2 * np.pi * positive_freqs[np.argmax(fft_magnitude)]
+    phi_guess = 0
+
+    initial_guesses = [A_guess, gamma_guess, omega_guess, phi_guess, C_guess]
+
+    # Curve fitting
+    popt, pcov = curve_fit(damped_oscillation, time, signal, p0=initial_guesses)
+    return popt, pcov
+
+def plot_fit(time, signal, fitted_signal):
+    """
+    Plots the original signal and the fitted model.
+
+    Parameters:
+        time (np.ndarray): Time vector.
+        signal (np.ndarray): Original signal.
+        fitted_signal (np.ndarray): Fitted signal from the model.
+    """
+    plt.figure(figsize=(10, 6))
+    plt.plot(time, signal, 'b.', label='Noisy Signal')
+    plt.plot(time, fitted_signal, 'r-', label='Fitted Model')
+    plt.xlabel('Time')
+    plt.ylabel('Signal')
+    plt.legend()
+    plt.title('Oscillatory Signal Fitting')
+    plt.show()
+
 if __name__ == "__main__":
     psi1 = 0.165
     psi2 = 0.335
     eps1 = 0.0455
     eps2 = 0.3
 
-    # vec_U = np.linspace(0.1, 7, 50)
-    vec_U = [3.0]
+    #vec_U = np.linspace(3.0, 6.5, 100)
+    vec_U = [6.5]
     freqs = np.zeros((2, len(vec_U)))
+    damping_ratios = np.zeros((2, len(vec_U)))
+    damping_ratios_m = np.zeros((2, len(vec_U)))
 
     # Dimensionless parameters
-    dt_nd = 0.01
+    dt_nd = 0.05
     t_final_nd = 300
     vec_t_nd = np.arange(0, t_final_nd, dt_nd)
     n = len(vec_t_nd)
 
-    for u_idx, U_vel in enumerate(vec_U):
+    # for idx, U_vel in enumerate(vec_U):
+    for idx, U_vel in tqdm(enumerate(vec_U), total=len(vec_U)):
         # Zhao 2004 params
         ndv = NDVars(
             a_h = -0.5,
@@ -266,7 +359,7 @@ if __name__ == "__main__":
         #     aero(i)
 
         # Newmark V2
-        for i in tqdm(range(n-1)):
+        for i in range(n-1):
             t = vec_t_nd[i]
             F[:,i+1] = F[:,i]
             du = np.zeros(2)
@@ -286,32 +379,48 @@ if __name__ == "__main__":
         y0 = np.array([np.radians(3), 0, 0, 0, 0, 0, 0, 0])
         monolithic_sol = solve_ivp(lambda t, y: A @ y, (0, t_final_nd), y0, t_eval=vec_t_nd)
 
-        fig, axs = plt.subplot_mosaic(
-            [["h"], ["alpha"]],  # Disposition des graphiques
-            constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-            figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
-        )
-        axs["h"].plot(vec_t_nd, u[0, :], label="Iterative")
-        axs["alpha"].plot(vec_t_nd, u[1, :], label="Iterative")
-        axs["h"].plot(vec_t_nd, monolithic_sol.y[2, :], label="Monolithic")
-        axs["alpha"].plot(vec_t_nd, monolithic_sol.y[0, :], label="Monolithic")
-        
-        axs["h"].legend()
-        axs["alpha"].legend()
-        axs["h"].set_xlabel('t')
-        axs["h"].set_ylabel('h')
-        axs["h"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+        offset = 100
+        smoothed_h = sp.signal.savgol_filter(u[0, :], window_length=500, polyorder=3)
+        smoothed_h = sp.signal.savgol_filter(smoothed_h, window_length=500, polyorder=3)
 
-        axs["alpha"].set_xlabel('t')
-        axs["alpha"].set_ylabel('alpha')
-        axs["alpha"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-        plt.show()
+        peaks_h_t_i, peaks_h_d_i = get_peaks(vec_t_nd[offset:], smoothed_h[offset:])
+        peaks_a_t_i, peaks_a_d_i = get_peaks(vec_t_nd[offset:], u[1, offset:])
+
+        if (len(vec_U) == 1):
+            fig, axs = plt.subplot_mosaic(
+                [["h"], ["alpha"]],  # Disposition des graphiques
+                constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
+                figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
+            )
+            
+            axs["h"].plot(vec_t_nd, u[0, :], label="Iterative")
+            axs["h"].plot(peaks_h_t_i, peaks_h_d_i, "o")
+            axs["h"].plot(vec_t_nd, smoothed_h, label="Smoothed")
+
+            axs["alpha"].plot(vec_t_nd, u[1, :], label="Iterative")
+            axs["alpha"].plot(peaks_a_t_i, peaks_a_d_i, "o")
+            # axs["h"].plot(vec_t_nd, monolithic_sol.y[2, :], label="Monolithic")
+            # axs["alpha"].plot(vec_t_nd, monolithic_sol.y[0, :], label="Monolithic")
+            
+            axs["h"].legend()
+            axs["alpha"].legend()
+            axs["h"].set_xlabel('t')
+            axs["h"].set_ylabel('h')
+            axs["h"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+
+            axs["alpha"].set_xlabel('t')
+            axs["alpha"].set_ylabel('alpha')
+            axs["alpha"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+            plt.show()
 
         # X = fft(u, axis=1)
         # freq = fftfreq(n, d=dt_nd)
         # idx = np.argmax(np.abs(X), axis=1)
         # dominant_freqs = np.abs(freq[idx])
-        # freqs[:, u_idx] = dominant_freqs
+        # freqs[:, idx] = dominant_freqs
+        damping_ratios[0, idx] = get_damping_ratio(smoothed_h[offset:])
+        damping_ratios[1, idx] = get_damping_ratio(u[1, offset:])
+        damping_ratios_m[1, idx] = get_damping_ratio(monolithic_sol.y[0, offset:])
 
     # fig, axs = plt.subplot_mosaic(
     #     [["freq"]],  # Disposition des graphiques
@@ -322,11 +431,17 @@ if __name__ == "__main__":
     # axs["freq"].plot(vec_U, freqs[1, :], "o")
     # plt.show()
 
-    # fig, axs = plt.subplot_mosaic(
-    #     [["damping"]],  # Disposition des graphiques
-    #     constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-    #     figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
-    # )
-    # axs["damping"].plot(vec_U, freqs[0, :], "o")
-    # axs["damping"].plot(vec_U, freqs[1, :], "o")
-    # plt.show()
+    if (len(vec_U) > 1):
+        fig, axs = plt.subplot_mosaic(
+            [["damping"]],  # Disposition des graphiques
+            constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
+            figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
+        )
+        axs["damping"].plot(vec_U, damping_ratios[0, :], "o", label="Heave (Iterative)")
+        axs["damping"].plot(vec_U, damping_ratios[1, :], "o", label="Pitch (Iterative)")
+        # axs["damping"].plot(vec_U, damping_ratios_m[1, :], "o", label="Pitch (Monolithic)")
+        axs["damping"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+        axs["damping"].legend()
+        axs["damping"].set_xlabel('U')
+        axs["damping"].set_ylabel('zeta')
+        plt.show()
