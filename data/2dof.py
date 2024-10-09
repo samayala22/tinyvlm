@@ -259,6 +259,59 @@ def plot_fit(time, signal, fitted_signal):
     plt.title('Oscillatory Signal Fitting')
     plt.show()
 
+def create_monolithic_system(y0: np.ndarray, ndv: NDVars):
+    def monolithic_system(t, y: np.ndarray):
+        M1 = np.zeros((6,6))
+        M2 = np.zeros((6,6))
+        V = np.zeros(6)
+
+        M2[0, 0] = 1
+        M2[1, 1] = 1
+        M2[2, 2] = 1 + 1/ndv.mu
+        M2[2, 3] = ndv.x_a - ndv.a_h/ndv.mu
+        M2[3, 2] = ndv.x_a / (ndv.r_a**2) - ndv.a_h/(ndv.mu*ndv.r_a**2)
+        M2[3, 3] = 1.0 + (2/(ndv.mu*ndv.r_a**2))*((ndv.a_h**2)/2 + 1/16)
+        M2[4, 2] = -1
+        M2[4, 3] = - (0.5 - ndv.a_h)
+        M2[4, 4] = 1
+        M2[5, 2] = -1
+        M2[5, 3] = - (0.5 - ndv.a_h)
+        M2[5, 5] = 1
+
+        f0 = 0.5 - ndv.a_h
+        f1 = - 1 / (np.pi * ndv.mu)
+        f2 = 2*np.pi
+        f3 = 2 / (np.pi * ndv.mu * ndv.r_a**2)
+        f4 = np.pi * (0.5 + ndv.a_h)
+        f5 = (y0[1] + y0[2] + f0*y0[3])*(-psi1*np.exp(-eps1*t) - psi2*np.exp(-eps2*t))
+
+        M1[0, 2] = 1
+        M1[1, 3] = 1
+        M1[2, 0] = - (ndv.omega/ndv.U)**2
+        M1[2, 1] = - 2 / ndv.mu
+        M1[2, 2] = - 2.0*ndv.zeta_h*(ndv.omega/ndv.U) - 2 / ndv.mu
+        M1[2, 3] = - (1/(np.pi*ndv.mu)) * (np.pi + 2*np.pi*(0.5 - ndv.a_h))
+        M1[2, 4] = (2 / ndv.mu) * psi1
+        M1[2, 5] = (2 / ndv.mu) * psi2
+        M1[3, 1] = - 1/(ndv.U**2) + f3*f4
+        M1[3, 2] = f3*f4
+        M1[3, 3] = - 2.0*ndv.zeta_a/ndv.U + f3*f4*f0 - f3*0.5*np.pi*f0
+        M1[3, 4] = - psi1*f3*f4
+        M1[3, 5] = - psi2*f3*f4
+        M1[4, 3] = 1
+        M1[4, 4] = -eps1
+        M1[5, 3] = 1
+        M1[5, 5] = -eps2
+
+        V[2] = f1*f2*f5
+        V[3] = f3*f4*f5
+
+        y_d = np.linalg.inv(M2) @ (M1 @ y + V)
+
+        return y_d
+    
+    return monolithic_system
+
 if __name__ == "__main__":
     psi1 = 0.165
     psi2 = 0.335
@@ -266,7 +319,7 @@ if __name__ == "__main__":
     eps2 = 0.3
 
     #vec_U = np.linspace(3.0, 6.5, 100)
-    vec_U = [6.5]
+    vec_U = [2.0]
     freqs = np.zeros((2, len(vec_U)))
     damping_ratios = np.zeros((2, len(vec_U)))
     damping_ratios_m = np.zeros((2, len(vec_U)))
@@ -375,9 +428,13 @@ if __name__ == "__main__":
                 iteration += 1
             # print("iters: ", iteration)
         
-        A = monolithic_aeroelastic_system(ndv)
-        y0 = np.array([np.radians(3), 0, 0, 0, 0, 0, 0, 0])
-        monolithic_sol = solve_ivp(lambda t, y: A @ y, (0, t_final_nd), y0, t_eval=vec_t_nd)
+        # A = monolithic_aeroelastic_system(ndv)
+        # y0 = np.array([np.radians(3), 0, 0, 0, 0, 0, 0, 0])
+        # monolithic_sol = solve_ivp(lambda t, y: A @ y, (0, t_final_nd), y0, t_eval=vec_t_nd)
+
+        y0 = np.array([0, np.radians(3), 0, 0, 0, 0])
+        system = create_monolithic_system(y0, ndv)
+        monolithic_sol = solve_ivp(system, (0, t_final_nd), y0, t_eval=vec_t_nd)
 
         offset = 100
         smoothed_h = sp.signal.savgol_filter(u[0, :], window_length=500, polyorder=3)
@@ -399,8 +456,8 @@ if __name__ == "__main__":
 
             axs["alpha"].plot(vec_t_nd, u[1, :], label="Iterative")
             axs["alpha"].plot(peaks_a_t_i, peaks_a_d_i, "o")
-            # axs["h"].plot(vec_t_nd, monolithic_sol.y[2, :], label="Monolithic")
-            # axs["alpha"].plot(vec_t_nd, monolithic_sol.y[0, :], label="Monolithic")
+            axs["h"].plot(vec_t_nd, monolithic_sol.y[0, :], label="Monolithic")
+            axs["alpha"].plot(vec_t_nd, monolithic_sol.y[1, :], label="Monolithic")
             
             axs["h"].legend()
             axs["alpha"].legend()
