@@ -1,11 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy as sp
-from scipy.fft import fft, fftfreq
+from scipy.fft import fft, ifft, fftfreq
 from scipy.integrate import solve_ivp
 from scipy.signal import find_peaks
 from scipy.optimize import curve_fit
-from csaps import csaps
 from tqdm import tqdm
 
 EPS_sqrt_f = np.sqrt(1.19209e-07)
@@ -287,13 +286,14 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars):
 
         M1[0, 2] = 1
         M1[1, 3] = 1
-        M1[2, 0] = - (ndv.omega/ndv.U)**2
+        # M1[2, 0] = - (ndv.omega/ndv.U)**2
         M1[2, 1] = - 2 / ndv.mu
         M1[2, 2] = - 2.0*ndv.zeta_h*(ndv.omega/ndv.U) - 2 / ndv.mu
         M1[2, 3] = - (1/(np.pi*ndv.mu)) * (np.pi + 2*np.pi*(0.5 - ndv.a_h))
         M1[2, 4] = (2 / ndv.mu) * psi1
         M1[2, 5] = (2 / ndv.mu) * psi2
-        M1[3, 1] = - 1/(ndv.U**2) + f3*f4
+        # M1[3, 1] = - 1/(ndv.U**2) + f3*f4
+        M1[3, 1] = f3*f4
         M1[3, 2] = f3*f4
         M1[3, 3] = - 2.0*ndv.zeta_a/ndv.U + f3*f4*f0 - f3*0.5*np.pi*f0
         M1[3, 4] = - psi1*f3*f4
@@ -306,11 +306,140 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars):
         V[2] = f1*f2*f5
         V[3] = f3*f4*f5
 
+        # Linear springs
+        # V[2] += - (ndv.omega/ndv.U)**2 * y[0]
+        # V[3] += - 1/(ndv.U**2) * y[1]
+
+        # Nonlinear springs
+        def M(alpha):
+            M0 = 0
+            Mf = 0
+            delta = np.radians(0.5)
+            a_f = np.radians(0.25)
+            if (alpha < a_f):
+                return M0 + alpha - a_f
+            elif (alpha >= a_f and alpha <= (a_f + delta)):
+                return M0 + Mf * (alpha - a_f)
+            else: # alpha > a_F + delta
+                return M0 + alpha - a_f + delta * (Mf - 1)
+            
+        V[2] += - (ndv.omega/ndv.U)**2 * y[0]
+        V[3] += - 1/(ndv.U**2) * M(y[1])
+
         y_d = np.linalg.inv(M2) @ (M1 @ y + V)
 
         return y_d
     
     return monolithic_system
+
+def reconstruct_signal_from_main_modes(signal, n_modes, sample_rate=1.0):
+    """
+    Reconstruct a signal using its n strongest amplitude modes from FFT.
+
+    Parameters:
+    signal (array-like): The input signal.
+    n_modes (int): Number of strongest modes to keep.
+    sample_rate (float): The sample rate of the signal (default is 1.0).
+
+    Returns:
+    tuple: (reconstructed_signal, frequencies, amplitudes)
+        - reconstructed_signal: The signal reconstructed from n strongest modes.
+        - frequencies: The frequencies of the n strongest modes.
+        - amplitudes: The amplitudes of the n strongest modes.
+    """
+    # Perform FFT
+    N = len(signal)
+    fft_result = fft(signal)
+    
+    # Calculate frequencies
+    freqs = np.fft.fftfreq(N, d=1/sample_rate)
+    
+    # Get amplitudes
+    amplitudes = np.abs(fft_result)
+    
+    # Sort amplitudes and get indices of n strongest
+    strongest_indices = np.argsort(amplitudes)[::-1][:n_modes]
+    
+    # Create a mask for the FFT result
+    mask = np.zeros(N, dtype=bool)
+    mask[strongest_indices] = True
+    mask[N - strongest_indices] = True  # Include conjugate frequencies
+    
+    # Apply mask to FFT result
+    filtered_fft = fft_result * mask
+    
+    # Reconstruct the signal
+    reconstructed_signal = np.real(ifft(filtered_fft))
+    
+    # Get the frequencies and amplitudes of the strongest modes
+    strongest_freqs = freqs[strongest_indices]
+    strongest_amplitudes = amplitudes[strongest_indices]
+    
+    return reconstructed_signal, strongest_freqs, strongest_amplitudes
+
+def reconstruct_signal_minimizing_error(signal, max_modes, sample_rate=1.0):
+    """
+    Reconstruct a signal using FFT, selecting modes to minimize error.
+
+    Parameters:
+    signal (array-like): The input signal.
+    max_modes (int): Maximum number of modes to consider.
+    sample_rate (float): The sample rate of the signal (default is 1.0).
+
+    Returns:
+    tuple: (reconstructed_signal, selected_freqs, selected_amps, n_modes)
+        - reconstructed_signal: The signal reconstructed from selected modes.
+        - selected_freqs: The frequencies of the selected modes.
+        - selected_amps: The amplitudes of the selected modes.
+        - n_modes: Number of modes used for reconstruction.
+    """
+    N = len(signal)
+    fft_result = fft(signal)
+    freqs = np.fft.fftfreq(N, d=1/sample_rate)
+    amplitudes = np.abs(fft_result)
+
+    # Sort indices by amplitude
+    sorted_indices = np.argsort(amplitudes)[::-1]
+
+    best_error = np.inf
+    best_reconstruction = None
+    best_n_modes = 0
+    selected_freqs = []
+    selected_amps = []
+
+    for n_modes in range(1, min(max_modes, N//2) + 1):
+        # Select top n_modes
+        mask = np.zeros(N, dtype=bool)
+        for i in range(n_modes):
+            idx = sorted_indices[i]
+            mask[idx] = True
+            mask[N - idx - 1] = True  # Include conjugate
+
+        # Reconstruct signal
+        filtered_fft = fft_result * mask
+        reconstructed = np.real(ifft(filtered_fft))
+
+        # Calculate error
+        error = np.mean((signal - reconstructed)**2)
+
+        # Check if this is the best reconstruction so far
+        if error < best_error:
+            best_error = error
+            best_reconstruction = reconstructed
+            best_n_modes = n_modes
+            selected_freqs = freqs[sorted_indices[:n_modes]]
+            selected_amps = amplitudes[sorted_indices[:n_modes]]
+        else:
+            # If error starts increasing, we've found the optimal number of modes
+            break
+
+    # return best_reconstruction, selected_freqs, selected_amps, best_n_modes
+    return best_reconstruction
+
+# Example usage:
+# time = np.linspace(0, 10, 1000)
+# original_signal = np.sin(2*np.pi*2*time) + 0.5*np.sin(2*np.pi*5*time) + 0.3*np.random.randn(len(time))
+# reconstructed, freqs, amps, n_modes = reconstruct_signal_minimizing_error(original_signal, max_modes=10, sample_rate=100)
 
 if __name__ == "__main__":
     psi1 = 0.165
@@ -318,17 +447,16 @@ if __name__ == "__main__":
     eps1 = 0.0455
     eps2 = 0.3
 
-    #vec_U = np.linspace(3.0, 6.5, 100)
-    vec_U = [2.0]
+    # vec_U = np.linspace(1.0, 8, 10)
+    vec_U = [0.4 * 6.285]
     freqs = np.zeros((2, len(vec_U)))
     damping_ratios = np.zeros((2, len(vec_U)))
     damping_ratios_m = np.zeros((2, len(vec_U)))
 
-    # Dimensionless parameters
-    dt_nd = 0.05
-    t_final_nd = 300
-    vec_t_nd = np.arange(0, t_final_nd, dt_nd)
-    n = len(vec_t_nd)
+    # Dimensional parameters
+    b = 0.5
+    k_a = 1000.0
+    rho = 1.0
 
     # for idx, U_vel in enumerate(vec_U):
     for idx, U_vel in tqdm(enumerate(vec_U), total=len(vec_U)):
@@ -343,6 +471,22 @@ if __name__ == "__main__":
             r_a = 0.5,
             U = U_vel
         )
+
+        # Dimensionless parameters
+        dt_nd = 0.05
+        # t_final_nd = U_vel * 200.0
+        t_final_nd = 1500.0
+        vec_t_nd = np.arange(0, t_final_nd, dt_nd)
+        n = len(vec_t_nd)
+
+        m = ndv.mu * (np.pi * rho * b**2)
+        omega_a = np.sqrt(k_a / (m * (ndv.r_a * b)**2))
+        U = U_vel * (b * omega_a)
+        omega_h = ndv.omega * omega_a
+        k_h = omega_h**2 * m
+
+        print(f"U: {U}")
+
 
         # Aeroelastic equations of motion mass, damping and stiffness matrices
         M = np.array([
@@ -438,46 +582,78 @@ if __name__ == "__main__":
 
         offset = 100
         smoothed_h = sp.signal.savgol_filter(u[0, :], window_length=500, polyorder=3)
-        smoothed_h = sp.signal.savgol_filter(smoothed_h, window_length=500, polyorder=3)
+        smoothed_h = sp.signal.savgol_filter(smoothed_h, window_length=800, polyorder=3)
+
+        # sample_rate = 1 / (vec_t_nd[1] - vec_t_nd[0])  # Calculate sample rate from time array
+        # smoothed_h = reconstruct_signal_minimizing_error(u[0, :], 10, sample_rate)
 
         peaks_h_t_i, peaks_h_d_i = get_peaks(vec_t_nd[offset:], smoothed_h[offset:])
         peaks_a_t_i, peaks_a_d_i = get_peaks(vec_t_nd[offset:], u[1, offset:])
 
         if (len(vec_U) == 1):
             fig, axs = plt.subplot_mosaic(
-                [["h"], ["alpha"]],  # Disposition des graphiques
+                [["h", "hd/h"], ["alpha", "ad/a"]],  # Disposition des graphiques
                 constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
                 figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
             )
             
             axs["h"].plot(vec_t_nd, u[0, :], label="Iterative")
+            axs["h"].plot(monolithic_sol.t, monolithic_sol.y[0, :], label="Monolithic")
             axs["h"].plot(peaks_h_t_i, peaks_h_d_i, "o")
             axs["h"].plot(vec_t_nd, smoothed_h, label="Smoothed")
+            # axs["hd/h"].plot(u[0, :], v[0, :], "o", markerfacecolor='none', markeredgecolor='blue', markeredgewidth=0.2)
+            axs["hd/h"].plot(u[0, :], v[0, :])
 
-            axs["alpha"].plot(vec_t_nd, u[1, :], label="Iterative")
-            axs["alpha"].plot(peaks_a_t_i, peaks_a_d_i, "o")
-            axs["h"].plot(vec_t_nd, monolithic_sol.y[0, :], label="Monolithic")
-            axs["alpha"].plot(vec_t_nd, monolithic_sol.y[1, :], label="Monolithic")
-            
+            axs["alpha"].plot(vec_t_nd, np.degrees(u[1, :]), label="Iterative")
+            axs["alpha"].plot(peaks_a_t_i, np.degrees(peaks_a_d_i), "o")
+            axs["alpha"].plot(monolithic_sol.t, np.degrees(monolithic_sol.y[1, :]), label="Monolithic")
+            axs["ad/a"].plot(u[1, :], v[1, :], "o", markerfacecolor='none', markeredgecolor='blue', markeredgewidth=0.2)
+            # axs["ad/a"].plot(monolithic_sol.y[1, 8000:], monolithic_sol.y[3, 8000:])
+
             axs["h"].legend()
-            axs["alpha"].legend()
-            axs["h"].set_xlabel('t')
-            axs["h"].set_ylabel('h')
+            axs["h"].set_xlabel(r"$\bar{t}$")
+            axs["h"].set_ylabel(r"$\bar{h}$")
             axs["h"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
 
-            axs["alpha"].set_xlabel('t')
-            axs["alpha"].set_ylabel('alpha')
+            axs["hd/h"].set_xlabel(r"$\bar{h}$")
+            axs["hd/h"].set_ylabel(r"$\bar{h'}$")
+            axs["hd/h"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+
+            axs["alpha"].legend()
+            axs["alpha"].set_xlabel(r"$\bar{t}$")
+            axs["alpha"].set_ylabel(r"$\alpha$")
             axs["alpha"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+            
+            axs["ad/a"].set_xlabel(r"$\alpha$")
+            axs["ad/a"].set_ylabel(r"$\alpha'$")
+            axs["ad/a"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+
+            fig.suptitle(r"Aeroelastic response at $\bar{U} = %s$" % U_vel)
+
             plt.show()
 
-        # X = fft(u, axis=1)
-        # freq = fftfreq(n, d=dt_nd)
-        # idx = np.argmax(np.abs(X), axis=1)
-        # dominant_freqs = np.abs(freq[idx])
-        # freqs[:, idx] = dominant_freqs
+
+        X = fft(u, axis=1)
+        freq = fftfreq(n, d= b * dt_nd / U)
+        max_freq_idx = np.argmax(np.abs(X), axis=1)
+        dominant_freqs = np.abs(freq[max_freq_idx])
+        freqs[:, idx] = 2*np.pi * dominant_freqs / omega_a
+        
         damping_ratios[0, idx] = get_damping_ratio(smoothed_h[offset:])
         damping_ratios[1, idx] = get_damping_ratio(u[1, offset:])
-        damping_ratios_m[1, idx] = get_damping_ratio(monolithic_sol.y[0, offset:])
+        damping_ratios_m[1, idx] = get_damping_ratio(monolithic_sol.y[1, offset:])
+
+        def freq_ratio(time_range, nb_periods):
+            m = ndv.mu * (np.pi * rho * b**2)
+            omega_a = np.sqrt(k_a / (m * (ndv.r_a * b)**2))
+            U = U_vel * (b * omega_a)
+            total_t = b * time_range / U
+            avg_period = total_t / nb_periods
+            omega = 2*np.pi / avg_period
+            return omega / omega_a
+
+        # freqs[1, idx] = freq_ratio(peaks_a_t_i[-1] - peaks_a_t_i[0], len(peaks_a_t_i)-1)
+        # freqs[0, idx] = freq_ratio(peaks_h_t_i[-1] - peaks_h_t_i[0], len(peaks_h_t_i)-1)
 
     # fig, axs = plt.subplot_mosaic(
     #     [["freq"]],  # Disposition des graphiques
@@ -490,15 +666,26 @@ if __name__ == "__main__":
 
     if (len(vec_U) > 1):
         fig, axs = plt.subplot_mosaic(
-            [["damping"]],  # Disposition des graphiques
+            [["damping"], ["freq"]],  # Disposition des graphiques
             constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
             figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
         )
         axs["damping"].plot(vec_U, damping_ratios[0, :], "o", label="Heave (Iterative)")
         axs["damping"].plot(vec_U, damping_ratios[1, :], "o", label="Pitch (Iterative)")
-        # axs["damping"].plot(vec_U, damping_ratios_m[1, :], "o", label="Pitch (Monolithic)")
+        axs["damping"].plot(vec_U, damping_ratios_m[1, :], "o", label="Pitch (Monolithic)")
+        
+        axs["freq"].plot(vec_U, freqs[0, :], "o", label="Heave (Iterative)")
+        axs["freq"].plot(vec_U, freqs[1, :], "o", label="Pitch (Iterative)")
+        
         axs["damping"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
         axs["damping"].legend()
         axs["damping"].set_xlabel('U')
-        axs["damping"].set_ylabel('zeta')
+        axs["damping"].set_ylabel(r"$\zeta$")
+
+        axs["freq"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+        axs["freq"].legend()
+        axs["freq"].set_xlabel('U')
+        axs["freq"].set_ylabel('omega')
+
+
         plt.show()
