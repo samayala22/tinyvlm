@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 EPS_sqrt_f = np.sqrt(1.19209e-07)
 
-def newmark_beta_step(M, C, K, u_i, v_i, a_i, F_i, F_ip1, dt, beta=1/4, gamma=1/2):
+def newmark_beta_step(M, C, K, u_i, v_i, a_i, delta_F, dt, beta=1/4, gamma=1/2):
     """
     Implicit Newmark-Beta Method for Structural Dynamics.
 
@@ -31,7 +31,7 @@ def newmark_beta_step(M, C, K, u_i, v_i, a_i, F_i, F_ip1, dt, beta=1/4, gamma=1/
 
     # Effective stiffness matrix
     K_eff = x0 * M + x1 * C + x2 * K
-    F_eff = (F_ip1-F_i) + M @ (xd0 * v_i + xdd0 * a_i) + C @ (xd1 * v_i + xdd1 * a_i)
+    F_eff = delta_F + M @ (xd0 * v_i + xdd0 * a_i) + C @ (xd1 * v_i + xdd1 * a_i)
     du = np.linalg.solve(K_eff, F_eff)
     dv = x1 * du - xd1 * v_i - xdd1 * a_i
     da = x0 * du - xd0 * v_i - xdd0 * a_i
@@ -258,6 +258,19 @@ def plot_fit(time, signal, fitted_signal):
     plt.title('Oscillatory Signal Fitting')
     plt.show()
 
+
+def nl_alpha(alpha):
+    M0 = 0
+    Mf = 0
+    delta = np.radians(0.5)
+    a_f = np.radians(0.25)
+    if (alpha < a_f):
+        return M0 + alpha - a_f
+    elif (alpha >= a_f and alpha <= (a_f + delta)):
+        return M0 + Mf * (alpha - a_f)
+    else: # alpha > a_F + delta
+        return M0 + alpha - a_f + delta * (Mf - 1)
+
 def create_monolithic_system(y0: np.ndarray, ndv: NDVars):
     def monolithic_system(t, y: np.ndarray):
         M1 = np.zeros((6,6))
@@ -309,137 +322,15 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars):
         # Linear springs
         # V[2] += - (ndv.omega/ndv.U)**2 * y[0]
         # V[3] += - 1/(ndv.U**2) * y[1]
-
-        # Nonlinear springs
-        def M(alpha):
-            M0 = 0
-            Mf = 0
-            delta = np.radians(0.5)
-            a_f = np.radians(0.25)
-            if (alpha < a_f):
-                return M0 + alpha - a_f
-            elif (alpha >= a_f and alpha <= (a_f + delta)):
-                return M0 + Mf * (alpha - a_f)
-            else: # alpha > a_F + delta
-                return M0 + alpha - a_f + delta * (Mf - 1)
             
         V[2] += - (ndv.omega/ndv.U)**2 * y[0]
-        V[3] += - 1/(ndv.U**2) * M(y[1])
+        V[3] += - 1/(ndv.U**2) * nl_alpha(y[1])
 
         y_d = np.linalg.inv(M2) @ (M1 @ y + V)
 
         return y_d
     
     return monolithic_system
-
-def reconstruct_signal_from_main_modes(signal, n_modes, sample_rate=1.0):
-    """
-    Reconstruct a signal using its n strongest amplitude modes from FFT.
-
-    Parameters:
-    signal (array-like): The input signal.
-    n_modes (int): Number of strongest modes to keep.
-    sample_rate (float): The sample rate of the signal (default is 1.0).
-
-    Returns:
-    tuple: (reconstructed_signal, frequencies, amplitudes)
-        - reconstructed_signal: The signal reconstructed from n strongest modes.
-        - frequencies: The frequencies of the n strongest modes.
-        - amplitudes: The amplitudes of the n strongest modes.
-    """
-    # Perform FFT
-    N = len(signal)
-    fft_result = fft(signal)
-    
-    # Calculate frequencies
-    freqs = np.fft.fftfreq(N, d=1/sample_rate)
-    
-    # Get amplitudes
-    amplitudes = np.abs(fft_result)
-    
-    # Sort amplitudes and get indices of n strongest
-    strongest_indices = np.argsort(amplitudes)[::-1][:n_modes]
-    
-    # Create a mask for the FFT result
-    mask = np.zeros(N, dtype=bool)
-    mask[strongest_indices] = True
-    mask[N - strongest_indices] = True  # Include conjugate frequencies
-    
-    # Apply mask to FFT result
-    filtered_fft = fft_result * mask
-    
-    # Reconstruct the signal
-    reconstructed_signal = np.real(ifft(filtered_fft))
-    
-    # Get the frequencies and amplitudes of the strongest modes
-    strongest_freqs = freqs[strongest_indices]
-    strongest_amplitudes = amplitudes[strongest_indices]
-    
-    return reconstructed_signal, strongest_freqs, strongest_amplitudes
-
-def reconstruct_signal_minimizing_error(signal, max_modes, sample_rate=1.0):
-    """
-    Reconstruct a signal using FFT, selecting modes to minimize error.
-
-    Parameters:
-    signal (array-like): The input signal.
-    max_modes (int): Maximum number of modes to consider.
-    sample_rate (float): The sample rate of the signal (default is 1.0).
-
-    Returns:
-    tuple: (reconstructed_signal, selected_freqs, selected_amps, n_modes)
-        - reconstructed_signal: The signal reconstructed from selected modes.
-        - selected_freqs: The frequencies of the selected modes.
-        - selected_amps: The amplitudes of the selected modes.
-        - n_modes: Number of modes used for reconstruction.
-    """
-    N = len(signal)
-    fft_result = fft(signal)
-    freqs = np.fft.fftfreq(N, d=1/sample_rate)
-    amplitudes = np.abs(fft_result)
-
-    # Sort indices by amplitude
-    sorted_indices = np.argsort(amplitudes)[::-1]
-
-    best_error = np.inf
-    best_reconstruction = None
-    best_n_modes = 0
-    selected_freqs = []
-    selected_amps = []
-
-    for n_modes in range(1, min(max_modes, N//2) + 1):
-        # Select top n_modes
-        mask = np.zeros(N, dtype=bool)
-        for i in range(n_modes):
-            idx = sorted_indices[i]
-            mask[idx] = True
-            mask[N - idx - 1] = True  # Include conjugate
-
-        # Reconstruct signal
-        filtered_fft = fft_result * mask
-        reconstructed = np.real(ifft(filtered_fft))
-
-        # Calculate error
-        error = np.mean((signal - reconstructed)**2)
-
-        # Check if this is the best reconstruction so far
-        if error < best_error:
-            best_error = error
-            best_reconstruction = reconstructed
-            best_n_modes = n_modes
-            selected_freqs = freqs[sorted_indices[:n_modes]]
-            selected_amps = amplitudes[sorted_indices[:n_modes]]
-        else:
-            # If error starts increasing, we've found the optimal number of modes
-            break
-
-    # return best_reconstruction, selected_freqs, selected_amps, best_n_modes
-    return best_reconstruction
-
-# Example usage:
-# time = np.linspace(0, 10, 1000)
-# original_signal = np.sin(2*np.pi*2*time) + 0.5*np.sin(2*np.pi*5*time) + 0.3*np.random.randn(len(time))
-# reconstructed, freqs, amps, n_modes = reconstruct_signal_minimizing_error(original_signal, max_modes=10, sample_rate=100)
 
 if __name__ == "__main__":
     psi1 = 0.165
@@ -485,9 +376,6 @@ if __name__ == "__main__":
         omega_h = ndv.omega * omega_a
         k_h = omega_h**2 * m
 
-        print(f"U: {U}")
-
-
         # Aeroelastic equations of motion mass, damping and stiffness matrices
         M = np.array([
             [1.0, ndv.x_a],
@@ -501,6 +389,7 @@ if __name__ == "__main__":
             [(ndv.omega/ndv.U)**2, 0],
             [0, 1/(ndv.U**2)]
         ])
+        zeros = np.zeros((2,2))
 
         # Time history of dofs
         u = np.zeros((2, len(vec_t_nd)))
@@ -536,39 +425,33 @@ if __name__ == "__main__":
             wagner_init = (u[1, 0] + u[0, 0] + (0.5 - ndv.a_h)*v[1,0])*(1 - psi1*np.exp(-eps1*t) - psi2*np.exp(-eps2*t))
             cl = np.pi*(a[0, i] - ndv.a_h * a[1, i] + v[1, i]) + 2*np.pi*(wagner_init + duhamel)
             cm = np.pi*(0.5 + ndv.a_h)*(wagner_init + duhamel) + 0.5*np.pi*ndv.a_h*(a[0, i] - ndv.a_h*a[1, i]) - 0.5*np.pi*(0.5 - ndv.a_h)*v[1, i] - (np.pi/16) * a[1, i]
-            F[0,i] = - cl / (np.pi*ndv.mu)
-            F[1,i] = (2*cm) / (np.pi*ndv.mu*ndv.r_a**2)
-
-        # def central_difference_step(M, C, K, u_prev, u, F_i, dt):
-        #     M_inv = np.linalg.inv(M)
-        #     a = M_inv @ (F_i - C @ ((u - u_prev) / dt) - K @ u)
-        #     u_next = 2 * u - u_prev + dt**2 * a
-        #     return u_next
-
-        # # Initialize u_prev
-        # u_prev = u[:,0] - dt * v[:,0] + 0.5 * dt**2 * a[:,0]
-        # for i in tqdm(range(1, len(vec_t))):
-        #     F_i = F[:,i-1]
-        #     u[:,i] = central_difference_step(M, C, K, u_prev, u[:,i-1], F_i, dt)
-        #     v[:,i] = (u[:,i] - u_prev) / (2 * dt)
-        #     a[:,i] = (u[:,i] - 2 * u[:,i-1] + u_prev) / dt**2
-        #     u_prev = u[:,i-1]
-        #     aero(i)
+            
+            return np.array([
+                - cl / (np.pi*ndv.mu),
+                (2*cm) / (np.pi*ndv.mu*ndv.r_a**2)
+            ])
 
         # Newmark V2
         for i in range(n-1):
             t = vec_t_nd[i]
             F[:,i+1] = F[:,i]
+            delta_F = np.zeros(2)
             du = np.zeros(2)
             du_k = np.zeros(2) + 1
             iteration = 0
-            while (np.linalg.norm(du_k - du) / len(du) > 1e-7):
+            while (np.linalg.norm(du_k - du) / len(du) > 1e-12):
                 du_k = du[:]
-                du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i], F[:,i+1], dt_nd)
+                # du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i+1] - F[:,i], dt_nd)
+                du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
+
                 u[:,i+1] = u[:,i] + du
                 v[:,i+1] = v[:,i] + dv
                 a[:,i+1] = a[:,i] + da
-                aero(i+1)
+                F[:,i+1] = aero(i+1)
+                delta_F = F[:,i+1] - F[:,i]
+                delta_F[0] += - (ndv.omega / ndv.U)**2 * du[0]
+                delta_F[1] += - 1/(ndv.U**2) * (nl_alpha(u[1,i+1]) - nl_alpha(u[1,i]))
+
                 iteration += 1
             # print("iters: ", iteration)
         
@@ -600,7 +483,7 @@ if __name__ == "__main__":
             axs["h"].plot(vec_t_nd, u[0, :], label="Iterative")
             axs["h"].plot(monolithic_sol.t, monolithic_sol.y[0, :], label="Monolithic")
             axs["h"].plot(peaks_h_t_i, peaks_h_d_i, "o")
-            axs["h"].plot(vec_t_nd, smoothed_h, label="Smoothed")
+            axs["h"].plot(vec_t_nd, smoothed_h, "--", label="Smoothed")
             # axs["hd/h"].plot(u[0, :], v[0, :], "o", markerfacecolor='none', markeredgecolor='blue', markeredgewidth=0.2)
             axs["hd/h"].plot(u[0, :], v[0, :])
 
