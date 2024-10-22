@@ -1,10 +1,14 @@
 #pragma once
 
+#include <memory>
+
 #include "vlm_fwd.hpp"
 #include "vlm_types.hpp"
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
 #include "vlm_memory.hpp"
+
+#include "linalg.h"
 
 namespace vlm {
 

@@ -1,7 +1,6 @@
 #include "vlm_backend_cpu.hpp"
 #include "vlm_backend_cpu_kernels_ispc.h"
 
-#include "linalg.h"
 #include "tinytimer.hpp"
 #include "tinycpuid2.hpp"
 #include "vlm_mesh.hpp"

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
 #include "vlm_types.hpp"

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vlm_types.hpp"
+#include "linalg.h"
 
 // List of pure functions 
 namespace vlm {

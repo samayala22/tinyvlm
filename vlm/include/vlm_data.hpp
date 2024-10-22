@@ -4,6 +4,7 @@
 #include "vlm_fwd.hpp"
 #include "vlm_memory.hpp"
 #include "tinyinterpolate.hpp"
+#include "linalg.h"
 
 namespace vlm {
 

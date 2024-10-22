@@ -1,5 +1,8 @@
 #include "vlm_types.hpp"
 #include "tinyad.hpp"
+#include "linalg.h"
+
+#include <functional>
 
 namespace vlm {
 
