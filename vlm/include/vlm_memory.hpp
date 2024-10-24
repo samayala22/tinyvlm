@@ -323,86 +323,102 @@ class Tensor {
         std::array<uint64_t, Dim> _strides{0};
 };
 
-enum class MemoryLocationV2 {
+enum class Location {
     Device, Host
 };
 
-// template<typename T, int Dim>
-// class TensorView {
-//     using DimArray = std::array<u64, Dim>;
-//     public:
-//         TensorView(const Memory& memory, MemoryLocationV2 location, const DimArray& shape, const DimArray& strides, T* ptr) : m_memory(memory), m_location(location), m_shape(shape), m_strides(strides), m_ptr(ptr) {}
-//         ~TensorView() = default;
+template<typename T, int Dim, MemoryLocation L>
+class TensorView {
+    using DimArray = std::array<u64, Dim>;
+    public:
+        TensorView(const DimArray& shape, const DimArray& strides, T* ptr) : m_shape(shape), m_strides(strides), m_ptr(ptr) {}
+        ~TensorView() = default;
 
-//         T* ptr() const {return m_ptr;}
+        T* ptr() const {return m_ptr;}
         
-//         u64 size() const {
-//             u64 size = 1;
-//             for (u64 i = 0; i < Dim; i++) size *= m_shape[i];
-//             return size;
-//         }
+        u64 size() const {
+            u64 size = 1;
+            for (u64 i = 0; i < Dim; i++) size *= m_shape[i];
+            return size;
+        }
 
-//         u64 stride(int dim) const {return m_strides[dim];}
-//         u64 shape(int dim) const {return m_shape[dim];}
+        u64 size_bytes() const {return size() * sizeof(T);}
 
-//         template<typename... Args>
-//         inline constexpr auto slice(Args... args) {
-//             constexpr u64 M = CountRanges<Args...>::value;
-//             static_assert(sizeof...(args) == Dim, "The number of indices must match the dimension N.");
-//             static_assert(M <= Dim, "Too many ranges provided compared to the view's dimensionality");
+        u64 stride(int dim) const {return m_strides[dim];}
+        u64 shape(int dim) const {return m_shape[dim];}
 
-//             T* newPtr = m_ptr;
-//             std::array<uint64_t, M> new_shape{};
-//             std::array<uint64_t, M> newStrides{};
-//             uint64_t newDimIndex = 0;
+        template<typename... Args>
+        inline constexpr auto slice(Args... args) {
+            constexpr u64 M = CountRanges<Args...>::value;
+            static_assert(sizeof...(args) == Dim, "The number of indices must match the dimension N.");
+            static_assert(M <= Dim, "Too many ranges provided compared to the view's dimensionality");
 
-//             uint64_t argIndex = 0;
-//             ([&](auto& arg) {
-//                 if constexpr (std::is_same<std::decay_t<decltype(arg)>, Range>::value) {
-//                     uint64_t first = arg[0]; // Removed 'constexpr'
-//                     uint64_t last = (arg[1] < 0) ? m_shape[argIndex] + arg[1] + 1 : arg[1];
-//                     assert((first >= 0) && (first < m_shape[argIndex]));
-//                     assert((last >= 0) && (last <= m_shape[argIndex])); // Changed '<' to '<=' for upper bound
-//                     assert(last - first > 0);
-//                     newPtr += first * m_strides[argIndex];
-//                     new_shape[newDimIndex] = last - first;
-//                     newStrides[newDimIndex] = m_strides[argIndex];
-//                     newDimIndex++;
-//                 } else if constexpr (std::is_integral<std::decay_t<decltype(arg)>>::value) {
-//                     uint64_t real_arg = (arg < 0) ? m_shape[argIndex] + arg : arg; // Removed '+1' as indexing starts from 0
-//                     assert((real_arg >= 0) && (real_arg < m_shape[argIndex]));
-//                     newPtr += real_arg * m_strides[argIndex];
-//                 }
-//                 argIndex++;
-//             }(args), ...);
+            T* newPtr = m_ptr;
+            std::array<uint64_t, M> new_shape{};
+            std::array<uint64_t, M> newStrides{};
+            uint64_t newDimIndex = 0;
+
+            uint64_t argIndex = 0;
+            ([&](auto& arg) {
+                if constexpr (std::is_same<std::decay_t<decltype(arg)>, Range>::value) {
+                    uint64_t first = arg[0]; // Removed 'constexpr'
+                    uint64_t last = (arg[1] < 0) ? m_shape[argIndex] + arg[1] + 1 : arg[1];
+                    assert((first >= 0) && (first < m_shape[argIndex]));
+                    assert((last >= 0) && (last <= m_shape[argIndex])); // Changed '<' to '<=' for upper bound
+                    assert(last - first > 0);
+                    newPtr += first * m_strides[argIndex];
+                    new_shape[newDimIndex] = last - first;
+                    newStrides[newDimIndex] = m_strides[argIndex];
+                    newDimIndex++;
+                } else if constexpr (std::is_integral<std::decay_t<decltype(arg)>>::value) {
+                    uint64_t real_arg = (arg < 0) ? m_shape[argIndex] + arg : arg; // Removed '+1' as indexing starts from 0
+                    assert((real_arg >= 0) && (real_arg < m_shape[argIndex]));
+                    newPtr += real_arg * m_strides[argIndex];
+                }
+                argIndex++;
+            }(args), ...);
             
-//             return TensorView<T, M>(m_memory, m_location, new_shape, newStrides, newPtr);
-//         }
-//     private:
-//         const Memory& m_memory;
-//         MemoryLocationV2 m_location;
-//         DimArray m_shape{0};
-//         DimArray m_strides{0};
-//         T* m_ptr = nullptr;
-// };
+            return TensorView<T, M, L>(new_shape, newStrides, newPtr);
+        }
+    private:
+        DimArray m_shape{0};
+        DimArray m_strides{0};
+        T* m_ptr = nullptr;
+};
 
-// template<typename T, int Dim>
-// class TensorV2 : public TensorView<T, Dim> {
-//     public:
-//     TensorV2(const Memory& memory) : m_memory(memory) {}
-//     void init(const DimArray& shape) {
-//         m_shape = shape;
-//         m_strides[0] = 1;
-//         for (u64 i = 1; i < Dim; ++i) {
-//             m_strides[i] = m_strides[i - 1] * m_shape[i - 1];
-//         }
-//     }
+template<typename T, int Dim, MemoryLocation L>
+class TensorV2 : public TensorView<T, Dim, L> {
+private:
+    Memory& m_memory;
+    using View = TensorView<T, Dim, L>;
+    using DimArray = std::array<u64, Dim>;
 
-//     void init(const DimArray& shape, const DimArray& strides) {
-//         m_shape = shape;
-//         m_strides = strides;
-//     }
-// };
+public:
+    TensorV2(Memory& memory) : 
+        View({}, {}, nullptr),  // Initialize base class
+        m_memory(memory) {}
+    
+    ~TensorV2() {
+        m_memory.free(L, ptr());
+    }
+    
+    void init(const DimArray& shape) {
+        DimArray strides;
+        strides[0] = 1;
+        for (u64 i = 1; i < Dim; ++i) {
+            strides[i] = strides[i - 1] * shape[i - 1];
+        }
+        init(shape, strides);
+    }
+
+    void init(const DimArray& shape, const DimArray& strides) {
+        m_memory.free(L, ptr());
+        u64 size = 1;
+        for (u64 i = 0; i < Dim; i++) size *= shape[i];
+        T* new_ptr = static_cast<T*>(m_memory.alloc(L, size * sizeof(T)));
+        *this = View(shape, strides, new_ptr);
+    }
+};
 
 } // namespace vlm
 
