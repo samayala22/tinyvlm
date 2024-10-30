@@ -97,6 +97,23 @@ private:
     ~CtxManager() = default;
 };
 
+template<typename T>
+void launch_fill_kernel(Location location, T* ptr, T value, i64 size) {
+    switch (location) {
+    case Location::Device: {
+        constexpr Dim3<u32> block{1024};
+        const Dim3<u64> n{(u64)size};
+        kernel_fill<T><<<grid_size(block, n)(), block()>>>(ptr, value, size);
+        CHECK_CUDA(cudaGetLastError());
+        break;
+    }
+    case Location::Host: {
+        std::fill(ptr, ptr + size, value);
+        break;
+    }
+    }
+}
+
 /// @brief Memory manager implementation for the CUDA backend
 class MemoryCUDA final : public Memory {
     public:
@@ -137,21 +154,8 @@ class MemoryCUDA final : public Memory {
             }
         }
 
-        void fill(Location location, float* ptr, float value, i64 size) const override {
-            switch (location) {
-                case Location::Device: {
-                    constexpr Dim3<u32> block{1024};
-                    const Dim3<u64> n{(u64)size};
-                    kernel_fill_f32<block.x><<<grid_size(block, n)(), block()>>>(ptr, value, size);
-                    CHECK_CUDA(cudaGetLastError());
-                    break;
-                }
-                case Location::Host: {
-                    std::fill(ptr, ptr + size, value);
-                    break;
-                }
-            }
-        };
+        void fill(Location location, float* ptr, float value, i64 size) const override { launch_fill_kernel(location, ptr, value, size); }
+        void fill(Location location, double* ptr, double value, i64 size) const override { launch_fill_kernel(location, ptr, value, size); }
 };
 
 BackendCUDA::BackendCUDA() : Backend(std::make_unique<MemoryCUDA>())  {

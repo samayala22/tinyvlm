@@ -78,8 +78,8 @@ __global__ void kernel_reduce(u64 N, T* buf, T* val) {
     }
 }
 
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_fill_f32(float* buffer, float value, size_t n) {
+template<typename T>
+__global__ void kernel_fill(T* buffer, T value, size_t n) {
     const u64 tid = cg::this_grid().thread_rank();
     
     if (tid >= n) return;
