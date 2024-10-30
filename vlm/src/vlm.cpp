@@ -79,11 +79,10 @@ void VLM::alloc_buffers() {
 
 AeroCoefficients VLM::run(const FlowData& flow) {
     // Reset buffer state
-    backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
-    backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
-    backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, mesh.verts_wing_init.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
-    
-    // Move wing to create 100 chord long wake panels
+    backend->memory->fill(Location::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
+    backend->memory->fill(Location::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
+    backend->memory->copy(Location::Device, mesh.verts_wing.d_view().ptr, 1, Location::Device, mesh.verts_wing_init.d_view().ptr, 1, sizeof(f32), mesh.verts_wing_init.d_view().size());
+    // Move wing to create 100 chord long wake panels 
     auto init_pos = translation_matrix<f32>({
         -100.0f * flow.u_inf*std::cos(flow.alpha),
         0.0f,
@@ -91,7 +90,7 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     });
     init_pos.store(transforms.h_view().ptr, transforms.h_view().layout.stride(1));
     for (u32 m = 1; m < nb_meshes; m++) {
-        backend->memory->copy(MemoryTransfer::HostToHost, transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), transforms.h_view().ptr, transforms.h_view().layout.stride(2) * sizeof(f32));
+        backend->memory->copy(Location::Host, transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), 1, Location::Host, transforms.h_view().ptr, 1, sizeof(f32), transforms.h_view().layout.stride(2));
     }
     transforms.to_device();
 
@@ -101,9 +100,9 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     
     backend->mesh_metrics(flow.alpha, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
     backend->lhs_assemble(lhs.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), condition0,1);    
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view().ptr + 0 * local_velocities.d_view().layout.stride(), flow.freestream.x, local_velocities.d_view().layout.stride());
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view().ptr + 1 * local_velocities.d_view().layout.stride(), flow.freestream.y, local_velocities.d_view().layout.stride());
-    backend->memory->fill_f32(MemoryLocation::Device, local_velocities.d_view().ptr + 2 * local_velocities.d_view().layout.stride(), flow.freestream.z, local_velocities.d_view().layout.stride());
+    backend->memory->fill(Location::Device, local_velocities.d_view().ptr + 0 * local_velocities.d_view().layout.stride(), flow.freestream.x, local_velocities.d_view().layout.stride());
+    backend->memory->fill(Location::Device, local_velocities.d_view().ptr + 1 * local_velocities.d_view().layout.stride(), flow.freestream.y, local_velocities.d_view().layout.stride());
+    backend->memory->fill(Location::Device, local_velocities.d_view().ptr + 2 * local_velocities.d_view().layout.stride(), flow.freestream.z, local_velocities.d_view().layout.stride());
     backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), local_velocities.d_view());
     backend->lu_factor(lhs.d_view());
     backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
@@ -158,7 +157,7 @@ void strip_alpha_to_vel(const FlowData& flow, View<f32, MultiSurface>& local_vel
         assert(strip_alphas.layout.ns(m) == local_velocities.layout.ns(m));
         f32* strip_alphas_m = strip_alphas.ptr + strip_alphas.layout.offset(m);
         f32* local_velocities_m = local_velocities.ptr + local_velocities.layout.offset(m);
-        // todo: this can be done with fill_f32 (eliminating the need for mem transfer)
+        // todo: this can be done with fill (eliminating the need for mem transfer)
         for (u64 j = 0; j < strip_alphas.layout.ns(m); j++) {
             auto fs = compute_freestream(flow.u_inf, strip_alphas_m[j], 0.0f);
             local_velocities_m[0*local_velocities.layout.stride() + j] = fs.x;
@@ -182,13 +181,13 @@ AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
     });
     init_pos.store(transforms.h_view().ptr, transforms.h_view().layout.stride(1));
     for (u32 m = 1; m < nb_meshes; m++) {
-        backend->memory->copy(MemoryTransfer::HostToHost, transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), transforms.h_view().ptr, transforms.h_view().layout.stride(2) * sizeof(f32));
+        backend->memory->copy(Location::Host, transforms.h_view().ptr + m*transforms.h_view().layout.stride(2), 1, Location::Host, transforms.h_view().ptr, 1, sizeof(f32), transforms.h_view().layout.stride(2));
     }
     transforms.to_device();
-    backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
-    backend->memory->fill_f32(MemoryLocation::Host, strip_alphas.h_view().ptr, flow.alpha, strip_alphas.h_view().size());
-    backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, mesh.verts_wing_init.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
-
+    backend->memory->fill(Location::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
+    backend->memory->fill(Location::Host, strip_alphas.h_view().ptr, flow.alpha, strip_alphas.h_view().size());
+    backend->memory->copy(Location::Device, mesh.verts_wing.d_view().ptr, 1, Location::Device, mesh.verts_wing_init.d_view().ptr, 1, sizeof(f32), mesh.verts_wing_init.d_view().size());
+    
     backend->wake_shed(mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), 0);
     backend->displace_wing(transforms.d_view(), mesh.verts_wing.d_view(), mesh.verts_wing_init.d_view());
     backend->wake_shed(mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), 1);
@@ -200,7 +199,7 @@ AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
         err = 0.0; // reset l1 error
         strip_alpha_to_vel(flow, local_velocities.h_view(), strip_alphas.h_view()); // Compute local panel velocities based on strip alphas
         local_velocities.to_device();
-        backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
+        backend->memory->fill(Location::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
         backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), local_velocities.d_view());
         backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
         backend->gamma_delta(gamma_wing_delta.d_view(), gamma_wing.d_view());
@@ -272,9 +271,9 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
     }
     transforms.to_device();
     backend->displace_wing(transforms.d_view(), verts_wing_pos.d_view(), mesh.verts_wing_init.d_view());
-    backend->memory->copy(MemoryTransfer::DeviceToHost, colloc_pos.h_view().ptr, mesh.colloc.d_view().ptr, mesh.colloc.d_view().size_bytes());
-    backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, verts_wing_pos.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
-    backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
+    backend->memory->copy(Location::Host, colloc_pos.h_view().ptr, 1, Location::Device, mesh.colloc.d_view().ptr, 1, sizeof(f32), mesh.colloc.d_view().size());
+    backend->memory->copy(Location::Device, mesh.verts_wing.d_view().ptr, 1, Location::Device, verts_wing_pos.d_view().ptr, 1, sizeof(f32), verts_wing_pos.d_view().size());
+    backend->memory->fill(Location::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
     backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
 
     // 1.  Compute the dynamic time steps for the simulation
@@ -371,7 +370,7 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
         }
 
         velocities.to_device();
-        backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
+        backend->memory->fill(Location::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
         backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), velocities.d_view());
         backend->rhs_assemble_wake_influence(rhs.d_view(), gamma_wake.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wake.d_view(), i);
         backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());

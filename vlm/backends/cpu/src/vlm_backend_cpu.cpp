@@ -27,10 +27,24 @@ class MemoryCPU final : public Memory {
     public:
         MemoryCPU() : Memory(true) {}
         ~MemoryCPU() = default;
-        void* alloc(MemoryLocation location, std::size_t size) const override {return std::malloc(size);}
-        void free(MemoryLocation location, void* ptr) const override {std::free(ptr);}
-        void copy(MemoryTransfer transfer, void* dst, const void* src, std::size_t size) const override {std::memcpy(dst, src, size);}
-        void fill_f32(MemoryLocation location, float* ptr, float value, std::size_t size) const override {std::fill(ptr, ptr + size, value);}
+        void* alloc(Location location, i64 size_bytes) const override {return std::malloc(size_bytes);}
+        void free(Location location, void* ptr) const override {std::free(ptr);}
+        void copy(Location dst_loc, void* dst, i64 dst_stride, Location src_loc, const void* src, i64 src_stride, i64 elem_size, i64 size) const override {
+            if (dst_stride == 1 && src_stride == 1) {
+                std::memcpy(dst, src, size * elem_size);
+            } else {
+                const char* src_ptr = static_cast<const char*>(src);
+                char* dst_ptr = static_cast<char*>(dst);
+                i64 byte_stride = src_stride * elem_size;
+                i64 byte_dst_stride = dst_stride * elem_size;
+
+                for (i64 i = 0; i < size; ++i) {
+                    std::memcpy(dst_ptr + i * byte_dst_stride, src_ptr + i * byte_stride, elem_size);
+                }
+            }
+        }
+        void fill(Location location, float* ptr, float value, i64 size) const override {std::fill(ptr, ptr + size, value);}
+        void fill(Location location, double* ptr, double value, i64 size) const override {std::fill(ptr, ptr + size, value);}
 };
 
 void print_cpu_info() {
@@ -119,7 +133,7 @@ void BackendCPU::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f3
         f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
         const f32* s_gamma = gamma.ptr + surf.offset;
         tf::Task first_row = graph.emplace([=]{
-            memory->copy(MemoryTransfer::DeviceToDevice, s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
+            memory->copy(Location::Device, s_gamma_delta, 1, Location::Device, s_gamma, 1, sizeof(*s_gamma_delta), surf.ns);
         });
         tf::Task remaining_rows = graph.for_each_index((u64)1,surf.nc, [=] (u64 b, u64 e) {
             for (u64 i = b; i < e; i++) {
@@ -269,9 +283,9 @@ void BackendCPU::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, cons
             }
         });
         auto copy = taskflow.emplace([&, wake_begin, wake_end, m]{
-            memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 0*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 0*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
-            memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 1*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 1*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
-            memory->copy(MemoryTransfer::DeviceToDevice, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 2*verts_wake.layout.stride(), wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 2*wake_rollup.layout.stride(), (wake_end - wake_begin) * sizeof(f32));
+            memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 0*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 0*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
+            memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 1*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 1*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
+            memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 2*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 2*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
         });
         begin.precede(rollup);
         rollup.precede(copy);
@@ -284,18 +298,18 @@ void BackendCPU::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, cons
 void BackendCPU::gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) {
     // const tiny::ScopedTimer timer("Shed Gamma");
 
-    memory->copy(MemoryTransfer::DeviceToDevice, gamma_wing_prev.ptr, gamma_wing.ptr, gamma_wing.size_bytes());
+    memory->copy(Location::Device, gamma_wing_prev.ptr, 1, Location::Device, gamma_wing.ptr, 1, sizeof(f32), gamma_wing.size());
     for (u64 i = 0; i < gamma_wake.layout.surfaces().size(); i++) {
         assert(iteration < gamma_wake.layout.nc(i));
         f32* gamma_wake_ptr = gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration - 1) * gamma_wake.layout.ns(i);
         f32* gamma_wing_ptr = gamma_wing.ptr + gamma_wing.layout.offset(i) + (gamma_wing.layout.nc(i) - 1) * gamma_wing.layout.ns(i); // last row
-        memory->copy(MemoryTransfer::DeviceToDevice, gamma_wake_ptr, gamma_wing_ptr, gamma_wing.layout.ns(i) * sizeof(f32));
+        memory->copy(Location::Device, gamma_wake_ptr, 1, Location::Device, gamma_wing_ptr, 1, sizeof(f32), gamma_wing.layout.ns(i));
     }
 }
 
 // TODO: consider moving this buffer to be simulation side rather than backend side
 void BackendCPU::lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
-    d_solver_ipiv = (i32*)memory->alloc(MemoryLocation::Device, sizeof(i32) * lhs.layout.m());
+    d_solver_ipiv = (i32*)memory->alloc(Location::Device, sizeof(i32) * lhs.layout.m());
 }
 
 void BackendCPU::lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
@@ -309,7 +323,7 @@ void BackendCPU::lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f
     // const tiny::ScopedTimer timer("Solve");
     const int32_t n = static_cast<int32_t>(lhs.layout.n());
 
-    memory->copy(MemoryTransfer::DeviceToDevice, gamma.ptr, rhs.ptr, rhs.size_bytes());
+    memory->copy(Location::Device, gamma.ptr, 1, Location::Device, rhs.ptr, 1, sizeof(f32), rhs.size());
 
     LAPACKE_sgetrs(LAPACK_COL_MAJOR, 'N', n, 1, lhs.ptr, n, d_solver_ipiv, gamma.ptr, n);
 }
@@ -696,9 +710,9 @@ void BackendCPU::wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, 
         f32* vwing = verts_wing.ptr + verts_wing.layout.offset(i) + (verts_wing.layout.nc(i) - 1) * verts_wing.layout.ns(i);
         f32* vwake = verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i);
 
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 0*verts_wake.layout.stride(), vwing + 0*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 1*verts_wake.layout.stride(), vwing + 1*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 2*verts_wake.layout.stride(), vwing + 2*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
+        memory->copy(Location::Device, vwake + 0*verts_wake.layout.stride(), 1, Location::Device, vwing + 0*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
+        memory->copy(Location::Device, vwake + 1*verts_wake.layout.stride(), 1, Location::Device, vwing + 1*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
+        memory->copy(Location::Device, vwake + 2*verts_wake.layout.stride(), 1, Location::Device, vwing + 2*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
     }
 }
 

@@ -6,30 +6,30 @@
 #include <vector>
 #include <array>
 #include <memory>
+#include <functional>
 
 #include "vlm_types.hpp"
 
 namespace vlm {
 
-enum class MemoryLocation {
+// TODO: remove HostDevice
+enum class Location {
     Device, Host, HostDevice
-};
-
-enum class MemoryTransfer {
-    HostToDevice, DeviceToHost, HostToHost, DeviceToDevice
 };
 
 class Memory {
     public:
-        Memory(bool unified) : _unified(unified) {}
-        ~Memory() = default;
-        virtual void* alloc(MemoryLocation location, std::size_t size) const = 0;
-        virtual void free(MemoryLocation location, void* ptr) const = 0;
-        virtual void copy(MemoryTransfer transfer, void* dst, const void* src, std::size_t size) const = 0;
-        virtual void fill_f32(MemoryLocation location, float* ptr, float value, std::size_t size) const = 0;
-        bool is_unified() const { return _unified; }
+        Memory(bool unified) : m_unified(unified) {}
+        virtual ~Memory() = default;
+        virtual void* alloc(Location location, i64 size) const = 0;
+        virtual void free(Location location, void* ptr) const = 0;
+        virtual void copy(Location dst_loc, void* dst, i64 dst_stride, Location src_loc, const void* src, i64 src_stride, i64 elem_size, i64 size) const = 0;
+        virtual void fill(Location loc, float* ptr, float value, i64 size) const = 0;
+        virtual void fill(Location loc, double* ptr, double value, i64 size) const = 0;
+
+        bool is_unified() const { return m_unified; }
     private:
-        const bool _unified; // host and device memory are the same
+        const bool m_unified;
 };
 
 template<typename T>
@@ -64,10 +64,10 @@ class View {
         }
 };
 
-template<typename T, MemoryLocation Location, class Layout>
+template<typename T, Location Location, class Layout>
 class Buffer {
-    using is_host = std::bool_constant<Location == MemoryLocation::Host || Location == MemoryLocation::HostDevice>;
-    using is_device = std::bool_constant<Location == MemoryLocation::Device || Location == MemoryLocation::HostDevice>;
+    using is_host = std::bool_constant<Location == Location::Host || Location == Location::HostDevice>;
+    using is_device = std::bool_constant<Location == Location::Device || Location == Location::HostDevice>;
 
 public:
     Buffer() = delete;
@@ -87,13 +87,13 @@ public:
     void to_device() {
         static_assert(is_host::value && is_device::value);
         if (!memory.is_unified())
-            memory.copy(MemoryTransfer::HostToDevice, _device.ptr, _host.ptr, size_bytes());
+            memory.copy(Location::Device, _device.ptr, 1, Location::Host, _host.ptr, 1, sizeof(T), size());
     }
 
     void to_host() {
         static_assert(is_host::value && is_device::value);
         if (!memory.is_unified()) 
-            memory.copy(MemoryTransfer::DeviceToHost, _host.ptr, _device.ptr, size_bytes());
+            memory.copy(Location::Host, _host.ptr, 1, Location::Device, _device.ptr, 1, sizeof(T), size());
     }
 
     std::size_t size() const { return _host.size(); }
@@ -104,20 +104,20 @@ public:
         _device.layout = layout;
 
         if (memory.is_unified()) {
-            _host.ptr = static_cast<T*>(memory.alloc(MemoryLocation::Host, size_bytes()));
+            _host.ptr = static_cast<T*>(memory.alloc(Location::Host, size_bytes()));
             _device.ptr = _host.ptr;
         } else {
-            if constexpr (is_host::value) _host.ptr = static_cast<T*>(memory.alloc(MemoryLocation::Host, size_bytes()));
-            if constexpr (is_device::value) _device.ptr = static_cast<T*>(memory.alloc(MemoryLocation::Device, size_bytes()));
+            if constexpr (is_host::value) _host.ptr = static_cast<T*>(memory.alloc(Location::Host, size_bytes()));
+            if constexpr (is_device::value) _device.ptr = static_cast<T*>(memory.alloc(Location::Device, size_bytes()));
         }
     }
 
     void dealloc() {
         if (memory.is_unified()) {
-            memory.free(MemoryLocation::Host, _host.ptr);
+            memory.free(Location::Host, _host.ptr);
         } else {
-            if constexpr (is_host::value) memory.free(MemoryLocation::Host, _host.ptr);
-            if constexpr (is_device::value) memory.free(MemoryLocation::Device, _device.ptr);
+            if constexpr (is_host::value) memory.free(Location::Host, _host.ptr);
+            if constexpr (is_device::value) memory.free(Location::Device, _device.ptr);
         }
     }
 
@@ -323,128 +323,194 @@ class Tensor {
         std::array<uint64_t, Dim> _strides{0};
 };
 
-enum class Location {
-    Device, Host
+namespace beta {
+
+using Range = std::array<i64, 2>;
+
+constexpr Range All{0,-1};
+
+template<typename... Args>
+struct CountRanges;
+
+template<>
+struct CountRanges<> {
+    static constexpr i64 value = 0;
 };
 
-template<typename T, int Dim, MemoryLocation L>
+template<typename First, typename... Rest>
+struct CountRanges<First, Rest...> {
+    static constexpr i64 value = std::is_same<Range, std::decay_t<First>>::value + CountRanges<Rest...>::value;
+};
+
+template<typename T, int Dim, Location L>
 class TensorView {
-    using DimArray = std::array<u64, Dim>;
+    using DimArray = std::array<i64, Dim>;
     public:
-        TensorView(const DimArray& shape, const DimArray& strides, T* ptr) : m_shape(shape), m_strides(strides), m_ptr(ptr) {}
+        TensorView(const Memory& memory, const DimArray& shape, const DimArray& stride, T* const ptr) : m_memory(memory), m_shape(shape), m_stride(stride), m_ptr(ptr) {}
         ~TensorView() = default;
 
-        T* ptr() const {return m_ptr;}
-        
-        u64 size() const {
-            u64 size = 1;
-            for (u64 i = 0; i < Dim; i++) size *= m_shape[i];
+        inline i64 size() const {
+            i64 size = 1;
+            for (i64 i = 0; i < Dim; i++) size *= m_shape[i];
             return size;
         }
 
-        u64 size_bytes() const {return size() * sizeof(T);}
+        inline i64 size_bytes() const { return size() * sizeof(T); }
+        inline const DimArray& stride() const { return m_stride; }
+        inline i64 stride(u32 dim) const { assert(dim < Dim); return m_stride[dim]; }
+        inline const DimArray& shape() const { return m_shape; }
+        inline i64 shape(u32 dim) const { assert(dim < Dim); return m_shape[dim]; }
+        inline constexpr u32 dim() const { return Dim;}
+        inline constexpr Location location() const { return L; }
+        inline T* ptr() const {return m_ptr;}
 
-        u64 stride(int dim) const {return m_strides[dim];}
-        u64 shape(int dim) const {return m_shape[dim];}
+        template<typename... Idx> inline constexpr T& operator()(Idx... idx)       { static_assert(L == Location::Host); return m_ptr[offset({idx...})]; }
+        template<typename... Idx> inline constexpr T& operator()(Idx... idx) const { static_assert(L == Location::Host); return m_ptr[offset({idx...})]; }
+
+        inline constexpr T& operator()(const DimArray& indices)       { static_assert(L == Location::Host); return m_ptr[offset(indices)]; }
+        inline constexpr T& operator()(const DimArray& indices) const { static_assert(L == Location::Host); return m_ptr[offset(indices)]; }
 
         template<typename... Args>
         inline constexpr auto slice(Args... args) {
-            constexpr u64 M = CountRanges<Args...>::value;
+            constexpr i64 M = CountRanges<Args...>::value;
             static_assert(sizeof...(args) == Dim, "The number of indices must match the dimension N.");
             static_assert(M <= Dim, "Too many ranges provided compared to the view's dimensionality");
 
             T* newPtr = m_ptr;
-            std::array<uint64_t, M> new_shape{};
-            std::array<uint64_t, M> newStrides{};
-            uint64_t newDimIndex = 0;
+            std::array<i64, M> new_shape{};
+            std::array<i64, M> newstride{};
+            i64 newDimIndex = 0;
 
-            uint64_t argIndex = 0;
+            i64 argIndex = 0;
             ([&](auto& arg) {
                 if constexpr (std::is_same<std::decay_t<decltype(arg)>, Range>::value) {
-                    uint64_t first = arg[0]; // Removed 'constexpr'
-                    uint64_t last = (arg[1] < 0) ? m_shape[argIndex] + arg[1] + 1 : arg[1];
+                    i64 first = arg[0];
+                    i64 last = (arg[1] < 0) ? m_shape[argIndex] + arg[1] + 1 : arg[1];
                     assert((first >= 0) && (first < m_shape[argIndex]));
-                    assert((last >= 0) && (last <= m_shape[argIndex])); // Changed '<' to '<=' for upper bound
+                    assert((last >= 0) && (last <= m_shape[argIndex]));
                     assert(last - first > 0);
-                    newPtr += first * m_strides[argIndex];
+                    newPtr += first * m_stride[argIndex];
                     new_shape[newDimIndex] = last - first;
-                    newStrides[newDimIndex] = m_strides[argIndex];
+                    newstride[newDimIndex] = m_stride[argIndex];
                     newDimIndex++;
                 } else if constexpr (std::is_integral<std::decay_t<decltype(arg)>>::value) {
-                    uint64_t real_arg = (arg < 0) ? m_shape[argIndex] + arg : arg; // Removed '+1' as indexing starts from 0
+                    i64 real_arg = (arg < 0) ? m_shape[argIndex] + arg : arg;
                     assert((real_arg >= 0) && (real_arg < m_shape[argIndex]));
-                    newPtr += real_arg * m_strides[argIndex];
+                    newPtr += real_arg * m_stride[argIndex];
                 }
                 argIndex++;
             }(args), ...);
             
-            return TensorView<T, M, L>(new_shape, newStrides, newPtr);
+            return TensorView<T, M, L>(m_memory, new_shape, newstride, newPtr);
         }
+
+        template<Location ML>
+        void to(TensorView<T, Dim, ML>& dst) const {
+            assert(dst.shape() == m_shape);
+
+            // TODO: Check for overlap
+            // I believe this operation is too expensive and has a O(n^2) complexity
+
+            // Compute number of consecutive constant strided elements
+            i64 contiguous = shape(0);
+            i64 i =  1;
+            for (; i < Dim; i++) {
+                if (stride(i)/stride(0) != contiguous || dst.stride(i)/dst.stride(0) != contiguous) break; // can put this in for loop body
+                contiguous *= shape(i);
+            }
+
+            DimArray dim_idx{0};
+
+            std::function<void(u32)> copy_lambda = [&](u32 di) {
+                if (di == i-1) {
+                    m_memory.copy(
+                        dst.location(),
+                        dst.ptr() + dst.offset(dim_idx),
+                        dst.stride(0),
+                        this->location(),
+                        this->ptr() + this->offset(dim_idx),
+                        this->stride(0),
+                        sizeof(T),
+                        contiguous
+                    );
+                } else {
+                    for (u32 dii = 0; dii < shape(di); dii++) {
+                        dim_idx[di] = dii;
+                        copy_lambda(di-1);
+                    }
+                }
+            };
+            copy_lambda(Dim-1);
+        }
+
+        inline T& operator[](i64 i) { static_assert(L == Location::Host); return ptr()[i]; }
+
+        inline constexpr i64 offset(const DimArray& indices) const {
+            i64 index = 0;
+            for (i64 i = 0; i < Dim; i++) {
+                i64 idx = (indices[i] < 0) ? indices[i] + m_shape[i] : indices[i];
+                index += idx * m_stride[i];
+            }
+            return index;
+        }
+
+        const Memory& m_memory;
     private:
-        DimArray m_shape{0};
-        DimArray m_strides{0};
-        T* m_ptr = nullptr;
+
+        const DimArray m_shape{0};
+        const DimArray m_stride{0};
+        T* const m_ptr = nullptr;
 };
 
-template<typename T, int Dim, MemoryLocation L>
-class TensorV2 : public TensorView<T, Dim, L> {
+template<typename T, int Dim, Location L>
+class Tensor {
 private:
-    Memory& m_memory;
     using View = TensorView<T, Dim, L>;
-    using DimArray = std::array<u64, Dim>;
-
+    using DimArray = std::array<i64, Dim>;
+    View m_view;
+    
 public:
-    TensorV2(Memory& memory) : 
-        View({}, {}, nullptr),  // Initialize base class
-        m_memory(memory) {}
+    Tensor(const Memory& memory) : 
+        m_view(memory, {}, {}, nullptr) {}
     
-    ~TensorV2() {
-        m_memory.free(L, ptr());
-    }
-    
-    void init(const DimArray& shape) {
-        DimArray strides;
-        strides[0] = 1;
-        for (u64 i = 1; i < Dim; ++i) {
-            strides[i] = strides[i - 1] * shape[i - 1];
-        }
-        init(shape, strides);
+    ~Tensor() {
+        m_view.m_memory.free(L, m_view.ptr());
     }
 
-    void init(const DimArray& shape, const DimArray& strides) {
-        m_memory.free(L, ptr());
-        u64 size = 1;
-        for (u64 i = 0; i < Dim; i++) size *= shape[i];
-        T* new_ptr = static_cast<T*>(m_memory.alloc(L, size * sizeof(T)));
-        *this = View(shape, strides, new_ptr);
+    void init(const DimArray& shape) {
+        auto& mem = m_view.m_memory;
+        mem.free(L, m_view.ptr());
+        i64 size = shape[0];
+        DimArray stride;
+        stride[0] = 1;
+        for (i64 i = 1; i < Dim; ++i) {
+            size *= shape[i];
+            stride[i] = stride[i - 1] * shape[i - 1];
+        }
+        T* const ptr = static_cast<T*>(mem.alloc(L, size * sizeof(T)));
+
+        m_view.~View();
+        new (&m_view) View(mem, shape, stride, ptr);
     }
+
+    [[nodiscard]] Tensor<T, Dim, L> clone() {
+        Tensor<T, Dim, L> cloned_tensor(m_view.m_memory);
+        cloned_tensor.init(m_view.shape());
+        m_view.to(cloned_tensor.view());
+        return cloned_tensor;
+    }
+    
+    inline T* ptr() const { return m_view.ptr(); }
+    inline i64 size() const { return m_view.size(); }
+    inline i64 size_bytes() const { return m_view.size_bytes(); }
+    
+    inline const View& view() const { return m_view; }
+    inline View& view() { return m_view; }
+
+    inline T& operator[](i64 i) { return ptr()[i]; }
 };
+
+} // namespace beta
+
 
 } // namespace vlm
-
-// #include <algorithm>
-// #include <cstring>
-// #include <memory>
-
-// using namespace vlm;
-
-// class MemoryCPU final : public Memory {
-//     public:
-//         MemoryCPU() : Memory(true) {}
-//         ~MemoryCPU() = default;
-//         void* alloc(MemoryLocation location, std::size_t size) const override {return std::malloc(size);}
-//         void free(MemoryLocation location, void* ptr) const override {std::free(ptr);}
-//         void copy(MemoryTransfer transfer, void* dst, const void* src, std::size_t size) const override {std::memcpy(dst, src, size);}
-//         void fill_f32(MemoryLocation location, float* ptr, float value, std::size_t size) const override {std::fill(ptr, ptr + size, value);}
-// };
-
-// int main() {
-//     std::unique_ptr<Memory> memory = std::make_unique<MemoryCPU>(); // memory manager
-//     Buffer<float, MemoryLocation::Host, MultiSurface> buffer{*memory}; // owning host/device buffer with a view type
-
-//     MultiSurface layout{{{5,5,0}},3}; // dimensions of the view following the custom layout
-
-//     buffer.alloc(layout); // allocate and initialize the views in the buffer.
-
-//     assert(buffer.size() == layout.size()); // linear size of the allocated buffer must match the size of the view
-// }

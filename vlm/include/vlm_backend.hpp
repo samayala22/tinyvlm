@@ -23,7 +23,7 @@ class Backend {
 
         f32 sigma_vatistas = 0.0f;
         Backend(std::unique_ptr<Memory> memory_) : memory(std::move(memory_)) {
-            d_val = (f32*)memory->alloc(MemoryLocation::Device, sizeof(f32));
+            d_val = (f32*)memory->alloc(Location::Device, sizeof(f32));
         }
         virtual ~Backend();
 
@@ -34,6 +34,7 @@ class Backend {
         virtual void displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) = 0;
         virtual void displace_wing(const View<f32, Tensor<3>>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) = 0;
         virtual void wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, u32 iteration) = 0;
+
         virtual void gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) = 0;
         virtual void gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) = 0;
         virtual void lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) = 0;

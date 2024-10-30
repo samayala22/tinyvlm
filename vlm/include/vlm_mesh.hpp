@@ -14,12 +14,12 @@ namespace vlm {
 // TODO: move functions into cpp file
 class Mesh {
     public:
-    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing_init; // (nc+1)*(ns+1)*3
-    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing; // (nc+1)*(ns+1)*3
-    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wake; // (nw+1)*(ns+1)*3
-    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> normals; // nc*ns*3
-    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> colloc; // nc*ns*3
-    Buffer<f32, MemoryLocation::HostDevice, MultiSurface> area; // nc*ns
+    Buffer<f32, Location::HostDevice, MultiSurface> verts_wing_init; // (nc+1)*(ns+1)*3
+    Buffer<f32, Location::HostDevice, MultiSurface> verts_wing; // (nc+1)*(ns+1)*3
+    Buffer<f32, Location::HostDevice, MultiSurface> verts_wake; // (nw+1)*(ns+1)*3
+    Buffer<f32, Location::HostDevice, MultiSurface> normals; // nc*ns*3
+    Buffer<f32, Location::HostDevice, MultiSurface> colloc; // nc*ns*3
+    Buffer<f32, Location::HostDevice, MultiSurface> area; // nc*ns
 
     f32 frame[16] = {
         1.0f, 0.0f, 0.0f, 0.0f,
@@ -40,12 +40,12 @@ class Mesh {
         area.alloc(MultiSurface{wing_panels, 1});
 
         // Sete last row to 1 for homogeneous coordinatesverts_wing_init.h_view().layout
-        verts_wing_init.memory.fill_f32(MemoryLocation::Host, verts_wing_init.h_view().ptr + verts_wing_init.h_view().layout(0,3), 1.f, verts_wing_init.h_view().layout.stride());
+        verts_wing_init.memory.fill(Location::Host, verts_wing_init.h_view().ptr + verts_wing_init.h_view().layout(0,3), 1.f, verts_wing_init.h_view().layout.stride());
     }
 
     void alloc_wake(const std::vector<SurfaceDims>& wake_vertices) {
         verts_wake.alloc(MultiSurface{wake_vertices, 4});
-        verts_wake.memory.fill_f32(MemoryLocation::Device, verts_wake.d_view().ptr + verts_wake.d_view().layout(0,3), 1.f,  verts_wake.d_view().layout.stride());
+        verts_wake.memory.fill(Location::Device, verts_wake.d_view().ptr + verts_wake.d_view().layout(0,3), 1.f,  verts_wake.d_view().layout.stride());
     }
 };
 

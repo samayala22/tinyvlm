@@ -54,8 +54,8 @@ class LUSolver_CUDA final : public LUSolver {
         void factorize(const View<f32, Tensor<2>>& A) = 0;
         void solve(const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x) = 0;
     private:
-        Buffer<f32, MemoryLocation::Device, Tensor<1>> ipiv;
-        Buffer<f32, MemoryLocation::Device, Tensor<1>> buffer;
+        Buffer<f32, Location::Device, Tensor<1>> ipiv;
+        Buffer<f32, Location::Device, Tensor<1>> buffer;
         f32* info = nullptr;
 };
 

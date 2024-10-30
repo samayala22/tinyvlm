@@ -27,12 +27,12 @@ class NewmarkBeta {
         const f32 m_beta;
         const f32 m_gamma;
     public:
-        Buffer<f32, MemoryLocation::Device, Tensor<2>> K_eff{m_memory}; // effective stiffness
-        Buffer<f32, MemoryLocation::Device, Tensor<1>> du{m_memory}; // incremental displacement
-        Buffer<f32, MemoryLocation::Device, Tensor<1>> factor{m_memory}; // intermediary vector
-        Buffer<f32, MemoryLocation::Device, Tensor<2>> u{m_memory}; // dof x tsteps position history
-        Buffer<f32, MemoryLocation::Device, Tensor<2>> v{m_memory}; // dof x tsteps velocity history
-        Buffer<f32, MemoryLocation::Device, Tensor<2>> a{m_memory}; // dof x tsteps acceleration history
+        Buffer<f32, Location::Device, Tensor<2>> K_eff{m_memory}; // effective stiffness
+        Buffer<f32, Location::Device, Tensor<1>> du{m_memory}; // incremental displacement
+        Buffer<f32, Location::Device, Tensor<1>> factor{m_memory}; // intermediary vector
+        Buffer<f32, Location::Device, Tensor<2>> u{m_memory}; // dof x tsteps position history
+        Buffer<f32, Location::Device, Tensor<2>> v{m_memory}; // dof x tsteps velocity history
+        Buffer<f32, Location::Device, Tensor<2>> a{m_memory}; // dof x tsteps acceleration history
 };
 
 void NewmarkBeta::init(View<f32, Tensor<2>>& M, View<f32, Tensor<2>>& C, View<f32, Tensor<2>>& K, View<f32, Tensor<1>>& F0, View<f32, Tensor<1>>& u0, View<f32, Tensor<1>>& v0, u32 nb_timesteps) {
@@ -57,9 +57,9 @@ void NewmarkBeta::init(View<f32, Tensor<2>>& M, View<f32, Tensor<2>>& C, View<f3
     v.alloc(time_series);
     a.alloc(time_series);
 
-    m_memory.fill_f32(MemoryLocation::Device, u.d_view().ptr, 0.0f, u.size());
-    m_memory.fill_f32(MemoryLocation::Device, v.d_view().ptr, 0.0f, v.size());
-    m_memory.fill_f32(MemoryLocation::Device, a.d_view().ptr, 0.0f, a.size());
+    m_memory.fill(Location::Device, u.d_view().ptr, 0.0f, u.size());
+    m_memory.fill(Location::Device, v.d_view().ptr, 0.0f, v.size());
+    m_memory.fill(Location::Device, a.d_view().ptr, 0.0f, a.size());
 
     // View<f32, Tensor<1>> a0_col0 = a.d_view().layout.slice(a.d_view().ptr, all, 0);
     // m_memory.copy(MemoryTransfer::DeviceToDevice, a0_col0.ptr, F0.ptr, F0.size_bytes());
@@ -78,12 +78,12 @@ void NewmarkBeta::step(View<f32, Tensor<2>>& M, View<f32, Tensor<2>>& C, View<f3
     const f32 xdd1 = - dt * (1 - m_gamma / (2*m_beta));
 
     // K_eff = K + a0 * M + a1 * C
-    m_memory.copy(MemoryTransfer::DeviceToDevice, K_eff.d_view().ptr, K.ptr, K.size_bytes());
+    m_memory.copy(Location::Device, K_eff.d_view().ptr, 1, Location::Device, K.ptr, 1, sizeof(K.ptr), K.size());
     m_blas->axpy(x0, M, K_eff.d_view());
     m_blas->axpy(x1, C, K_eff.d_view());
 
     // F_eff = (F[i+1]-F[i]) + M @ (xd0 * v[i] + xdd0 * a[i]) + C @ (xd1 * v[i] + xdd1 * a[i])
-    m_memory.fill_f32(MemoryLocation::Device, du.d_view().ptr, 0.0f, du.size());
+    m_memory.fill(Location::Device, du.d_view().ptr, 0.0f, du.size());
     m_blas->axpy(1.0f, F_next, du.d_view());
     m_blas->axpy(-1.0f, F_now, du.d_view());
 
@@ -91,12 +91,12 @@ void NewmarkBeta::step(View<f32, Tensor<2>>& M, View<f32, Tensor<2>>& C, View<f3
     View<f32, Tensor<1>> v_i = v.d_view().layout.slice(v.d_view().ptr, all, iteration);
     View<f32, Tensor<1>> u_i = u.d_view().layout.slice(u.d_view().ptr, all, iteration);
 
-    m_memory.fill_f32(MemoryLocation::Device, factor.d_view().ptr, 0.0f, factor.size());
+    m_memory.fill(Location::Device, factor.d_view().ptr, 0.0f, factor.size());
     m_blas->axpy(xd0, v_i, factor.d_view());
     m_blas->axpy(xdd0, a_i, factor.d_view());
     m_blas->gemv(1.0f, M, factor.d_view(), 1.0f, du.d_view());
 
-    m_memory.fill_f32(MemoryLocation::Device, factor.d_view().ptr, 0.0f, factor.size());
+    m_memory.fill(Location::Device, factor.d_view().ptr, 0.0f, factor.size());
     m_blas->axpy(xd1, v_i, factor.d_view());
     m_blas->axpy(xdd1, a_i, factor.d_view());
     m_blas->gemv(1.0f, C, factor.d_view(), 1.0f, du.d_view());
@@ -126,19 +126,19 @@ class UVLM_2DOF final: public Simulation {
         void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final);
     
         // Mesh (initial position)
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> verts_wing_pos{*backend->memory}; // (nc+1)*(ns+1)*3
-        Buffer<f32, MemoryLocation::Host, MultiSurface> colloc_pos{*backend->memory}; // (nc)*(ns)*3
+        Buffer<f32, Location::HostDevice, MultiSurface> verts_wing_pos{*backend->memory}; // (nc+1)*(ns+1)*3
+        Buffer<f32, Location::Host, MultiSurface> colloc_pos{*backend->memory}; // (nc)*(ns)*3
 
         // Data
-        Buffer<f32, MemoryLocation::Device, Matrix<MatrixLayout::ColMajor>> lhs{*backend->memory}; // (ns*nc)^2
-        Buffer<f32, MemoryLocation::Device, MultiSurface> rhs{*backend->memory}; // ns*nc
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
-        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
-        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
-        Buffer<f32, MemoryLocation::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
-        Buffer<f32, MemoryLocation::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
-        Buffer<f32, MemoryLocation::HostDevice, Tensor<3>> transforms{*backend->memory}; // 4*4*nb_meshes
-        Buffer<f32, MemoryLocation::Device, Tensor<3>> panel_forces{*backend->memory}; // panels x 3 x timesteps
+        Buffer<f32, Location::Device, Matrix<MatrixLayout::ColMajor>> lhs{*backend->memory}; // (ns*nc)^2
+        Buffer<f32, Location::Device, MultiSurface> rhs{*backend->memory}; // ns*nc
+        Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
+        Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
+        Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
+        Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
+        Buffer<f32, Location::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
+        Buffer<f32, Location::HostDevice, Tensor<3>> transforms{*backend->memory}; // 4*4*nb_meshes
+        Buffer<f32, Location::Device, Tensor<3>> panel_forces{*backend->memory}; // panels x 3 x timesteps
 
         // Simulation boilerplate
         std::vector<f32> vec_t; // timesteps
@@ -147,12 +147,12 @@ class UVLM_2DOF final: public Simulation {
         std::vector<linalg::alias::float4x4> body_frames;
 
         // Structure 
-        Buffer<f32, MemoryLocation::Device, Tensor<2>> M{*backend->memory}; // dof x dof mass matrix
-        Buffer<f32, MemoryLocation::Device, Tensor<2>> C{*backend->memory}; // dof x dof damping matrix
-        Buffer<f32, MemoryLocation::Device, Tensor<2>> K{*backend->memory}; // dof x dof stiffness matrix
-        Buffer<f32, MemoryLocation::Device, Tensor<2>> F{*backend->memory}; // dof x timesteps
-        Buffer<f32, MemoryLocation::Device, Tensor<1>> u0{*backend->memory}; // initial condition
-        Buffer<f32, MemoryLocation::Device, Tensor<1>> v0{*backend->memory}; // initial condition
+        Buffer<f32, Location::Device, Tensor<2>> M{*backend->memory}; // dof x dof mass matrix
+        Buffer<f32, Location::Device, Tensor<2>> C{*backend->memory}; // dof x dof damping matrix
+        Buffer<f32, Location::Device, Tensor<2>> K{*backend->memory}; // dof x dof stiffness matrix
+        Buffer<f32, Location::Device, Tensor<2>> F{*backend->memory}; // dof x timesteps
+        Buffer<f32, Location::Device, Tensor<1>> u0{*backend->memory}; // initial condition
+        Buffer<f32, Location::Device, Tensor<1>> v0{*backend->memory}; // initial condition
 
         NewmarkBeta integrator{*backend->memory};
     private:
@@ -210,9 +210,9 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
     }
     transforms.to_device();
     backend->displace_wing(transforms.d_view(), verts_wing_pos.d_view(), mesh.verts_wing_init.d_view());
-    backend->memory->copy(MemoryTransfer::DeviceToHost, colloc_pos.h_view().ptr, mesh.colloc.d_view().ptr, mesh.colloc.d_view().size_bytes());
-    backend->memory->copy(MemoryTransfer::DeviceToDevice, mesh.verts_wing.d_view().ptr, verts_wing_pos.d_view().ptr, mesh.verts_wing.d_view().size_bytes());
-    backend->memory->fill_f32(MemoryLocation::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
+    backend->memory->copy(Location::Host, colloc_pos.h_view().ptr, 1, Location::Device, mesh.colloc.d_view().ptr, 1, sizeof(f32), mesh.colloc.d_view().size());
+    backend->memory->copy(Location::Device, mesh.verts_wing.d_view().ptr, 1, Location::Device, verts_wing_pos.d_view().ptr, 1, sizeof(f32), verts_wing_pos.d_view().size());
+    backend->memory->fill(Location::Device, lhs.d_view().ptr, 0.f, lhs.d_view().size());
     backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
 
     // 1.  Compute the dynamic time steps for the simulation
@@ -308,7 +308,7 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
     const Tensor<3> panel_forces_layout{{wing_panels[0].size(), 3, vec_t.size()}};
     panel_forces.alloc(panel_forces_layout);
     F.alloc(force_history_layout);
-    backend->memory->fill_f32(MemoryLocation::Device, F.d_view().ptr, 0.0f, F.d_view().size());
+    backend->memory->fill(Location::Device, F.d_view().ptr, 0.0f, F.d_view().size());
     auto F0 = F.d_view().layout.slice(F.d_view().ptr, all, 0);
     integrator.init(M.d_view(), C.d_view(), K.d_view(), F0, u0.d_view(), v0.d_view(), vec_t.size()-1);
 
@@ -350,7 +350,7 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
         }
 
         velocities.to_device();
-        backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
+        backend->memory->fill(Location::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
         backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), velocities.d_view());
         backend->rhs_assemble_wake_influence(rhs.d_view(), gamma_wake.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wake.d_view(), i);
         backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());
@@ -402,7 +402,7 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
             }
 
             velocities.to_device();
-            backend->memory->fill_f32(MemoryLocation::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
+            backend->memory->fill(Location::Device, rhs.d_view().ptr, 0.f, rhs.d_view().size());
             backend->rhs_assemble_velocities(rhs.d_view(), mesh.normals.d_view(), velocities.d_view());
             backend->rhs_assemble_wake_influence(rhs.d_view(), gamma_wake.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.verts_wake.d_view(), i+1);
             backend->lu_solve(lhs.d_view(), rhs.d_view(), gamma_wing.d_view());

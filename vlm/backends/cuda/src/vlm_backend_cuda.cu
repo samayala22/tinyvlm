@@ -102,40 +102,51 @@ class MemoryCUDA final : public Memory {
     public:
         MemoryCUDA() : Memory(false) {}
         ~MemoryCUDA() = default;
-        void* alloc(MemoryLocation location, std::size_t size) const override {
+        void* alloc(Location location, i64 size) const override {
             void* res = nullptr;
             switch (location) {
-                case MemoryLocation::Device: CHECK_CUDA(cudaMalloc(&res, size)); break;
-                case MemoryLocation::Host: CHECK_CUDA(cudaMallocHost(&res, size)); break;
+                case Location::Device: CHECK_CUDA(cudaMalloc(&res, size)); break;
+                case Location::Host: CHECK_CUDA(cudaMallocHost(&res, size)); break;
             }
             return res;
         }
 
-        void free(MemoryLocation location, void* ptr) const override {
+        void free(Location location, void* ptr) const override {
             switch (location) {
-                case MemoryLocation::Device: CHECK_CUDA(cudaFree(ptr)); break;
-                case MemoryLocation::Host: CHECK_CUDA(cudaFreeHost(ptr)); break;
+                case Location::Device: CHECK_CUDA(cudaFree(ptr)); break;
+                case Location::Host: CHECK_CUDA(cudaFreeHost(ptr)); break;
             }
         }
 
-        void copy(MemoryTransfer transfer, void* dst, const void* src, std::size_t size) const override {
-            switch (transfer) {
-                case MemoryTransfer::HostToDevice: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyHostToDevice)); break;
-                case MemoryTransfer::DeviceToHost: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost)); break;
-                case MemoryTransfer::HostToHost: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyHostToHost)); break;
-                case MemoryTransfer::DeviceToDevice: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToDevice)); break;
+        void copy(Location dst_loc, void* dst, i64 dst_stride, Location src_loc, const void* src, i64 src_stride, i64 elem_size, i64 size) const override {
+            cudaMemcpyKind kind;
+            if (dst_loc == Location::Host && src_loc == Location::Device) {
+                kind = cudaMemcpyDeviceToHost;
+            } else if (dst_loc == Location::Device && src_loc == Location::Host) {
+                kind = cudaMemcpyHostToDevice;
+            } else if (dst_loc == Location::Device && src_loc == Location::Device) {
+                kind = cudaMemcpyDeviceToDevice;
+            } else if (dst_loc == Location::Host && src_loc == Location::Host) {
+                kind = cudaMemcpyHostToHost;
+            }
+
+            if (dst_stride == 1 && src_stride == 1) {
+                CHECK_CUDA(cudaMemcpy(dst, src, size * elem_size, kind));
+            } else {
+                CHECK_CUDA(cudaMemcpy2D(dst, dst_stride * elem_size, src, src_stride * elem_size, elem_size, size, kind));
             }
         }
-        void fill_f32(MemoryLocation location, float* ptr, float value, std::size_t size) const override {
+
+        void fill(Location location, float* ptr, float value, i64 size) const override {
             switch (location) {
-                case MemoryLocation::Device: {
+                case Location::Device: {
                     constexpr Dim3<u32> block{1024};
-                    const Dim3<u64> n{size};
+                    const Dim3<u64> n{(u64)size};
                     kernel_fill_f32<block.x><<<grid_size(block, n)(), block()>>>(ptr, value, size);
                     CHECK_CUDA(cudaGetLastError());
                     break;
                 }
-                case MemoryLocation::Host: {
+                case Location::Host: {
                     std::fill(ptr, ptr + size, value);
                     break;
                 }
@@ -159,7 +170,7 @@ void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f
     for (const auto& surf : gamma_delta.layout.surfaces())  {
         f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
         const f32* s_gamma = gamma.ptr + surf.offset;
-        memory->copy(MemoryTransfer::DeviceToDevice, s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
+        memory->copy(Location::Device, s_gamma_delta, 1, Location::Device, s_gamma, 1, sizeof(*s_gamma_delta), surf.ns);
         
         constexpr Dim3<u32> block{32, 32};
         const Dim3<u64> n{surf.nc-1, surf.ns};
@@ -316,21 +327,21 @@ void BackendCUDA::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, con
 void BackendCUDA::gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) {
     // const tiny::ScopedTimer timer("Shed Gamma");
 
-    memory->copy(MemoryTransfer::DeviceToDevice, gamma_wing_prev.ptr, gamma_wing.ptr, gamma_wing.size_bytes());
+    memory->copy(Location::Device, gamma_wing_prev.ptr, 1, Location::Device, gamma_wing.ptr, 1, sizeof(f32), gamma_wing.size());
     for (u64 i = 0; i < gamma_wake.layout.surfaces().size(); i++) {
         assert(iteration < gamma_wake.layout.nc(i));
         f32* gamma_wake_ptr = gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration - 1) * gamma_wake.layout.ns(i);
         f32* gamma_wing_ptr = gamma_wing.ptr + gamma_wing.layout.offset(i) + (gamma_wing.layout.nc(i) - 1) * gamma_wing.layout.ns(i); // last row
-        memory->copy(MemoryTransfer::DeviceToDevice, gamma_wake_ptr, gamma_wing_ptr, gamma_wing.layout.ns(i) * sizeof(f32));
+        memory->copy(Location::Device, gamma_wake_ptr, 1, Location::Device, gamma_wing_ptr, 1, sizeof(f32), gamma_wing.layout.ns(i));
     }
 }
 
 void BackendCUDA::lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
     int bufsize = 0;
     CHECK_CUSOLVER(cusolverDnSgetrf_bufferSize(CtxManager::getInstance().cusolver(), lhs.layout.m(), lhs.layout.n(), lhs.ptr, lhs.layout.stride(), &bufsize));
-    d_solver_info = (i32*)memory->alloc(MemoryLocation::Device, sizeof(i32));
-    d_solver_buffer = (f32*)memory->alloc(MemoryLocation::Device, sizeof(f32) * bufsize);
-    d_solver_ipiv = (i32*)memory->alloc(MemoryLocation::Device, sizeof(i32) * lhs.layout.n());
+    d_solver_info = (i32*)memory->alloc(Location::Device, sizeof(i32));
+    d_solver_buffer = (f32*)memory->alloc(Location::Device, sizeof(f32) * bufsize);
+    d_solver_ipiv = (i32*)memory->alloc(Location::Device, sizeof(i32) * lhs.layout.n());
 }
 
 void BackendCUDA::lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
@@ -340,7 +351,8 @@ void BackendCUDA::lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
     int h_info = 0;
 
     CHECK_CUSOLVER(cusolverDnSgetrf(CtxManager::getInstance().cusolver(), n, n, lhs.ptr, n, d_solver_buffer, d_solver_ipiv, d_solver_info));
-    memory->copy(MemoryTransfer::DeviceToHost, &h_info, d_solver_info, sizeof(int));
+    memory->copy(Location::Host, &h_info, 1, Location::Device, d_solver_info, 1, sizeof(int), 1);
+
     if (h_info != 0) std::printf("Error: LU factorization failed\n");
 };
 
@@ -350,9 +362,9 @@ void BackendCUDA::lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<
     const i32 n = static_cast<int32_t>(lhs.layout.n());
     i32 h_info = 0;
 
-    memory->copy(MemoryTransfer::DeviceToDevice, gamma.ptr, rhs.ptr, rhs.size_bytes());
+    memory->copy(Location::Device, gamma.ptr, 1, Location::Device, rhs.ptr, 1, sizeof(f32), rhs.size());
     CHECK_CUSOLVER(cusolverDnSgetrs(CtxManager::getInstance().cusolver(), CUBLAS_OP_N, n, 1, lhs.ptr, n, d_solver_ipiv, gamma.ptr, n, d_solver_info));
-    memory->copy(MemoryTransfer::DeviceToHost, &h_info, d_solver_info, sizeof(int));
+    memory->copy(Location::Host, &h_info, 1, Location::Device, d_solver_info, 1, sizeof(int), 1);
     if (h_info != 0) std::printf("Error: LU solve failed\n");
 }
 
@@ -375,7 +387,7 @@ f32 BackendCUDA::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wi
         d_val
     );
     CHECK_CUDA(cudaGetLastError());
-    memory->copy(MemoryTransfer::DeviceToHost, &h_cl, d_val, sizeof(f32));
+    memory->copy(Location::Host, &h_cl, 1, Location::Device, d_val, 1, sizeof(f32), 1);
     CtxManager::getInstance().sync();
     
     return h_cl / (0.5f * flow.rho * linalg::length2(flow.freestream) * area);
@@ -422,7 +434,7 @@ f32 BackendCUDA::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_
         d_val
     );
     CHECK_CUDA(cudaGetLastError());
-    memory->copy(MemoryTransfer::DeviceToHost, &h_cl, d_val, sizeof(f32));
+    memory->copy(Location::Host, &h_cl, 1, Location::Device, d_val, 1, sizeof(f32), 1);
     CtxManager::getInstance().sync();
     
     return h_cl / (0.5f * rho * linalg::length2(freestream) * area);
@@ -468,7 +480,7 @@ f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wa
         d_val
     );
     CHECK_CUDA(cudaGetLastError());
-    memory->copy(MemoryTransfer::DeviceToHost, &h_cd, d_val, sizeof(f32));
+    memory->copy(Location::Host, &h_cd, 1, Location::Device, d_val, 1, sizeof(f32), 1);
     CtxManager::getInstance().sync();
     return h_cd / (linalg::length2(flow.freestream) * area);
 }
@@ -545,9 +557,9 @@ void BackendCUDA::wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32,
         f32* vwing = verts_wing.ptr + verts_wing.layout.offset(i) + (verts_wing.layout.nc(i) - 1) * verts_wing.layout.ns(i);
         f32* vwake = verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i);
 
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 0*verts_wake.layout.stride(), vwing + 0*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 1*verts_wake.layout.stride(), vwing + 1*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 2*verts_wake.layout.stride(), vwing + 2*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
+        memory->copy(Location::Device, vwake + 0*verts_wake.layout.stride(), 1, Location::Device, vwing + 0*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
+        memory->copy(Location::Device, vwake + 1*verts_wake.layout.stride(), 1, Location::Device, vwing + 1*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
+        memory->copy(Location::Device, vwake + 2*verts_wake.layout.stride(), 1, Location::Device, vwing + 2*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
     }
 }
 
@@ -558,6 +570,6 @@ f32 BackendCUDA::mesh_area(const View<f32, SingleSurface>& areas) {
     kernel_reduce<<<grid_size(block, n)(), block()>>>(n.x, areas.ptr, d_val);
     CHECK_CUDA(cudaGetLastError());
     f32 h_area;
-    memory->copy(MemoryTransfer::DeviceToHost, &h_area, d_val, sizeof(f32));
+    memory->copy(Location::Host, &h_area, 1, Location::Device, d_val, 1, sizeof(f32), 1);
     return h_area;
 }

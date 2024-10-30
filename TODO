@@ -1,21 +1,9 @@
 - Move some of the logic from theodorsen test case to its own class
 - Consider calling delta_gamma directly from lu_solve
 - Get rid of exceptions
-- All backend functions should return a tf::Task so that we can build a single taskflow graph
+- All backend functions should return a tf::Task so that we can build a single taskflow graph -> most probably cancelled for now
 - Retire Mesh object as it is simply not generic enough, all geometry data is simulation specific
-- Cleanup vlm_types to include the bare minimum headers
-- Use vlm_types in vlm_memory
-- Rework the memory and buffer strategy. Spamming .d_view() is getting on my nerves:
-adopt a conventional 
-
-Buffer<f32, Memory::Device, Tensor<2>>;
-
-but keep the layout parameter as I like it. 
-
-memory class would then be implemented for each backend
-
-memory->copy(MemoryTransfer::DeviceToDevice, dst_ptr, src_ptr); // find a solution to templates for virtual classes..
-
+- Replace unsigned ints with signed ints
 
 // store kinematics in the backend ??
 // store flow properties in the backend ??
