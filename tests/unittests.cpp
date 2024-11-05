@@ -41,9 +41,11 @@ int main(int argc, char** argv) {
         Tensor<f32, 3, Location::Host> tensor_h{*memory};
         Tensor<f32, 3, Location::Device> tensor_d{*memory};
 
+        const i64 m = 3;
         const i64 n = 3;
-        tensor_d.init({n, n, n});
-        tensor_h.init({n, n, n});
+        const i64 k = 4;
+        tensor_d.init({m, n, k});
+        tensor_h.init({m, n, k});
 
         auto& tdv = tensor_d.view();
         auto& thv = tensor_h.view();
@@ -87,6 +89,97 @@ int main(int argc, char** argv) {
 
             CHECK(thv(0, 0, 0) == thv(1, 0, 0));
             CHECK(thv(0, 1, 1) == thv(1, 1, 1));
+        }
+
+        {
+            auto t = tensor_d.clone();
+            auto tv = t.view();
+            auto a = tv.slice(0, All, All);
+            auto b = tv.slice(All, 2, All);
+
+            auto aa = a.slice(Range{0,2}, All);
+            auto bb = b.slice(Range{1,3}, All);
+            aa.to(bb);
+            tv.to(thv);
+
+            CHECK(thv(0,0,1) == thv(1, 2, 1));
+            CHECK(thv(0,0,2) == thv(1, 2, 2));
+        }
+
+        { // orthogonal slices
+            auto t = tensor_d.clone();
+            auto tv = t.view();
+            auto a = tv.slice(0, All, Range{0,2});
+            auto b = tv.slice(All, Range{1,3}, 2);
+            
+            a.to(b);
+            tv.to(thv);
+
+            CHECK(thv(0,0,0) == thv(0, 1, 2));
+            CHECK(thv(0,1,0) == thv(1, 1, 2));
+            CHECK(thv(0,2,1) == thv(2, 2, 2));
+        }
+
+        {
+            auto t = tensor_d.clone();
+            auto tv = t.view();
+            auto a = tv.slice(Range{0,2}, Range{1,3}, All);
+            auto b = a.reshape(1, 2, 2, 2, 2);
+            
+            std::array<i64, 5> correct_stride{1, 1, 3, 9, 18};
+            CHECK(b.stride() == correct_stride);
+        }
+
+        {
+            auto t = tensor_d.clone();
+            auto tv = t.view();
+            auto a = tv.slice(All, Range{1,3}, All);
+            auto b = a.reshape(2, 3, 1, 1, 4);
+
+            std::array<i64, 5> correct_stride{1, 2, 9, 9, 9};
+            CHECK(b.stride() == correct_stride);
+        }
+
+        {
+            auto t = tensor_d.clone();
+            auto tv = t.view();
+            auto a = tv.slice(0, All, All);
+            auto b = a.reshape(3, 2, 2);
+
+            std::array<i64, 3> correct_stride{3, 9, 18};
+            CHECK(b.stride() == correct_stride);
+        }
+
+        {
+            auto t = tensor_d.clone();
+            auto tv = t.view();
+            auto a = tv.slice(All, All, All);
+            auto b = a.reshape(2, 18);
+
+            std::array<i64, 2> correct_stride{1, 2};
+            CHECK(b.stride() == correct_stride);
+        }
+
+        {
+            auto t = tensor_d.clone();
+            auto tv = t.view();
+            auto a = tv.slice(0, All, All);
+            a.fill(111.f);
+            tv.to(thv);
+
+            CHECK(thv(0,0,0) == 111.f);
+            CHECK(thv(0,1,1) == 111.f);
+            CHECK(thv(0,2,2) == 111.f);
+        }
+
+        {
+            Tensor<f32, 1, Location::Host> t{*memory};
+            t.init({10});
+            auto tv = t.view();
+            auto b = tv.reshape(10, 1, 1);
+
+            std::array<i64, 3> correct_stride{1, 10, 10};
+            CHECK(b.stride() == correct_stride);
         }
     }
 
