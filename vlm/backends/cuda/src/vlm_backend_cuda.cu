@@ -164,125 +164,6 @@ class CUDA_Memory final : public Memory {
         __host__ void fill(Location location, double *ptr, i64 stride, double value, i64 size) const override { launch_fill_kernel(location, ptr, stride, value, size); }
 };
 
-class CUDA_BLAS final : public BLAS {
-    public:
-        CUDA_BLAS() = default;
-        ~CUDA_BLAS() = default;
-
-        void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) override;
-        void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
-};
-
-cublasOperation_t cublas_trans(BLAS::Trans trans) {
-    switch (trans) {
-        case BLAS::Trans::No: return CUBLAS_OP_N;
-        case BLAS::Trans::Yes: return CUBLAS_OP_T;
-    }
-}
-
-void CUDA_BLAS::gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, TensorView<f32, 1, Location::Device>& y, Trans trans) {
-    // TODO: double check if this is correct
-    i64 m = (trans == Trans::No) ? A.shape(0) : A.shape(1);
-    i64 n = (trans == Trans::No) ? A.shape(1) : A.shape(0);
-
-    CHECK_CUBLAS(cublasSgemv_64(
-        CtxManager::getInstance().cublas(),
-        cublas_trans(trans),
-        m,
-        n,
-        &alpha,
-        A.ptr(),
-        A.stride(1),
-        x.ptr(),
-        x.stride(0),
-        &beta,
-        y.ptr(),
-        y.stride(0)
-    ));
-}
-
-void CUDA_BLAS::gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, TensorView<f32, 2, Location::Device>& C, Trans trans_a, Trans trans_b) {
-    i64 m = (trans_a == BLAS::Trans::No) ? A.shape(0) : A.shape(1);
-    i64 n = (trans_b == BLAS::Trans::No) ? B.shape(1) : B.shape(0);
-    i64 k = (trans_a == BLAS::Trans::No) ? A.shape(1) : A.shape(0);
-
-    CHECK_CUBLAS(cublasSgemm_64(
-        CtxManager::getInstance().cublas(),
-        cublas_trans(trans_a),
-        cublas_trans(trans_b),
-        m,
-        n,
-        k,
-        &alpha,
-        A.ptr(),
-        A.stride(1),
-        B.ptr(),
-        B.stride(1),
-        &beta,
-        C.ptr(),
-        C.stride(1)
-    ));
-}
-
-class CUDA_LU final : public LU {
-    public:
-        CUDA_LU(std::unique_ptr<Memory> memory);
-        ~CUDA_LU() = default;
-
-        void init(const TensorView<f32, 2, Location::Device>& A) override;
-        void factorize(const TensorView<f32, 2, Location::Device>& A) override;
-        void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) override;
-    private:
-        Tensor<i32, 1, Location::Device> ipiv{*m_memory};
-        Tensor<f32, 1, Location::Device> buffer{*m_memory};
-        Tensor<i32, 1, Location::Device> info_d{*m_memory}; // single value
-        Tensor<i32, 1, Location::Host> info_h{*m_memory}; // single value
-};
-
-CUDA_LU::CUDA_LU(std::unique_ptr<Memory> memory) : LU(std::move(memory)) {}
-
-void CUDA_LU::init(const TensorView<f32, 2, Location::Device>& A) {
-    int bufsize = 0;
-    CHECK_CUSOLVER(cusolverDnSgetrf_bufferSize(CtxManager::getInstance().cusolver(), A.shape(0), A.shape(1), A.ptr(), A.stride(1), &bufsize));
-    info_d.init({1});
-    info_h.init({1});
-    buffer.init({bufsize});
-    ipiv.init({std::min(A.shape(0), A.shape(1))});
-}
-
-void CUDA_LU::factorize(const TensorView<f32, 2, Location::Device>& A) {
-    CHECK_CUSOLVER(cusolverDnSgetrf(
-        CtxManager::getInstance().cusolver(),
-        A.shape(0),
-        A.shape(1),
-        A.ptr(),
-        A.stride(1),
-        buffer.ptr(),
-        ipiv.ptr(),
-        info_d.ptr()
-    ));
-    info_d.view().to(info_h.view());
-
-    if (info_h[0] != 0) std::printf("Error: LU factorization failed\n"); // todo: stderr ?
-}
-
-void CUDA_LU::solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) {
-    CHECK_CUSOLVER(cusolverDnSgetrs(
-        CtxManager::getInstance().cusolver(),
-        CUBLAS_OP_N,
-        A.shape(1),
-        x.shape(1),
-        A.ptr(),
-        A.stride(1),
-        ipiv.ptr(),
-        x.ptr(),
-        x.stride(1),
-        info_d.ptr()
-    ));
-    info_d.view().to(info_h.view());
-    if (info_h[0] != 0) std::printf("Error: LU solve failed\n"); // todo: stderr ?
-}
-
 BackendCUDA::BackendCUDA() : Backend(std::make_unique<CUDA_Memory>())  {
     print_cuda_info();
     CtxManager::getInstance().create();
@@ -294,9 +175,6 @@ BackendCUDA::~BackendCUDA() {
 
 std::unique_ptr<Memory> BackendCUDA::create_memory_manager() { return std::make_unique<CUDA_Memory>(); }
 // std::unique_ptr<Kernels> create_kernels() { return std::make_unique<CPU_Kernels>(); }
-std::unique_ptr<LU> BackendCUDA::create_lu_solver() { return std::make_unique<CUDA_LU>(create_memory_manager()); }
-std::unique_ptr<BLAS> BackendCUDA::create_blas() { return std::make_unique<CUDA_BLAS>(); }
-
 
 void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) {
     assert(gamma_delta.layout.dims() == 1);
