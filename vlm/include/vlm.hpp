@@ -14,7 +14,7 @@ class Simulation {
     public:
         std::unique_ptr<Backend> backend;
         // std::unique_ptr<Backend> backend_cpu; // TEMPORARY
-        u32 nb_meshes;
+        i32 nb_meshes;
         // Common geometry buffers
         Mesh mesh{*backend->memory};
         // Dimensions of the buffers
@@ -36,17 +36,20 @@ class VLM final: public Simulation {
         ~VLM() = default;
         AeroCoefficients run(const FlowData& flow);
 
-        std::vector<u32> condition0;
+        std::vector<i32> condition0; // TODO: remove
         
         // Pulic for output purposes (eg dump gamma to file)
-        Buffer<f32, Location::Device, Matrix<MatrixLayout::ColMajor>> lhs{*backend->memory}; // (ns*nc)^2
-        Buffer<f32, Location::Device, MultiSurface> rhs{*backend->memory}; // ns*nc
+        Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
+        Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
         Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> local_velocities{*backend->memory}; // ns*nc*3
-        Buffer<f32, Location::HostDevice, Tensor<3>> transforms{*backend->memory};
+        Buffer<f32, Location::HostDevice, MultiSurface> local_velocities{*backend->memory}; // ns*nc*3
+        Tensor2D<Location::Host> wake_transform{*backend->memory};
+        Tensor3D<Location::Device> transforms{*backend->memory};
+
+        std::unique_ptr<LU> solver;
     private:
         void alloc_buffers();
 };
@@ -55,26 +58,28 @@ class NLVLM final: public Simulation {
     public:
 
         static constexpr f64 DEFAULT_TOL = 1e-5;
-        static constexpr u64 DEFAULT_MAX_ITER = 100;
+        static constexpr i64 DEFAULT_MAX_ITER = 100;
 
         NLVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~NLVLM() = default;
         AeroCoefficients run(const FlowData& flow, const Database& db);
 
-        const u64 max_iter = DEFAULT_MAX_ITER;
+        const i64 max_iter = DEFAULT_MAX_ITER;
         const f64 tol = DEFAULT_TOL;
-        std::vector<u32> condition0;
+        std::vector<i32> condition0;
 
-        Buffer<f32, Location::Device, Matrix<MatrixLayout::ColMajor>> lhs; // (ns*nc)^2
-        Buffer<f32, Location::Device, MultiSurface> rhs; // ns*nc
+        Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
+        Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
         Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wake; // nw*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta; // nc*ns
         Buffer<f32, Location::HostDevice, MultiSurface> local_velocities; // ns*nc*3
         Buffer<f32, Location::Host, MultiSurface> strip_alphas; // ns
-        Buffer<f32, Location::HostDevice, Tensor<3>> transforms;
+        Tensor2D<Location::Host> wake_transform{*backend->memory};
+        Tensor3D<Location::Device> transforms{*backend->memory};
 
+        std::unique_ptr<LU> solver;
     private:
         void alloc_buffers();
 };
@@ -90,18 +95,21 @@ class UVLM final: public Simulation {
         Buffer<f32, Location::Host, MultiSurface> colloc_pos{*backend->memory}; // (nc)*(ns)*3
 
         // Data
-        Buffer<f32, Location::Device, Matrix<MatrixLayout::ColMajor>> lhs{*backend->memory}; // (ns*nc)^2
-        Buffer<f32, Location::Device, MultiSurface> rhs{*backend->memory}; // ns*nc
+        Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
+        Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
         Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
         Buffer<f32, Location::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
-        Buffer<f32, Location::HostDevice, Tensor<3>> transforms{*backend->memory}; // 4*4*nb_meshes
+        Tensor3D<Location::Host> transforms_h{*backend->memory};
+        Tensor3D<Location::Device> transforms{*backend->memory};
         
+        std::unique_ptr<LU> solver;
+
         std::vector<f32> vec_t; // timesteps
         std::vector<f32> local_dt; // per mesh dt (pre reduction)
-        std::vector<u32> condition0;
+        std::vector<i32> condition0;
 
     private:
         void alloc_buffers();

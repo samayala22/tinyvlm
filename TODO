@@ -3,7 +3,7 @@
 - Get rid of exceptions
 - All backend functions should return a tf::Task so that we can build a single taskflow graph -> most probably cancelled for now
 - Retire Mesh object as it is simply not generic enough, all geometry data is simulation specific
-- Replace unsigned ints with signed ints
-
+- Take care of the narrowing conversions and uint <-> int comparisons
 // store kinematics in the backend ??
 // store flow properties in the backend ??
+// Should Memory be a singleton class ?

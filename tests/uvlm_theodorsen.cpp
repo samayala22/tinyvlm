@@ -31,17 +31,17 @@ void dump_buffer(std::ofstream& stream, T* start, T* end) {
 }
 
 template<typename T>
-void print_buffer(const T* start, u64 size) {
+void print_buffer(const T* start, i64 size) {
     std::cout << "[";
-    for (u64 i = 0; i < size; i++) {
+    for (i64 i = 0; i < size; i++) {
         std::cout << start[i] << ",";
     }
     std::cout << "]\n";
 }
 
 int main() {
-    const u64 ni = 20;
-    const u64 nj = 5;
+    const i64 ni = 20;
+    const i64 nj = 5;
     // vlm::Executor::instance(1);
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
     const std::vector<std::string> backends = get_available_backends();

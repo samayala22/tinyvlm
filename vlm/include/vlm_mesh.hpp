@@ -40,16 +40,16 @@ class Mesh {
         area.alloc(MultiSurface{wing_panels, 1});
 
         // Sete last row to 1 for homogeneous coordinatesverts_wing_init.h_view().layout
-        verts_wing_init.memory.fill(Location::Host, verts_wing_init.h_view().ptr + verts_wing_init.h_view().layout(0,3), 1.f, verts_wing_init.h_view().layout.stride());
+        verts_wing_init.memory.fill(Location::Host, verts_wing_init.h_view().ptr + verts_wing_init.h_view().layout(0,3), 1, 1.f, verts_wing_init.h_view().layout.stride());
     }
 
     void alloc_wake(const std::vector<SurfaceDims>& wake_vertices) {
         verts_wake.alloc(MultiSurface{wake_vertices, 4});
-        verts_wake.memory.fill(Location::Device, verts_wake.d_view().ptr + verts_wake.d_view().layout(0,3), 1.f,  verts_wake.d_view().layout.stride());
+        verts_wake.memory.fill(Location::Device, verts_wake.d_view().ptr + verts_wake.d_view().layout(0,3), 1, 1.f,  verts_wake.d_view().layout.stride());
     }
 };
 
-using SurfDims = std::pair<u64, u64>; // nc, ns
+using SurfDims = std::pair<i64, i64>; // nc, ns
 
 class MeshFile {
 public:

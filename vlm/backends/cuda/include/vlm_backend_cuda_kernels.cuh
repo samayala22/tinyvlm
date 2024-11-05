@@ -11,20 +11,20 @@ namespace cg = cooperative_groups;
 constexpr f32 RCUT = 1e-10f;
 constexpr f32 RCUT2 = 1e-5f;
 
-template<typename T = u32>
+template<typename T = i32>
 struct Dim3 {
     T x, y, z;
     __host__ __device__ constexpr Dim3(T x_, T y_= 1, T z_= 1) : x(x_), y(y_), z(z_) {}
     __host__ __device__ __inline__ constexpr T size() const {return x * y * z;}
-    __host__ __device__ __inline__ dim3 operator()() const { return dim3(static_cast<u32>(x), static_cast<u32>(y), static_cast<u32>(z)); }
+    __host__ __device__ __inline__ dim3 operator()() const { return dim3(static_cast<i32>(x), static_cast<i32>(y), static_cast<i32>(z)); }
 };
 
 template<typename T>
-constexpr Dim3<u32> grid_size(const Dim3<u32>& block, const Dim3<T>& size) {
+constexpr Dim3<i32> grid_size(const Dim3<i32>& block, const Dim3<T>& size) {
     return Dim3{
-        static_cast<u32>((size.x + block.x - 1) / block.x),
-        static_cast<u32>((size.y + block.y - 1) / block.y),
-        static_cast<u32>((size.z + block.z - 1) / block.z)
+        static_cast<i32>((size.x + block.x - 1) / block.x),
+        static_cast<i32>((size.y + block.y - 1) / block.y),
+        static_cast<i32>((size.z + block.z - 1) / block.z)
     };
 }
 
@@ -32,7 +32,7 @@ template<typename T>
 __inline__ __device__ T warp_reduce_sum(T val) {
     cg::coalesced_group active = cg::coalesced_threads();
     #pragma unroll
-    for (u32 offset = active.size() / 2; offset > 0; offset /= 2) {
+    for (i32 offset = active.size() / 2; offset > 0; offset /= 2) {
         val += active.shfl_down(val, offset);
     }
     return val;
@@ -41,8 +41,8 @@ __inline__ __device__ T warp_reduce_sum(T val) {
 template<typename T>
 __inline__ __device__ T block_reduce_sum(T val) {
     static __shared__ T shared[32]; // Shared mem for 32 partial sums
-    u32 lane = threadIdx.x % warpSize;
-    u32 wid = threadIdx.x / warpSize;
+    i32 lane = threadIdx.x % warpSize;
+    i32 wid = threadIdx.x / warpSize;
 
     cg::thread_block block = cg::this_thread_block();
     cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
@@ -62,12 +62,12 @@ __inline__ __device__ T block_reduce_sum(T val) {
 }
 
 template<typename T>
-__global__ void kernel_reduce(u64 N, T* buf, T* val) {
+__global__ void kernel_reduce(i64 N, T* buf, T* val) {
     T sum = 0;
-    u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
+    i64 tid = blockIdx.x * blockDim.x + threadIdx.x;
     
     // Grid-stride loop
-    for (u32 i = tid; i < N; i += blockDim.x * gridDim.x) {
+    for (i32 i = tid; i < N; i += blockDim.x * gridDim.x) {
         sum += buf[i];
     }
     
@@ -79,11 +79,11 @@ __global__ void kernel_reduce(u64 N, T* buf, T* val) {
 }
 
 template<typename T>
-__global__ void kernel_fill(T* buffer, T value, size_t n) {
-    const u64 tid = cg::this_grid().thread_rank();
+__global__ void kernel_fill(T* buffer, i64 stride, T value, i64 n) {
+    const i64 tid = cg::this_grid().thread_rank();
     
     if (tid >= n) return;
-    buffer[tid] = value;
+    buffer[tid * stride] = value;
 }
 
 __inline__ __device__ float3 kernel_biosavart(float3 colloc, const float3 vertex1, const float3 vertex2, const float sigma) {
@@ -126,11 +126,11 @@ __inline__ __device__ void kernel_symmetry(float3* inf, float3 colloc, const flo
 
 
 /// @param v ptr to a upper left vertex of a panel that is along the chord root
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_influence(u64 m, u64 n, f32* lhs, f32* collocs, u64 collocs_ld, f32* v, u64 v_ld, u64 v_n, f32* normals, u64 normals_ld, f32 sigma) {
+template<i32 X, i32 Y = 1, i32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_influence(i64 m, i64 n, f32* lhs, f32* collocs, i64 collocs_ld, f32* v, i64 v_ld, i64 v_n, f32* normals, i64 normals_ld, f32 sigma) {
     assert(n % (v_n-1) == 0); // kernel runs on a span wise section of the surface
-    const u64 j = blockIdx.y * blockDim.y + threadIdx.y;
-    const u64 i = blockIdx.x * blockDim.x + threadIdx.x;
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y;
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (j >= n || i >= m) return;
 
@@ -156,10 +156,10 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_influence(u64 m, u64 n, f32* lhs
 
     float3 inf{0.0f, 0.0f, 0.0f};
     {
-        const u64 v0 = j + j / (v_n-1);
-        const u64 v1 = v0 + 1;
-        const u64 v3 = v0 + v_n;
-        const u64 v2 = v3 + 1;
+        const i64 v0 = j + j / (v_n-1);
+        const i64 v1 = v0 + 1;
+        const i64 v3 = v0 + v_n;
+        const i64 v2 = v3 + 1;
         
         // Tried to put them in shared memory but got worse L1 hit rate. 
         const float3 vertex0{v[0*v_ld + v0], v[1*v_ld + v0], v[2*v_ld + v0]};
@@ -181,19 +181,19 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_influence(u64 m, u64 n, f32* lhs
     }
 }
 
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_gamma_delta(u64 m, u64 n, f32* gamma_wing_delta, const f32* gamma_wing) {
-    const u64 i = blockIdx.x * blockDim.x + threadIdx.x;
-    const u64 j = blockIdx.y * blockDim.y + threadIdx.y;
+template<i32 X, i32 Y = 1, i32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_gamma_delta(i64 m, i64 n, f32* gamma_wing_delta, const f32* gamma_wing) {
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x;
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (j >= n || i >= m) return;
 
     gamma_wing_delta[i * n + j] = gamma_wing[i * n + j] - gamma_wing[(i-1) * n + j];
 }
 
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_rhs_assemble_velocities(u64 n, f32* rhs, const f32* velocities, u64 velocities_ld, const f32* normals, u64 normals_ld) {
-    const u64 i = blockIdx.x * blockDim.x + threadIdx.x;
+template<i32 X, i32 Y = 1, i32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_rhs_assemble_velocities(i64 n, f32* rhs, const f32* velocities, i64 velocities_ld, const f32* normals, i64 normals_ld) {
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (i >= n) return;
 
@@ -204,18 +204,18 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_rhs_assemble_velocities(u64 n, f
     );
 }
 
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_mesh_metrics(u64 m, u64 n, f32* colloc, u64 colloc_ld, f32* normals, u64 normals_ld, f32* areas, const f32* verts_wing, u64 verts_wing_ld, f32 alpha_rad) {
-    const u64 j = blockIdx.x * blockDim.x + threadIdx.x;
-    const u64 i = blockIdx.y * blockDim.y + threadIdx.y;
+template<i32 X, i32 Y = 1, i32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_mesh_metrics(i64 m, i64 n, f32* colloc, i64 colloc_ld, f32* normals, i64 normals_ld, f32* areas, const f32* verts_wing, i64 verts_wing_ld, f32 alpha_rad) {
+    const i64 j = blockIdx.x * blockDim.x + threadIdx.x;
+    const i64 i = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (j >= n || i >= m) return;
 
-    const u64 lidx =  i * n + j;
-    const u64 v0 = (i+0) * (n+1) + j;
-    const u64 v1 = (i+0) * (n+1) + j + 1;
-    const u64 v2 = (i+1) * (n+1) + j + 1;
-    const u64 v3 = (i+1) * (n+1) + j;
+    const i64 lidx =  i * n + j;
+    const i64 v0 = (i+0) * (n+1) + j;
+    const i64 v1 = (i+0) * (n+1) + j + 1;
+    const i64 v2 = (i+1) * (n+1) + j + 1;
+    const i64 v3 = (i+1) * (n+1) + j;
 
     const float3 vertex0{verts_wing[0*verts_wing_ld + v0], verts_wing[1*verts_wing_ld + v0], verts_wing[2*verts_wing_ld + v0]}; // upper left
     const float3 vertex1{verts_wing[0*verts_wing_ld + v1], verts_wing[1*verts_wing_ld + v1], verts_wing[2*verts_wing_ld + v1]}; // upper right
@@ -247,16 +247,16 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_mesh_metrics(u64 m, u64 n, f32* 
     colloc[2*colloc_ld + lidx] = colloc_pt.z;
 }
 
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cl_single(u64 m, u64 n, const f32* verts_wing, u64 verts_wing_surface_ld, u64 verts_wing_ld, const f32* gamma_delta, u64 gamma_delta_surface_ld, float3 freestream, float3 lift_axis, f32 rho, f32* cl) {
+template<i32 X, i32 Y = 1, i32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cl_single(i64 m, i64 n, const f32* verts_wing, i64 verts_wing_surface_ld, i64 verts_wing_ld, const f32* gamma_delta, i64 gamma_delta_surface_ld, float3 freestream, float3 lift_axis, f32 rho, f32* cl) {
     static_assert(X == 32);
 
     cg::thread_block block = cg::this_thread_block();
 
-    const u64 j = blockIdx.x * blockDim.x + threadIdx.x;
-    const u64 i = blockIdx.y * blockDim.y + threadIdx.y;
-    const u32 wid = block.thread_rank() / warpSize;
-    const u32 lane = block.thread_rank() % warpSize;
+    const i64 j = blockIdx.x * blockDim.x + threadIdx.x;
+    const i64 i = blockIdx.y * blockDim.y + threadIdx.y;
+    const i32 wid = block.thread_rank() / warpSize;
+    const i32 lane = block.thread_rank() % warpSize;
 
     __shared__ f32 shared[32];
 
@@ -265,8 +265,8 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cl_single(u64 m, u6
 
     if (j >= n || i >= m) return;
 
-    const u64 v0 = (i+0) * verts_wing_surface_ld + j;
-    const u64 v1 = (i+0) * verts_wing_surface_ld + j + 1;
+    const i64 v0 = (i+0) * verts_wing_surface_ld + j;
+    const i64 v1 = (i+0) * verts_wing_surface_ld + j + 1;
     const float3 vertex0{verts_wing[0*verts_wing_ld + v0], verts_wing[1*verts_wing_ld + v0], verts_wing[2*verts_wing_ld + v0]}; // upper left
     const float3 vertex1{verts_wing[0*verts_wing_ld + v1], verts_wing[1*verts_wing_ld + v1], verts_wing[2*verts_wing_ld + v1]}; // upper right
     // Leading edge vector pointing outward from wing root
@@ -287,14 +287,14 @@ inline __device__ float3 quad_normal(const float3 v0, const float3 v1, const flo
     return normalize(cross(v3-v1, v2-v0));
 }
 
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* verts_wake, u64 verts_wake_ld, u64 verts_wake_m, u64 verts_wake_n, float* gamma_wake, f32 sigma, f32* cd) {
+template<i32 X, i32 Y = 1, i32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* verts_wake, i64 verts_wake_ld, i64 verts_wake_m, i64 verts_wake_n, float* gamma_wake, f32 sigma, f32* cd) {
     cg::thread_block block = cg::this_thread_block();
 
-    const u64 i = blockIdx.x * blockDim.x + threadIdx.x; // jj
-    const u64 j = blockIdx.y * blockDim.y + threadIdx.y; // j
-    const u32 wid = block.thread_rank() / warpSize;
-    const u32 lane = block.thread_rank() % warpSize;
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // jj
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y; // j
+    const i32 wid = block.thread_rank() / warpSize;
+    const i32 lane = block.thread_rank() % warpSize;
 
     __shared__ f32 shared[32];
     if (wid == 0) shared[lane] = 0.0f;
@@ -302,12 +302,12 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* vert
  
     if (i >= verts_wake_n - 1 || j >= verts_wake_n - 1) return;
     
-    const u64 vi = verts_wake_m - 2;
+    const i64 vi = verts_wake_m - 2;
 
-    const u64 v0 = (vi+0) * (verts_wake_n) + j;
-    const u64 v1 = (vi+0) * (verts_wake_n) + j + 1;
-    const u64 v2 = (vi+1) * (verts_wake_n) + j + 1;
-    const u64 v3 = (vi+1) * (verts_wake_n) + j;
+    const i64 v0 = (vi+0) * (verts_wake_n) + j;
+    const i64 v1 = (vi+0) * (verts_wake_n) + j + 1;
+    const i64 v2 = (vi+1) * (verts_wake_n) + j + 1;
+    const i64 v3 = (vi+1) * (verts_wake_n) + j;
 
     const float3 vertex0 = {verts_wake[0*verts_wake_ld + v0], verts_wake[1*verts_wake_ld + v0], verts_wake[2*verts_wake_ld + v0]};
     const float3 vertex1 = {verts_wake[0*verts_wake_ld + v1], verts_wake[1*verts_wake_ld + v1], verts_wake[2*verts_wake_ld + v1]};
@@ -317,10 +317,10 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* vert
     const float3 colloc = 0.25f * (vertex0 + vertex1 + vertex2 + vertex3); // 3*(3 add + 1 mul)
     const float3 normal = quad_normal(vertex0, vertex1, vertex2, vertex3);
 
-    const u64 vv0 = (vi+0) * (verts_wake_n) + i;
-    const u64 vv1 = (vi+0) * (verts_wake_n) + i + 1;
-    const u64 vv2 = (vi+1) * (verts_wake_n) + i + 1;
-    const u64 vv3 = (vi+1) * (verts_wake_n) + i;
+    const i64 vv0 = (vi+0) * (verts_wake_n) + i;
+    const i64 vv1 = (vi+0) * (verts_wake_n) + i + 1;
+    const i64 vv2 = (vi+1) * (verts_wake_n) + i + 1;
+    const i64 vv3 = (vi+1) * (verts_wake_n) + i;
 
     const float3 vvertex0 = {verts_wake[0*verts_wake_ld + vv0], verts_wake[1*verts_wake_ld + vv0], verts_wake[2*verts_wake_ld + vv0]};
     const float3 vvertex1 = {verts_wake[0*verts_wake_ld + vv1], verts_wake[1*verts_wake_ld + vv1], verts_wake[2*verts_wake_ld + vv1]};
@@ -343,21 +343,21 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cd_single(f32* vert
     // if (block.thread_rank() == 0) atomicAdd(cd, cd_local);
 }
 
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(u64 wake_m, u64 wake_n, u64 wing_mn, const f32* colloc, const u64 colloc_ld, const f32* normals, const u64 normals_ld, const f32* verts_wake, const u64 verts_wake_ld, const f32* gamma_wake, f32* rhs, f32 sigma) {
+template<i32 X, i32 Y = 1, i32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(i64 wake_m, i64 wake_n, i64 wing_mn, const f32* colloc, const i64 colloc_ld, const f32* normals, const i64 normals_ld, const f32* verts_wake, const i64 verts_wake_ld, const f32* gamma_wake, f32* rhs, f32 sigma) {
     static_assert(X == 32);
     const cg::thread_block block = cg::this_thread_block();
-    const u64 i = blockIdx.x * blockDim.x + threadIdx.x; // wake_verts
-    const u64 j = blockIdx.y * blockDim.y + threadIdx.y; // colloc
-    const u32 wid = block.thread_rank() / warpSize;
-    const u32 lane = block.thread_rank() % warpSize;
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // wake_verts
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y; // colloc
+    const i32 wid = block.thread_rank() / warpSize;
+    const i32 lane = block.thread_rank() % warpSize;
     
     float induced_vel = 0.0f;
     if (i < wake_m * wake_n || j < wing_mn) {
-        const u64 v0 = i + i / wake_n;
-        const u64 v1 = v0 + 1;
-        const u64 v3 = v0 + wake_n+1;
-        const u64 v2 = v3 + 1;
+        const i64 v0 = i + i / wake_n;
+        const i64 v1 = v0 + 1;
+        const i64 v3 = v0 + wake_n+1;
+        const i64 v2 = v3 + 1;
 
         const float3 colloc_influenced = {colloc[0*colloc_ld + j], colloc[1*colloc_ld + j], colloc[2*colloc_ld + j]};
         const float3 normal = {normals[0*normals_ld + j], normals[1*normals_ld + j], normals[2*normals_ld + j]};
@@ -385,13 +385,13 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(u64 wake_m, u64 w
     }
 }
 
-template<u32 X, u32 Y = 1, u32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_unsteady_cl_single(u64 m, u64 n, u64 ld, const f32* verts_wing, u64 verts_wing_ld, const f32* gamma_wing_delta, const f32* gamma_wing, const f32* gamma_wing_prev, const f32* velocities, u64 velocities_ld, const f32* areas, const f32* normals, u64 normals_ld, float3 freestream, f32 dt, f32* cl) {
+template<i32 X, i32 Y = 1, i32 Z = 1>
+__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_unsteady_cl_single(i64 m, i64 n, i64 ld, const f32* verts_wing, i64 verts_wing_ld, const f32* gamma_wing_delta, const f32* gamma_wing, const f32* gamma_wing_prev, const f32* velocities, i64 velocities_ld, const f32* areas, const f32* normals, i64 normals_ld, float3 freestream, f32 dt, f32* cl) {
     const cg::thread_block block = cg::this_thread_block();
-    const u64 j = blockIdx.x * blockDim.x + threadIdx.x; // wake_verts
-    const u64 i = blockIdx.y * blockDim.y + threadIdx.y; // colloc
-    const u32 wid = block.thread_rank() / warpSize;
-    const u32 lane = block.thread_rank() % warpSize;
+    const i64 j = blockIdx.x * blockDim.x + threadIdx.x; // wake_verts
+    const i64 i = blockIdx.y * blockDim.y + threadIdx.y; // colloc
+    const i32 wid = block.thread_rank() / warpSize;
+    const i32 lane = block.thread_rank() % warpSize;
 
     if (i >= m|| j >= n) return;
     
@@ -399,12 +399,12 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_coeff_unsteady_cl_single(u64 m, 
     const float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
     const float3 lift_axis = normalize(cross(freestream, span_axis));
 
-    const u64 lidx = i * ld + j;
+    const i64 lidx = i * ld + j;
 
     const float3 vel{velocities[0*velocities_ld + lidx], velocities[1*velocities_ld + lidx], velocities[2*velocities_ld + lidx]};
 
-    const u64 v0 = (i+0) * (ld + 1) + j;
-    const u64 v1 = (i+0) * (ld + 1) + j + 1;
+    const i64 v0 = (i+0) * (ld + 1) + j;
+    const i64 v1 = (i+0) * (ld + 1) + j + 1;
 
     const float3 vertex0{verts_wing[0*verts_wing_ld + v0], verts_wing[1*verts_wing_ld + v0], verts_wing[2*verts_wing_ld + v0]}; // upper left
     const float3 vertex1{verts_wing[0*verts_wing_ld + v1], verts_wing[1*verts_wing_ld + v1], verts_wing[2*verts_wing_ld + v1]}; // upper right

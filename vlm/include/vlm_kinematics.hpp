@@ -26,10 +26,10 @@ class Kinematics {
         m_joints.push_back(std::move(joint));
     }
 
-    tmatrix displacement(float t, u64 n) const {
+    tmatrix displacement(float t, i64 n) const {
         fwd::Float t_dual{t, 1.f};
         tmatrix result = linalg::identity;
-        for (u64 i = 0; i < n; i++) {
+        for (i64 i = 0; i < n; i++) {
             result = linalg::mul(result, m_joints[i](t_dual));
         }
         return result;

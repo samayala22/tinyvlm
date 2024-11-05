@@ -16,6 +16,7 @@ class Backend {
     public:
         const std::unique_ptr<Memory> memory;
 
+        // TODO: remove these
         i32* d_solver_info = nullptr;
         i32* d_solver_ipiv = nullptr;
         f32* d_solver_buffer = nullptr;
@@ -28,20 +29,17 @@ class Backend {
         virtual ~Backend();
 
         // Kernels that run for all the meshes
-        virtual void lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) = 0;
-        virtual void rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) = 0;
-        virtual void rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) = 0;
-        virtual void displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) = 0;
-        virtual void displace_wing(const View<f32, Tensor<3>>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) = 0;
-        virtual void wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, u32 iteration) = 0;
+        virtual void lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<i32>& condition, i32 iteration) = 0;
+        virtual void rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) = 0;
+        virtual void rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, i32 iteration) = 0;
+        virtual void displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, i32 iteration) = 0;
+        virtual void displace_wing(const TensorView<f32, 3, Location::Device>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) = 0;
+        virtual void wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, i32 iteration) = 0;
 
-        virtual void gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) = 0;
+        virtual void gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, i32 iteration) = 0;
         virtual void gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) = 0;
-        virtual void lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) = 0;
-        virtual void lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) = 0;
-        virtual void lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) = 0;
         
-        // Per mesh kernels 
+        // Per mesh kernels
         virtual f32 coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const FlowData& flow, f32 area) = 0;
         virtual f32 coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow, const View<f32, MultiSurface>& areas) = 0;
         virtual f32 coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) = 0;
@@ -54,6 +52,11 @@ class Backend {
         virtual void mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) = 0;
         virtual f32 mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) = 0;
         virtual f32 mesh_area(const View<f32, SingleSurface>& areas) = 0;
+
+        virtual std::unique_ptr<Memory> create_memory_manager() = 0;
+        // virtual std::unique_ptr<Kernels> create_kernels() = 0;
+        virtual std::unique_ptr<LU> create_lu_solver() = 0;
+        virtual std::unique_ptr<BLAS> create_blas() = 0;
 };
 
 class BLAS {
@@ -62,20 +65,24 @@ class BLAS {
         BLAS() = default;
         virtual ~BLAS() = default;
 
-        virtual void gemv(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x, const f32 beta, View<f32, Tensor<1>>& y, Trans trans = Trans::No) = 0;
-        virtual void gemm(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<2>>& B, const f32 beta, View<f32, Tensor<2>>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
-        virtual void axpy(const f32 alpha, const View<f32, Tensor<1>>& x, View<f32, Tensor<1>>& y) = 0;
-        virtual void axpy(const f32 alpha, const View<f32, Tensor<2>>& x, View<f32, Tensor<2>>& y) = 0;
-        virtual void xypz(const f32 alpha, const View<f32, Tensor<1>>& x, const View<f32, Tensor<1>>& y, const f32 beta, View<f32, Tensor<1>>& z) = 0;
+        virtual void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) = 0;
+        virtual void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
+        // virtual void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, TensorView<f32, 1, Location::Device>& y) = 0;
+        // virtual void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, TensorView<f32, 2, Location::Device>& y) = 0;
+        // virtual void xypz(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y, const f32 beta, TensorView<f32, 1, Location::Device>& z) = 0;
 };
 
-class LUSolver {
+class LU {
     public:
-        LUSolver() = default;
-        virtual ~LUSolver() = default;
+        LU(std::unique_ptr<Memory> memory) : m_memory(std::move(memory)) {}
+        virtual ~LU() = default;
+        
+        virtual void init(const TensorView<f32, 2, Location::Device>& A) = 0;
+        virtual void factorize(const TensorView<f32, 2, Location::Device>& A) = 0;
+        virtual void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) = 0;
 
-        virtual void factorize(const View<f32, Tensor<2>>& A) = 0;
-        virtual void solve(const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x) = 0;
+    protected:
+        std::unique_ptr<Memory> m_memory;
 };
 
 std::unique_ptr<Backend> create_backend(const std::string& backend_name);

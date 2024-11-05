@@ -18,10 +18,10 @@ void mesh_quarterchord(View<f32, SingleSurface>& vertices) {
     f32* vz = vertices.ptr + 2 * vertices.layout.stride();
 
 
-    for (u64 i = 0; i < vertices.layout.nc() - 1; i++) {
-        for (u64 j = 0; j < vertices.layout.ns(); j++) {
-            const u64 v0 = (i+0) * vertices.layout.ns() + j;
-            const u64 v3 = (i+1) * vertices.layout.ns() + j;
+    for (i64 i = 0; i < vertices.layout.nc() - 1; i++) {
+        for (i64 j = 0; j < vertices.layout.ns(); j++) {
+            const i64 v0 = (i+0) * vertices.layout.ns() + j;
+            const i64 v3 = (i+1) * vertices.layout.ns() + j;
 
             vx[v0] = 0.75f * vx[v0] + 0.25f * vx[v3];
             vy[v0] = 0.75f * vy[v0] + 0.25f * vy[v3];
@@ -30,10 +30,10 @@ void mesh_quarterchord(View<f32, SingleSurface>& vertices) {
     }
 
     // Trailing edge vertices
-    const u64 i = vertices.layout.nc() - 2;
-    for (u64 j = 0; j < vertices.layout.ns(); j++) {
-        const u64 v0 = (i+0) * vertices.layout.ns() + j;
-        const u64 v3 = (i+1) * vertices.layout.ns() + j;
+    const i64 i = vertices.layout.nc() - 2;
+    for (i64 j = 0; j < vertices.layout.ns(); j++) {
+        const i64 v0 = (i+0) * vertices.layout.ns() + j;
+        const i64 v3 = (i+1) * vertices.layout.ns() + j;
         
         vx[v3] = (4.f/3.f) * vx[v3] - (1.f/3.f) * vx[v0];
         vy[v3] = (4.f/3.f) * vy[v3] - (1.f/3.f) * vy[v0];
@@ -44,7 +44,7 @@ void mesh_quarterchord(View<f32, SingleSurface>& vertices) {
 class Plot3DFile : public MeshFile {
 public:
     SurfDims get_dims(std::ifstream& f) const override {
-        u64 ni, nj, nk, blocks;
+        i64 ni, nj, nk, blocks;
         f >> blocks;
         if (blocks != 1) {
             throw std::runtime_error("Only single block plot3d mesh is supported");
@@ -57,7 +57,7 @@ public:
     }
 
     void read(std::ifstream& f, View<f32, SingleSurface>& vertices) const override {
-        u64 ni, nj, nk, blocks;
+        i64 ni, nj, nk, blocks;
         f32 x, y, z;
         f >> blocks;
         f >> ni >> nj >> nk;
@@ -65,20 +65,20 @@ public:
         assert(vertices.layout.nc() == ni);
         assert(vertices.layout.dim() == 4);
         
-        for (u64 j = 0; j < nj; j++) {
-            for (u64 i = 0; i < ni; i++) {
+        for (i64 j = 0; j < nj; j++) {
+            for (i64 i = 0; i < ni; i++) {
                 f >> x;
                 vertices[vertices.layout.stride() * 0 + nj*i + j] = x;
             }
         }
-        for (u64 j = 0; j < nj; j++) {
-            for (u64 i = 0; i < ni; i++) {
+        for (i64 j = 0; j < nj; j++) {
+            for (i64 i = 0; i < ni; i++) {
                 f >> y;
                 vertices[vertices.layout.stride() * 1 + nj*i + j] = y;
             }
         }
-        for (u64 j = 0; j < nj; j++) {
-            for (u64 i = 0; i < ni; i++) {
+        for (i64 j = 0; j < nj; j++) {
+            for (i64 i = 0; i < ni; i++) {
                 f >> z;
                 vertices[vertices.layout.stride() * 2 + nj*i + j] = z;
             }
@@ -91,7 +91,7 @@ public:
         //     throw std::runtime_error("First vertex of plot3d mesh must be at origin");
         // }
         const f32 first_y = vertices[vertices.layout.stride() * 1 + 0];
-        for (u64 i = 1; i < ni; i++) {
+        for (i64 i = 1; i < ni; i++) {
             if ( vertices[vertices.layout.stride() * 1 + i*nj] != first_y) {
                 throw std::runtime_error("Mesh vertices should be ordered in chordwise direction"); // todo get rid of throw
             }

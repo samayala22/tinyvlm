@@ -10,17 +10,14 @@ class BackendCUDA final : public Backend {
     public:
         BackendCUDA();
         ~BackendCUDA() override;
-        void lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) override;
-        void rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) override;
-        void rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) override;
-        void displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) override;
-        void displace_wing(const View<f32, Tensor<3>>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) override;
-        void wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, u32 iteration) override;
-        void gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) override;
+        void lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<i32>& condition, i32 iteration) override;
+        void rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) override;
+        void rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, i32 iteration) override;
+        void displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, i32 iteration) override;
+        void displace_wing(const TensorView<f32, 3, Location::Device>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) override;
+        void wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, i32 iteration) override;
+        void gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, i32 iteration) override;
         void gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) override;
-        void lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) override;
-        void lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) override;
-        void lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) override;
         
         // Per mesh kernels
         f32 coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const FlowData& flow, f32 area) override;
@@ -35,28 +32,11 @@ class BackendCUDA final : public Backend {
         void mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) override;
         f32 mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) override;
         f32 mesh_area(const View<f32, SingleSurface>& areas) override;
-};
 
-class BLAS_CUDA final : public BLAS {
-    public:
-        BLAS_CUDA() = default;
-        ~BLAS_CUDA() = default;
-
-        void gemv(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x, const f32 beta, View<f32, Tensor<1>>& y, Trans trans = Trans::No) override;
-        void gemm(const f32 alpha, const View<f32, Tensor<2>>& A, const View<f32, Tensor<2>>& B, const f32 beta, View<f32, Tensor<2>>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
-};
-
-class LUSolver_CUDA final : public LUSolver {
-    public:
-        LUSolver_CUDA() = default;
-        ~LUSolver_CUDA() = default;
-
-        void factorize(const View<f32, Tensor<2>>& A) = 0;
-        void solve(const View<f32, Tensor<2>>& A, const View<f32, Tensor<1>>& x) = 0;
-    private:
-        Buffer<f32, Location::Device, Tensor<1>> ipiv;
-        Buffer<f32, Location::Device, Tensor<1>> buffer;
-        f32* info = nullptr;
+        std::unique_ptr<Memory> create_memory_manager() override;
+        // std::unique_ptr<Kernels> create_kernels() override;
+        std::unique_ptr<LU> create_lu_solver() override;
+        std::unique_ptr<BLAS> create_blas() override;
 };
 
 } // namespace vlm

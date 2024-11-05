@@ -24,8 +24,8 @@ class Memory {
         virtual void* alloc(Location location, i64 size) const = 0;
         virtual void free(Location location, void* ptr) const = 0;
         virtual void copy(Location dst_loc, void* dst, i64 dst_stride, Location src_loc, const void* src, i64 src_stride, i64 elem_size, i64 size) const = 0;
-        virtual void fill(Location loc, float* ptr, float value, i64 size) const = 0;
-        virtual void fill(Location loc, double* ptr, double value, i64 size) const = 0;
+        virtual void fill(Location loc, float* ptr, i64 stride, float value, i64 size) const = 0;
+        virtual void fill(Location loc, double* ptr, i64 stride, double value, i64 size) const = 0;
 
         bool is_unified() const { return m_unified; }
     private:
@@ -134,17 +134,17 @@ private:
 };
 
 struct SurfaceDims { // ns major
-    uint64_t nc; // number of chordwise elements
-    uint64_t ns; // number of spanwise elements
-    uint64_t offset; // offset of the surface in the buffer
-    uint64_t size() const {return nc * ns;}
+    i64 nc; // number of chordwise elements
+    i64 ns; // number of spanwise elements
+    i64 offset; // offset of the surface in the buffer
+    i64 size() const {return nc * ns;}
 };
 
 class SingleSurface {
     public:
 
         SingleSurface() = default;
-        SingleSurface(uint64_t nc, uint64_t ns, uint64_t ld, uint64_t stride, uint32_t dim) {
+        SingleSurface(i64 nc, i64 ns, i64 ld, i64 stride, uint32_t dim) {
             _nc = nc;
             _ns = ns;
             _ld = ld;
@@ -154,17 +154,17 @@ class SingleSurface {
         ~SingleSurface() = default;
 
         std::size_t size() const {return _ns * _nc; } // required
-        uint64_t nc() const {return _nc; }
-        uint64_t ns() const {return _ns; }
-        uint64_t ld() const {return _ld; }
-        uint64_t stride() const {return _stride; }
-        uint64_t dim() const {return _dim; }
+        i64 nc() const {return _nc; }
+        i64 ns() const {return _ns; }
+        i64 ld() const {return _ld; }
+        i64 stride() const {return _stride; }
+        i64 dim() const {return _dim; }
 
     private:
-        uint64_t _nc = 0; // chord wise
-        uint64_t _ns = 0; // span wise
-        uint64_t _ld = 0; // distance between two consecutive rows 
-        uint64_t _stride = 0; // distance between each dimension
+        i64 _nc = 0; // chord wise
+        i64 _ns = 0; // span wise
+        i64 _ld = 0; // distance between two consecutive rows 
+        i64 _stride = 0; // distance between each dimension
         uint32_t _dim = 1;
 };
 
@@ -181,7 +181,7 @@ class MultiSurface {
             _dim = dim;
         }
 
-        uint64_t operator()(uint32_t wing_id, uint32_t dim) { // returns start of the specific wing buffer
+        i64 operator()(uint32_t wing_id, uint32_t dim) { // returns start of the specific wing buffer
             assert(wing_id < _surfaces.size());
             assert(dim < _dim);
             return _surfaces[wing_id].offset + dim * _stride;
@@ -190,12 +190,12 @@ class MultiSurface {
         std::size_t size() const {return dims() * stride(); } // required
         const std::vector<SurfaceDims>& surfaces() const {return _surfaces; }
         const SurfaceDims& surface(uint32_t wing_id) const {return _surfaces[wing_id]; }
-        uint64_t stride() const {return _stride; }
+        i64 stride() const {return _stride; }
         uint32_t dims() const {return _dim; }
 
-        uint64_t nc(uint32_t wing_id) const {return _surfaces[wing_id].nc; }
-        uint64_t ns(uint32_t wing_id) const {return _surfaces[wing_id].ns; }
-        uint64_t offset(uint32_t wing_id) const {return _surfaces[wing_id].offset; }
+        i64 nc(uint32_t wing_id) const {return _surfaces[wing_id].nc; }
+        i64 ns(uint32_t wing_id) const {return _surfaces[wing_id].ns; }
+        i64 offset(uint32_t wing_id) const {return _surfaces[wing_id].offset; }
         
         template<typename T>
         View<T, SingleSurface> subview(T* ptr, uint32_t wing_id) const {
@@ -203,7 +203,7 @@ class MultiSurface {
         }
         
         template<typename T>
-        View<T, SingleSurface> subview(T* ptr, uint32_t wing_id, uint64_t i, uint64_t m, uint64_t j, uint64_t n) const {
+        View<T, SingleSurface> subview(T* ptr, uint32_t wing_id, i64 i, i64 m, i64 j, i64 n) const {
             assert(wing_id < _surfaces.size());
             assert(i + m <= nc(wing_id));
             assert(j + n <= ns(wing_id));
@@ -216,114 +216,9 @@ class MultiSurface {
 
     private:
         std::vector<SurfaceDims> _surfaces;
-        uint64_t _stride = 0;
+        i64 _stride = 0;
         uint32_t _dim = 1;
 };
-
-enum class MatrixLayout {
-    RowMajor, ColMajor
-};
-
-template<MatrixLayout Layout>
-class Matrix {
-    public:
-        Matrix() = default;
-        Matrix(uint64_t m, uint64_t n, uint64_t stride) { construct(m, n, stride); }
-        void construct(uint64_t m, uint64_t n, uint64_t stride) {
-            _m = m;
-            _n = n;
-            _stride = stride;
-        }
-
-        std::size_t size() const {return _m * _n; }
-        uint64_t m() const {return _m; }
-        uint64_t n() const {return _n; }
-        uint64_t stride() const {return _stride; }
-        constexpr MatrixLayout layout() const {return Layout; }
-
-    private:
-        uint64_t _m = 0;
-        uint64_t _n = 0;
-        uint64_t _stride = 0; // leading dimension
-};
-
-using Range = std::array<int, 2>;
-
-constexpr Range all{0,-1};
-
-template<typename... Args>
-struct CountRanges;
-
-template<>
-struct CountRanges<> {
-    static constexpr std::size_t value = 0;
-};
-
-template<typename First, typename... Rest>
-struct CountRanges<First, Rest...> {
-    static constexpr std::size_t value = std::is_same<Range, std::decay_t<First>>::value + CountRanges<Rest...>::value;
-};
-
-template<int Dim>
-class Tensor {
-    public:
-        constexpr Tensor() = default;
-        constexpr Tensor(const std::array<uint64_t, Dim>& shape, const std::array<uint64_t, Dim>& strides) : _shape(shape), _strides(strides) {}
-        constexpr Tensor(const std::array<uint64_t, Dim>& shape) : _shape(shape) { default_strides(); }
-        std::size_t size() const {
-            std::size_t size = 1;
-            for (std::size_t i = 0; i < Dim; i++) size *= _shape[i];
-            return size;
-        }
-
-        uint64_t stride(int dim) const {return _strides[dim];}
-        uint64_t shape(int dim) const {return _shape[dim];}
-
-        template<typename T, typename... Args>
-        inline constexpr auto slice(T* ptr, Args... args) {
-            constexpr uint64_t M = CountRanges<Args...>::value;
-            static_assert(sizeof...(args) == Dim, "The number of indices must match the dimension N.");
-            static_assert(M <= Dim, "Too many ranges provided compared to the view's dimensionality");
-
-            T* newPtr = ptr;
-            std::array<uint64_t, M> newDims{};
-            std::array<uint64_t, M> newStrides{};
-            uint64_t newDimIndex = 0;
-
-            uint64_t argIndex = 0;
-            ([&](auto& arg) {
-                if constexpr (std::is_same<std::decay_t<decltype(arg)>, Range>::value) {
-                    uint64_t first = arg[0]; // Removed 'constexpr'
-                    uint64_t last = (arg[1] < 0) ? _shape[argIndex] + arg[1] + 1 : arg[1];
-                    assert((first >= 0) && (first < _shape[argIndex]));
-                    assert((last >= 0) && (last <= _shape[argIndex])); // Changed '<' to '<=' for upper bound
-                    assert(last - first > 0);
-                    newPtr += first * _strides[argIndex];
-                    newDims[newDimIndex] = last - first;
-                    newStrides[newDimIndex] = _strides[argIndex];
-                    newDimIndex++;
-                } else if constexpr (std::is_integral<std::decay_t<decltype(arg)>>::value) {
-                    uint64_t real_arg = (arg < 0) ? _shape[argIndex] + arg : arg; // Removed '+1' as indexing starts from 0
-                    assert((real_arg >= 0) && (real_arg < _shape[argIndex]));
-                    newPtr += real_arg * _strides[argIndex];
-                }
-                argIndex++;
-            }(args), ...);
-
-            return View<T, Tensor<M>>(newPtr, Tensor<M>{newDims, newStrides});
-        }
-    private:
-        constexpr void default_strides() {
-            _strides[0] = 1;
-            for (std::size_t i = 1; i < Dim; ++i) {
-                _strides[i] = _strides[i - 1] * _shape[i - 1];
-            }
-        }
-        std::array<uint64_t, Dim> _shape{0};
-        std::array<uint64_t, Dim> _strides{0};
-};
-
-namespace beta {
 
 using Range = std::array<i64, 2>;
 
@@ -404,6 +299,43 @@ class TensorView {
             return TensorView<T, M, L>(m_memory, new_shape, newstride, newPtr);
         }
 
+        template<typename... Args>
+        inline constexpr auto reshape(Args... args) {
+            constexpr i32 D = sizeof...(Args);
+            std::array<i64, D> new_shape = { static_cast<i64>(args)... };
+            std::array<i64, D> new_strides;
+            i64 contiguous = shape(0); // fused shape max
+            i64 i =  1; // number of initial dims that can be fused
+            for (; i < Dim; i++) {
+                if (stride(i)/stride(0) != contiguous) break;
+                contiguous *= shape(i);
+            }
+
+            assert(contiguous % new_shape[0] == 0);
+            contiguous /= new_shape[0];
+            new_strides[0] = stride(0);
+
+            for (i64 ii = 1; ii < D; ii++) {
+                i64 ns = new_shape[ii];
+
+                if (contiguous == 1 && i != Dim) {
+                    contiguous = shape(i);
+                    ++i;
+                }
+
+                assert(contiguous % ns == 0);
+                contiguous /= ns;
+                
+                if (contiguous * ns == shape(i-1)) {
+                    new_strides[ii] = stride(i-1);
+                } else {
+                    new_strides[ii] = new_strides[ii-1] * new_shape[ii-1];
+                }
+            }
+
+            return TensorView<T, D, L>(m_memory, new_shape, new_strides, m_ptr);
+        }
+
         template<Location ML>
         void to(TensorView<T, Dim, ML>& dst) const {
             assert(dst.shape() == m_shape);
@@ -443,6 +375,35 @@ class TensorView {
             copy_lambda(Dim-1);
         }
 
+        void fill(T value) {
+            i64 contiguous = shape(0);
+            i64 i =  1;
+            for (; i < Dim; i++) {
+                if (stride(i)/stride(0) != contiguous) break; // can put this in for loop body
+                contiguous *= shape(i);
+            }
+
+            DimArray dim_idx{0};
+
+            std::function<void(u32)> fill_lambda = [&](u32 di) {
+                if (di == i-1) {
+                    m_memory.fill(
+                        this->location(),
+                        this->ptr() + this->offset(dim_idx),
+                        this->stride(0),
+                        value,
+                        contiguous
+                    );
+                } else {
+                    for (u32 dii = 0; dii < shape(di); dii++) {
+                        dim_idx[di] = dii;
+                        fill_lambda(di-1);
+                    }
+                }
+            };
+            fill_lambda(Dim-1);
+        }
+
         inline T& operator[](i64 i) { static_assert(L == Location::Host); return ptr()[i]; }
 
         inline constexpr i64 offset(const DimArray& indices) const {
@@ -461,7 +422,7 @@ class TensorView {
         const DimArray m_stride{0};
         T* const m_ptr = nullptr;
 };
-
+ 
 template<typename T, int Dim, Location L>
 class Tensor {
 private:
@@ -476,6 +437,16 @@ public:
     ~Tensor() {
         m_view.m_memory.free(L, m_view.ptr());
     }
+
+    Tensor(const Tensor&) = delete; // no copy constructor
+    Tensor& operator=(const Tensor&) = delete; // no copy assignment
+    Tensor(Tensor&& other) noexcept 
+        : m_view(std::move(other.m_view)) {
+        other.m_view.~View();
+        new (&other.m_view) View(other.m_view.m_memory, {}, {}, nullptr);
+    }
+
+    Tensor& operator=(Tensor&& other) noexcept = delete;
 
     void init(const DimArray& shape) {
         auto& mem = m_view.m_memory;
@@ -497,7 +468,7 @@ public:
         Tensor<T, Dim, L> cloned_tensor(m_view.m_memory);
         cloned_tensor.init(m_view.shape());
         m_view.to(cloned_tensor.view());
-        return cloned_tensor;
+        return cloned_tensor; // uses move constructor
     }
     
     inline T* ptr() const { return m_view.ptr(); }
@@ -507,10 +478,42 @@ public:
     inline const View& view() const { return m_view; }
     inline View& view() { return m_view; }
 
-    inline T& operator[](i64 i) { return ptr()[i]; }
+    inline T& operator[](i64 i) { static_assert(L == Location::Host); return ptr()[i]; }
 };
 
-} // namespace beta
+// TODO: think about deleting this
+template<typename T, int Dim, Location L>
+class MultiTensor {
+    public:
+        MultiTensor(const Memory& memory) : m_memory(memory) {}
+        void init(const std::vector<std::array<i64, Dim>>& shapes) {
+            m_tensors.clear();
+            m_tensors.reserve(shapes.size());
+            m_tensor_views.resize(shapes.size());
+            
+            for (i64 i = 0; i < shapes.size(); i++) {
+                m_tensors.emplace_back(m_memory);  // Construct Tensor with memory
+                m_tensors[i].init(shapes[i]);
+                m_tensor_views[i] = m_tensors[i].view();
+            }
+        }
+        std::vector<TensorView<T, Dim, L>>& views() { return m_tensor_views; }
+        std::vector<TensorView<T, Dim, L>>& views() const { return m_tensor_views; }
+
+    private:
+        const Memory& m_memory;
+        std::vector<Tensor<T, Dim, L>> m_tensors;
+        std::vector<TensorView<T, Dim, L>> m_tensor_views;
+};
+
+template<Location L> using MultiTensorView2D = std::vector<TensorView<f32, 2, L>>;
+template<Location L> using MultiTensor2D = MultiTensor<f32, 2, L>;
+template<Location L> using TensorView2D = TensorView<f32, 2, L>;
+template<Location L> using Tensor1D = Tensor<f32, 1, L>;
+template<Location L> using Tensor2D = Tensor<f32, 2, L>;
+template<Location L> using Tensor3D = Tensor<f32, 3, L>;
+template<Location L> using TensorView1D = TensorView<f32, 1, L>;
+template<Location L> using MultiTensor1D = MultiTensor<f32, 1, L>;
 
 
 } // namespace vlm
