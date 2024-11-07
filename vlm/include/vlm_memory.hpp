@@ -483,12 +483,13 @@ public:
     inline T& operator[](i64 i) { static_assert(L == Location::Host); return ptr()[i]; }
 };
 
-// TODO: think about deleting this
+template<i32 N> using MultiDim = std::vector<std::array<i64, N>>;
+
 template<typename T, int Dim, Location L>
 class MultiTensor {
     public:
         MultiTensor(const Memory& memory) : m_memory(memory) {}
-        void init(const std::vector<std::array<i64, Dim>>& shapes) {
+        void init(const MultiDim<Dim>& shapes) {
             m_tensors.clear();
             m_tensors.reserve(shapes.size());
             m_tensor_views.resize(shapes.size());
@@ -508,14 +509,17 @@ class MultiTensor {
         std::vector<TensorView<T, Dim, L>> m_tensor_views;
 };
 
-template<Location L> using MultiTensorView2D = std::vector<TensorView<f32, 2, L>>;
-template<Location L> using MultiTensor2D = MultiTensor<f32, 2, L>;
-template<Location L> using TensorView2D = TensorView<f32, 2, L>;
 template<Location L> using Tensor1D = Tensor<f32, 1, L>;
 template<Location L> using Tensor2D = Tensor<f32, 2, L>;
 template<Location L> using Tensor3D = Tensor<f32, 3, L>;
-template<Location L> using TensorView1D = TensorView<f32, 1, L>;
-template<Location L> using MultiTensor1D = MultiTensor<f32, 1, L>;
-
+template<Location L> using TensorView1D = TensorView<f32, 2, L>;
+template<Location L> using TensorView2D = TensorView<f32, 2, L>;
+template<Location L> using TensorView3D = TensorView<f32, 3, L>;
+template<Location L> using MultiTensor1D = MultiTensor<f32, 2, L>;
+template<Location L> using MultiTensor2D = MultiTensor<f32, 2, L>;
+template<Location L> using MultiTensor3D = MultiTensor<f32, 3, L>;
+template<Location L> using MultiTensorView1D = std::vector<TensorView1D<L>>;
+template<Location L> using MultiTensorView2D = std::vector<TensorView2D<L>>;
+template<Location L> using MultiTensorView3D = std::vector<TensorView3D<L>>;
 
 } // namespace vlm

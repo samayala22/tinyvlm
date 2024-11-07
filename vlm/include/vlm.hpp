@@ -22,6 +22,8 @@ class Simulation {
         std::vector<SurfaceDims> wing_vertices;
         std::vector<SurfaceDims> wake_panels;
         std::vector<SurfaceDims> wake_vertices;
+
+        MultiDim<2> assembly_wings;
         
         // Misc
         std::vector<linalg::alias::float4x4> wing_positions; // todo: move this somewhere
@@ -37,8 +39,10 @@ class VLM final: public Simulation {
         AeroCoefficients run(const FlowData& flow);
 
         std::vector<i32> condition0; // TODO: remove
+
+        MultiTensor3D<Location::Device> colloc_d{*backend->memory};
+        MultiTensor3D<Location::Device> normals_d{*backend->memory};
         
-        // Pulic for output purposes (eg dump gamma to file)
         Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
         Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
         Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
@@ -68,6 +72,9 @@ class NLVLM final: public Simulation {
         const f64 tol = DEFAULT_TOL;
         std::vector<i32> condition0;
 
+        MultiTensor3D<Location::Device> colloc_d{*backend->memory};
+        MultiTensor3D<Location::Device> normals_d{*backend->memory};
+
         Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
         Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
         Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing; // nc*ns
@@ -89,7 +96,10 @@ class UVLM final: public Simulation {
         UVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~UVLM() = default;
         void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final);
-    
+
+        MultiTensor3D<Location::Device> colloc_d{*backend->memory};
+        MultiTensor3D<Location::Device> normals_d{*backend->memory};
+
         // Mesh
         Buffer<f32, Location::HostDevice, MultiSurface> verts_wing_pos{*backend->memory}; // (nc+1)*(ns+1)*3
         Buffer<f32, Location::Host, MultiSurface> colloc_pos{*backend->memory}; // (nc)*(ns)*3

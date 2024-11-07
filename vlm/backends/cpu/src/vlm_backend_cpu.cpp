@@ -261,7 +261,7 @@ std::unique_ptr<BLAS> BackendCPU::create_blas() { return std::make_unique<CPU_BL
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<i32>& condition, i32 iteration) {
+void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<i32>& condition, i32 iteration) {
     // tiny::ScopedTimer timer("LHS");
 
     assert(condition.size() == colloc.layout.surfaces().size());
@@ -322,7 +322,7 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const V
 /// @param rhs right hand side vector
 /// @param normals normals of all surfaces
 /// @param velocities displacement velocities of all surfaces
-void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) {
+void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& velocities) {
     // const tiny::ScopedTimer timer("RHS");
     assert(rhs.size() == rhs.size()); // single dim
     assert(rhs.size() == normals.layout.stride());
@@ -340,7 +340,7 @@ void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& r
 }
 
 // TODO: this doesnt work with multi-mesh rn
-void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, i32 iteration) {
+void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& verts_wake, i32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
 
     tf::Taskflow taskflow;
@@ -546,7 +546,7 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
     }
 }
 
-void BackendCPU::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, View<f32, MultiSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {
+void BackendCPU::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {
     for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
         const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
         const auto areas_local = areas.layout.subview(areas.ptr, i);
@@ -560,7 +560,7 @@ void BackendCPU::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& v
     }
 }
 
-f32 BackendCPU::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, const linalg::alias::float3& freestream, f32 dt) {
+f32 BackendCPU::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
@@ -667,7 +667,7 @@ f32 BackendCPU::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake,
 // }
 
 // TODO: change this to use the per panel local alpha (in global frame)
-void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) {
+void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& areas) {
     // parallel for
     for (int m = 0; m < colloc.layout.surfaces().size(); m++) {
         const f32* verts_wing_ptr = verts_wing.ptr + verts_wing.layout.offset(m);
