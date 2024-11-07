@@ -12,112 +12,105 @@ using namespace vlm;
 
 constexpr i32 DOF = 2;
 // #define DEBUG_DISPLACEMENT_DATA
+ 
+class NewmarkBeta {
+    public:
+        NewmarkBeta(Backend* backend, const f32 beta = 0.25f, const f32 gamma = 0.5f) : 
+            m_memory(backend->create_memory_manager()),
+            m_blas(backend->create_blas()),
+            m_solver(backend->create_lu_solver()),
+            m_beta(beta),
+            m_gamma(gamma) {};
+        ~NewmarkBeta() = default;
 
-// class NewmarkBeta {
-//     public:
-//         NewmarkBeta(Memory& memory, const f32 beta = 0.25f, const f32 gamma = 0.5f) : m_memory(memory), m_beta(beta), m_gamma(gamma) {};
-//         ~NewmarkBeta() = default;
+        void init(TensorView<f32, 2, Location::Device>& M,
+            TensorView<f32, 2, Location::Device>& C,
+            TensorView<f32, 2, Location::Device>& K, f32 dt);
 
-//         void init(TensorView<f32, 2, Location::Device>& M, TensorView<f32, 2, Location::Device>& C, TensorView<f32, 2, Location::Device>& K, TensorView<f32, 1, Location::Device>& F0, TensorView<f32, 1, Location::Device>& u0, TensorView<f32, 1, Location::Device>& v0, i32 nb_timesteps);
-//         void step(TensorView<f32, 2, Location::Device>& M, TensorView<f32, 2, Location::Device>& C, TensorView<f32, 2, Location::Device>& K, TensorView<f32, 1, Location::Device>& F_now, TensorView<f32, 1, Location::Device>& F_next, const f32 dt, const i32 iteration);
-//     private:
-//         std::unique_ptr<BLAS> m_blas;
-//         Memory& m_memory;
-//         std::unique_ptr<LU> m_solver;
-//         const f32 m_beta;
-//         const f32 m_gamma;
-//     public:
-//         Buffer<f32, Location::Device, Tensor<2>> K_eff{m_memory}; // effective stiffness
-//         Buffer<f32, Location::Device, Tensor<1>> du{m_memory}; // incremental displacement
-//         Buffer<f32, Location::Device, Tensor<1>> factor{m_memory}; // intermediary vector
-//         Buffer<f32, Location::Device, Tensor<2>> u{m_memory}; // dof x tsteps position history
-//         Buffer<f32, Location::Device, Tensor<2>> v{m_memory}; // dof x tsteps velocity history
-//         Buffer<f32, Location::Device, Tensor<2>> a{m_memory}; // dof x tsteps acceleration history
-// };
+        void step(
+            TensorView<f32, 2, Location::Device>& M,
+            TensorView<f32, 2, Location::Device>& C,
+            TensorView<f32, 1, Location::Device>& v_i,
+            TensorView<f32, 1, Location::Device>& a_i,
+            TensorView<f32, 1, Location::Device>& du,
+            TensorView<f32, 1, Location::Device>& dv,
+            TensorView<f32, 1, Location::Device>& da,
+            TensorView<f32, 1, Location::Device>& delta_F,
+            const f32 dt);
+    private:
+        std::unique_ptr<Memory> m_memory;
+        std::unique_ptr<BLAS> m_blas;
+        std::unique_ptr<LU> m_solver;
+        
+        Tensor<f32, 2, Location::Device> m_K_eff{*m_memory};
+        Tensor<f32, 1, Location::Device> m_factor{*m_memory};
+        
+        const f32 m_beta;
+        const f32 m_gamma;
+};
 
-// void NewmarkBeta::init(TensorView<f32, 2, Location::Device>& M, TensorView<f32, 2, Location::Device>& C, TensorView<f32, 2, Location::Device>& K, TensorView<f32, 1, Location::Device>& F0, TensorView<f32, 1, Location::Device>& u0, TensorView<f32, 1, Location::Device>& v0, i32 nb_timesteps) {
-//     assert(M.layout.shape(0) == C.layout.shape(0));
-//     assert(M.layout.shape(1) == C.layout.shape(1));
-//     assert(C.layout.shape(0) == K.layout.shape(0));
-//     assert(C.layout.shape(1) == K.layout.shape(1));
+void NewmarkBeta::init(TensorView<f32, 2, Location::Device>& M,
+    TensorView<f32, 2, Location::Device>& C,
+    TensorView<f32, 2, Location::Device>& K, f32 dt) 
+{
+    m_K_eff.init({M.shape(0), M.shape(1)});
+    m_factor.init({M.shape(0)});
 
-//     const Tensor<2> time_series{{M.layout.shape(0), nb_timesteps}}; // dofs x timesteps
+    auto K_eff = m_K_eff.view();
+    m_solver->init(K_eff);
 
-//     K_eff.dealloc();
-//     du.dealloc();
-//     factor.dealloc();
-//     u.dealloc();
-//     v.dealloc();
-//     a.dealloc();
+    const f32 x1 = m_gamma / (m_beta * dt);
+    const f32 x0 = 1 / (m_beta * dt*dt);
+    
+    K.to(K_eff);
+    m_blas->axpy(x0, M, K_eff);
+    m_blas->axpy(x1, C, K_eff);
+    m_solver->factorize(K_eff);
+}
 
-//     K_eff.alloc(K.layout);
-//     du.alloc(F0.layout);
-//     factor.alloc(F0.layout);
-//     u.alloc(time_series);
-//     v.alloc(time_series);
-//     a.alloc(time_series);
+void NewmarkBeta::step(
+    TensorView<f32, 2, Location::Device>& M,
+    TensorView<f32, 2, Location::Device>& C,
+    TensorView<f32, 1, Location::Device>& v_i,
+    TensorView<f32, 1, Location::Device>& a_i,
+    TensorView<f32, 1, Location::Device>& du,
+    TensorView<f32, 1, Location::Device>& dv,
+    TensorView<f32, 1, Location::Device>& da,
+    TensorView<f32, 1, Location::Device>& delta_F,
+    const f32 dt) 
+{
 
-//     m_memory.fill(Location::Device, u.d_view().ptr, 0.0f, u.size());
-//     m_memory.fill(Location::Device, v.d_view().ptr, 0.0f, v.size());
-//     m_memory.fill(Location::Device, a.d_view().ptr, 0.0f, a.size());
+    const f32 x1 = m_gamma / (m_beta * dt);
+    const f32 x0 = 1 / (m_beta * dt*dt);
+    const f32 xd0 = 1 / (m_beta * dt);
+    const f32 xd1 = m_gamma / m_beta;
+    const f32 xdd0 = 1/(2*m_beta);
+    const f32 xdd1 = - dt * (1 - m_gamma / (2*m_beta));
 
-//     // TensorView<f32, 1, Location::Device> a0_col0 = a.d_view().layout.slice(a.d_view().ptr, all, 0);
-//     // m_memory.copy(MemoryTransfer::DeviceToDevice, a0_col0.ptr, F0.ptr, F0.size_bytes());
-//     // m_blas->gemv(-1.0f, C, v0, 1.0f, a0_col0);
-//     // m_blas->gemv(-1.0f, K, u0, 1.0f, a0_col0);
-//     // m_solver->factorize(M);
-//     // m_solver->solve(M, a0_col0);
-// }
+    auto K_eff = m_K_eff.view();
+    auto factor = m_factor.view();
 
-// void NewmarkBeta::step(TensorView<f32, 2, Location::Device>& M, TensorView<f32, 2, Location::Device>& C, TensorView<f32, 2, Location::Device>& K, TensorView<f32, 1, Location::Device>& F_now, TensorView<f32, 1, Location::Device>& F_next, const f32 dt, const i32 iteration) {
-//     const f32 x1 = m_gamma / (m_beta * dt);
-//     const f32 x0 = 1 / (m_beta * dt*dt);
-//     const f32 xd0 = 1 / (m_beta * dt);
-//     const f32 xd1 = m_gamma / m_beta;
-//     const f32 xdd0 = 1/(2*m_beta);
-//     const f32 xdd1 = - dt * (1 - m_gamma / (2*m_beta));
+    delta_F.to(du);
+    factor.fill(0.f);
+    m_blas->axpy(xd0, v_i, factor);
+    m_blas->axpy(xdd0, a_i, factor);
+    m_blas->gemv(1.0f, M, factor, 1.0f, du);
+    factor.fill(0.f);
+    m_blas->axpy(xd1, v_i, factor);
+    m_blas->axpy(xdd1, a_i, factor);
+    m_blas->gemv(1.0f, C, factor, 1.0f, du);
 
-//     // K_eff = K + a0 * M + a1 * C
-//     m_memory.copy(Location::Device, K_eff.d_view().ptr, 1, Location::Device, K.ptr, 1, sizeof(K.ptr), K.size());
-//     m_blas->axpy(x0, M, K_eff.d_view());
-//     m_blas->axpy(x1, C, K_eff.d_view());
-
-//     // F_eff = (F[i+1]-F[i]) + M @ (xd0 * v[i] + xdd0 * a[i]) + C @ (xd1 * v[i] + xdd1 * a[i])
-//     m_memory.fill(Location::Device, du.d_view().ptr, 0.0f, du.size());
-//     m_blas->axpy(1.0f, F_next, du.d_view());
-//     m_blas->axpy(-1.0f, F_now, du.d_view());
-
-//     TensorView<f32, 1, Location::Device> a_i = a.d_view().layout.slice(a.d_view().ptr, all, iteration);
-//     TensorView<f32, 1, Location::Device> v_i = v.d_view().layout.slice(v.d_view().ptr, all, iteration);
-//     TensorView<f32, 1, Location::Device> u_i = u.d_view().layout.slice(u.d_view().ptr, all, iteration);
-
-//     m_memory.fill(Location::Device, factor.d_view().ptr, 0.0f, factor.size());
-//     m_blas->axpy(xd0, v_i, factor.d_view());
-//     m_blas->axpy(xdd0, a_i, factor.d_view());
-//     m_blas->gemv(1.0f, M, factor.d_view(), 1.0f, du.d_view());
-
-//     m_memory.fill(Location::Device, factor.d_view().ptr, 0.0f, factor.size());
-//     m_blas->axpy(xd1, v_i, factor.d_view());
-//     m_blas->axpy(xdd1, a_i, factor.d_view());
-//     m_blas->gemv(1.0f, C, factor.d_view(), 1.0f, du.d_view());
-
-//     m_solver->factorize(K_eff.d_view());
-//     m_solver->solve(K_eff.d_view(), du.d_view());
-
-//     TensorView<f32, 1, Location::Device> a_ip1 = a.d_view().layout.slice(a.d_view().ptr, all, iteration+1);
-//     TensorView<f32, 1, Location::Device> v_ip1 = v.d_view().layout.slice(v.d_view().ptr, all, iteration+1);
-//     TensorView<f32, 1, Location::Device> u_ip1 = u.d_view().layout.slice(u.d_view().ptr, all, iteration+1);
-
-//     // u[i+1] = u[i] + du
-//     // v[i+1] = v[i] + x1 * du - xd1 * v[i] - xdd1 * a[i]
-//     // a[i+1] = a[i] + x0 * du - xd0 * v[i] - xdd0 * a[i]
-//     // Fused kernel (only for host)
-//     for (i32 i = 0; i < u.d_view().layout.shape(0); i++) {
-//         u_ip1[i] = u_i[i] + du.d_view()[i];
-//         v_ip1[i] = v_i[i] + x1 * du.d_view()[i] - xd1 * v_i[i] - xdd1 * a_i[i];
-//         a_ip1[i] = a_i[i] + x0 * du.d_view()[i] - xd0 * v_i[i] - xdd0 * a_i[i];
-//     }
-// }
+    m_solver->solve(K_eff, du.reshape(du.size(), 1));
+    
+    dv.fill(0.f);
+    m_blas->axpy(x1, du, dv);
+    m_blas->axpy(-xd1, v_i, dv);
+    m_blas->axpy(-xdd1, a_i, dv);
+    da.fill(0.f);
+    m_blas->axpy(x0, du, da);
+    m_blas->axpy(-xd0, v_i, da);
+    m_blas->axpy(-xdd0, a_i, da);
+}
 
 class UVLM_2DOF final: public Simulation {
     public:
@@ -442,7 +435,7 @@ int main() {
     
     const std::vector<std::string> backends = {"cpu"};
 
-    auto solvers = tiny::make_combination(meshes, backends);
+    auto simulations = tiny::make_combination(meshes, backends);
 
     // Geometry
     const f32 b = 0.5f; // half chord
@@ -475,16 +468,7 @@ int main() {
     //     });
     // });
 
-    // Pure pitching
-    kinematics.add([=](const fwd::Float& t) {
-        return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
-    });
-    const f32 pitch_amplitude = 1.0f; // 1 to -1 deg pitching
-    kinematics.add([=](const fwd::Float& t) {
-        return rotation_matrix<fwd::Float>({0.25f, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_radians(pitch_amplitude) * fwd::sin(omega * t));
-    });
-
-    for (const auto& [mesh_name, backend_name] : solvers) {
+    for (const auto& [mesh_name, backend_name] : simulations) {
         // UVLM_2DOF simulation{backend_name, {mesh_name}};
         // simulation.run({kinematics}, {initial_pose}, t_final);
     }

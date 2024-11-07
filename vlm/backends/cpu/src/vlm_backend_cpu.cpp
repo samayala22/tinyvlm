@@ -115,6 +115,8 @@ class CPU_BLAS final : public BLAS {
 
         void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) override;
         void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
+        void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, TensorView<f32, 1, Location::Device>& y) override;
+        void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, TensorView<f32, 2, Location::Device>& y) override;
 };
 
 CBLAS_TRANSPOSE trans_to_cblas(BLAS::Trans trans) {
@@ -171,6 +173,27 @@ void CPU_BLAS::gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>&
         C.ptr(),
         static_cast<int>(C.stride(1))
     );
+}
+
+void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, TensorView<f32, 1, Location::Device>& y) {
+    cblas_saxpy(
+        x.shape(1),
+        alpha, 
+        x.ptr(),
+        x.stride(0),
+        y.ptr(),
+        y.stride(0)
+    );
+}
+
+void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, TensorView<f32, 2, Location::Device>& y) {
+    f32* y_ptr = y.ptr();
+    f32* x_ptr = x.ptr();
+    for (i64 j = 0; j < x.shape(1); j++) {
+        for (i64 i = 0; i < x.shape(0); i++) {
+            y_ptr[j * y.stride(1) + i] += alpha * x_ptr[j * x.stride(1) + i];
+        }
+    }
 }
 
 BackendCPU::BackendCPU() : Backend(std::make_unique<CPU_Memory>()) {

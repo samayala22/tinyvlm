@@ -15,6 +15,7 @@ namespace vlm {
 class Backend {
     public:
         const std::unique_ptr<Memory> memory;
+        std::unique_ptr<BLAS> blas;
 
         // TODO: remove these
         i32* d_solver_info = nullptr;
@@ -53,10 +54,10 @@ class Backend {
         virtual f32 mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) = 0;
         virtual f32 mesh_area(const View<f32, SingleSurface>& areas) = 0;
 
-        virtual std::unique_ptr<Memory> create_memory_manager() = 0;
+        virtual std::unique_ptr<Memory> create_memory_manager() = 0; // todo: deprecate
         // virtual std::unique_ptr<Kernels> create_kernels() = 0;
         virtual std::unique_ptr<LU> create_lu_solver() = 0;
-        virtual std::unique_ptr<BLAS> create_blas() = 0;
+        virtual std::unique_ptr<BLAS> create_blas() = 0; // todo: deprecate
 };
 
 class BLAS {
@@ -67,8 +68,8 @@ class BLAS {
 
         virtual void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) = 0;
         virtual void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
-        // virtual void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, TensorView<f32, 1, Location::Device>& y) = 0;
-        // virtual void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, TensorView<f32, 2, Location::Device>& y) = 0;
+        virtual void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, TensorView<f32, 1, Location::Device>& y) = 0;
+        virtual void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, TensorView<f32, 2, Location::Device>& y) = 0;
         // virtual void xypz(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y, const f32 beta, TensorView<f32, 1, Location::Device>& z) = 0;
 };
 

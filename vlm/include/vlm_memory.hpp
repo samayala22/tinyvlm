@@ -266,7 +266,7 @@ class TensorView {
         inline constexpr T& operator()(const DimArray& indices) const { static_assert(L == Location::Host); return m_ptr[offset(indices)]; }
 
         template<typename... Args>
-        inline constexpr auto slice(Args... args) {
+        inline constexpr auto slice(Args... args) const {
             constexpr i64 M = CountRanges<Args...>::value;
             static_assert(sizeof...(args) == Dim, "The number of indices must match the dimension N.");
             static_assert(M <= Dim, "Too many ranges provided compared to the view's dimensionality");
@@ -300,7 +300,7 @@ class TensorView {
         }
 
         template<typename... Args>
-        inline constexpr auto reshape(Args... args) {
+        inline constexpr auto reshape(Args... args) const {
             constexpr i32 D = sizeof...(Args);
             std::array<i64, D> new_shape = { static_cast<i64>(args)... };
             std::array<i64, D> new_strides;
@@ -337,7 +337,7 @@ class TensorView {
         }
 
         template<Location ML>
-        void to(TensorView<T, Dim, ML>& dst) const {
+        void to(const TensorView<T, Dim, ML>& dst) const {
             assert(dst.shape() == m_shape);
 
             // TODO: Check for overlap
@@ -375,7 +375,7 @@ class TensorView {
             copy_lambda(Dim-1);
         }
 
-        void fill(T value) {
+        void fill(T value) const {
             i64 contiguous = shape(0);
             i64 i =  1;
             for (; i < Dim; i++) {
@@ -450,6 +450,8 @@ public:
 
     void init(const DimArray& shape) {
         auto& mem = m_view.m_memory;
+        if (shape == m_view.shape()) return; // dont reallocate if same shape
+        // todo: dont reallocate if same size, only change the view shape and strides
         mem.free(L, m_view.ptr());
         i64 size = shape[0];
         DimArray stride;
