@@ -177,7 +177,7 @@ void CPU_BLAS::gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>&
 
 void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, TensorView<f32, 1, Location::Device>& y) {
     cblas_saxpy(
-        x.shape(1),
+        x.shape(0),
         alpha, 
         x.ptr(),
         x.stride(0),
@@ -187,6 +187,7 @@ void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>&
 }
 
 void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, TensorView<f32, 2, Location::Device>& y) {
+    assert(x.shape() == y.shape());
     f32* y_ptr = y.ptr();
     f32* x_ptr = x.ptr();
     for (i64 j = 0; j < x.shape(1); j++) {

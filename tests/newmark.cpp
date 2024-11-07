@@ -133,6 +133,7 @@ int main() {
         Tensor2D<Location::Host> u_h{*memory};
         Tensor2D<Location::Host> v_h{*memory};
         Tensor2D<Location::Host> a_h{*memory};
+        Tensor1D<Location::Host> t_h{*memory};
 
         Tensor1D<Location::Device> zero{*memory};
         Tensor2D<Location::Device> M_d{*memory};
@@ -152,6 +153,7 @@ int main() {
         u_h.init({3, tsteps});
         v_h.init({3, tsteps});
         a_h.init({3, tsteps});
+        t_h.init({tsteps});
 
         // Device tensors
         zero.init({3});
@@ -192,6 +194,7 @@ int main() {
         M_h[8] = 1.0f;
     
         // Initial condition
+        t_h.view().fill(0.0f);
         auto u0_h = u_h.view().slice(All, 0);
         auto v0_h = v_h.view().slice(All, 0);
         u0_h.fill(0.0f);
@@ -210,6 +213,7 @@ int main() {
         auto v0 = v_d.view().slice(All, 0);
         auto u0 = u_d.view().slice(All, 0);
 
+        // Pre-compute constant values
         u0_h.to(u0);
         v0_h.to(v0);
         zero.view().to(a0); // F0 = 0
@@ -219,11 +223,13 @@ int main() {
         solver->factorize(M_d.view());
         solver->solve(M_d.view(), a0.reshape(a0.size(), 1)); // maybe override solve for 1D rhs
 
+        // Initialize integrator with constant dt
         NewmarkBeta integrator{backend.get()};
         integrator.init(M_d.view(), C_d.view(), K_d.view(), dt);
-
+        
+        // Integration loop
         for (i64 step = 0; step < tsteps - 1; step++) {
-            // const f32 t = static_cast<f32>(step) * dt;
+            t_h.view()(step+1) = static_cast<f32>(step+1) * dt;
             auto u_i = u_d.view().slice(All, step);
             auto v_i = v_d.view().slice(All, step);
             auto a_i = a_d.view().slice(All, step);
@@ -256,8 +262,20 @@ int main() {
         v_d.view().to(v_h.view());
         a_d.view().to(a_h.view());
         
-        // std::ofstream accel_data("accel_" + backend_name + ".txt");
-        // accel_data << 3 << " " << tsteps << "\n";
+        // Output
+        std::ios::sync_with_stdio(false);
+        std::ofstream accel_data("newmark_3dof_" + backend_name.get() + ".txt");
+        accel_data << 3 << " " << tsteps << "\n";
+        for (i64 i = 0; i < tsteps; i++) {
+            auto& u_hv = u_h.view();
+            auto& v_hv = v_h.view();
+            auto& a_hv = a_h.view();
+            auto& t_hv = t_h.view();
+            accel_data << t_hv(i) << " " \
+                << u_hv(0, i) << " " << u_hv(1, i) << " " << u_hv(2, i) << " " \
+                << v_hv(0, i) << " " << v_hv(1, i) << " " << v_hv(2, i) << " " \
+                << a_hv(0, i) << " " << a_hv(1, i) << " " << a_hv(2, i) << "\n";
+        }
     }
     return 0;
 }

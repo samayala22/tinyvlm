@@ -200,10 +200,20 @@ for dt in dts:
     F = np.zeros((len(t), 3), dtype=float)
 
     # Perform integration
-    u, v, a = hht_alpha(M, C, K, x0, v0, F, t)
+    # u, v, a = hht_alpha(M, C, K, x0, v0, F, t)
+    u, v, a = newmark_beta_v2(M, C, K, x0, v0, F, t)
 
     # Plot acceleration of the first degree of freedom
     plt.plot(t, a[:, 0], label=f"HHT-alpha (dt={dt})")
+
+with open("build/windows/x64/debug/newmark_3dof_cuda.txt", "r") as f:
+    first_line = f.readline()
+    dof, tsteps = map(int, first_line.split())
+    result_cpp = np.zeros((dof * 3 + 1, tsteps))
+    for step, line in enumerate(f):
+        result_cpp[:, step] = np.array(list(map(float, line.split())))
+
+plt.plot(result_cpp[0, :], result_cpp[7, :], "--",label="C++ (CPU)")
 
 plt.title('Acceleration Response of the First Degree of Freedom')
 plt.xlabel('Time (s)')
