@@ -115,17 +115,17 @@ int main() {
     const std::vector<std::string> backends = get_available_backends();
     auto simulations = tiny::make_combination(backends);
 
-    f32 dt = 0.1;
-    f32 t_final = 20;
-    i64 tsteps = static_cast<i64>(t_final / dt) + 1;
+    const f32 dt = 0.1;
+    const f32 t_final = 20;
+    const i64 tsteps = static_cast<i64>(t_final / dt) + 1;
     
     for (const auto& [backend_name] : simulations) {
         // UVLM_2DOF simulation{backend_name, {mesh_name}};
         // simulation.run({kinematics}, {initial_pose}, t_final);
-        std::unique_ptr<Backend> backend = create_backend(backend_name);
-        std::unique_ptr<Memory> memory = backend->create_memory_manager();
-        std::unique_ptr<BLAS> blas = backend->create_blas();
-        std::unique_ptr<LU> solver = backend->create_lu_solver();
+        const std::unique_ptr<Backend> backend = create_backend(backend_name);
+        const std::unique_ptr<Memory> memory = backend->create_memory_manager();
+        const std::unique_ptr<BLAS> blas = backend->create_blas();
+        const std::unique_ptr<LU> solver = backend->create_lu_solver();
         
         Tensor2D<Location::Host> M_h{*memory};
         Tensor2D<Location::Host> C_h{*memory};

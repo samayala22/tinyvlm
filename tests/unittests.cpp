@@ -31,12 +31,12 @@ void print3d(const TensorView<f32, 3, Location::Host>& tensor) {
     }
 }
 
-int main(int argc, char** argv) {
+int main(int, char**) {
     const std::vector<std::string> backends = get_available_backends();
 
     for (const auto& backend_name : backends) {
-        std::unique_ptr<Backend> backend = create_backend(backend_name);
-        std::unique_ptr<Memory> memory = backend->create_memory_manager();
+        const std::unique_ptr<Backend> backend = create_backend(backend_name);
+        const std::unique_ptr<Memory> memory = backend->create_memory_manager();
 
         Tensor<f32, 3, Location::Host> tensor_h{*memory};
         Tensor<f32, 3, Location::Device> tensor_d{*memory};
@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
 
         {
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(All, Range{0, 2}, 0);
             auto b = tv.slice(All, Range{1, 3}, 2);
             a.to(b);
@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
 
         {
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(0, All, All);
             auto b = tv.slice(1, All, All);
             a.to(b);
@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
 
         {
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(0, All, All);
             auto b = tv.slice(All, 2, All);
 
@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
 
         { // orthogonal slices
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(0, All, Range{0,2});
             auto b = tv.slice(All, Range{1,3}, 2);
             
@@ -122,47 +122,47 @@ int main(int argc, char** argv) {
 
         {
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(Range{0,2}, Range{1,3}, All);
             auto b = a.reshape(1, 2, 2, 2, 2);
             
-            std::array<i64, 5> correct_stride{1, 1, 3, 9, 18};
+            const std::array<i64, 5> correct_stride{1, 1, 3, 9, 18};
             CHECK(b.stride() == correct_stride);
         }
 
         {
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(All, Range{1,3}, All);
             auto b = a.reshape(2, 3, 1, 1, 4);
 
-            std::array<i64, 5> correct_stride{1, 2, 9, 9, 9};
+            const std::array<i64, 5> correct_stride{1, 2, 9, 9, 9};
             CHECK(b.stride() == correct_stride);
         }
 
         {
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(0, All, All);
             auto b = a.reshape(3, 2, 2);
 
-            std::array<i64, 3> correct_stride{3, 9, 18};
+            const std::array<i64, 3> correct_stride{3, 9, 18};
             CHECK(b.stride() == correct_stride);
         }
 
         {
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(All, All, All);
             auto b = a.reshape(2, 18);
 
-            std::array<i64, 2> correct_stride{1, 2};
+            const std::array<i64, 2> correct_stride{1, 2};
             CHECK(b.stride() == correct_stride);
         }
 
         {
             auto t = tensor_d.clone();
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto a = tv.slice(0, All, All);
             a.fill(111.f);
             tv.to(thv);
@@ -175,10 +175,10 @@ int main(int argc, char** argv) {
         {
             Tensor<f32, 1, Location::Host> t{*memory};
             t.init({10});
-            auto tv = t.view();
+            const auto& tv = t.view();
             auto b = tv.reshape(10, 1, 1);
 
-            std::array<i64, 3> correct_stride{1, 10, 10};
+            const std::array<i64, 3> correct_stride{1, 10, 10};
             CHECK(b.stride() == correct_stride);
         }
     }
