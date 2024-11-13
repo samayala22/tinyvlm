@@ -17,7 +17,6 @@ class Mesh {
     Buffer<f32, Location::HostDevice, MultiSurface> verts_wing_init; // (nc+1)*(ns+1)*3
     Buffer<f32, Location::HostDevice, MultiSurface> verts_wing; // (nc+1)*(ns+1)*3
     Buffer<f32, Location::HostDevice, MultiSurface> verts_wake; // (nw+1)*(ns+1)*3
-    Buffer<f32, Location::HostDevice, MultiSurface> area; // nc*ns
 
     f32 frame[16] = {
         1.0f, 0.0f, 0.0f, 0.0f,
@@ -27,13 +26,11 @@ class Mesh {
     }; // Col major order (TODO: move this to kinematic tracker?)
 
     Mesh(const Memory& memory) : 
-    verts_wing_init(memory), verts_wing(memory), verts_wake(memory),
-    area(memory) {};
+    verts_wing_init(memory), verts_wing(memory), verts_wake(memory) {};
     
     void alloc_wing(const std::vector<SurfaceDims>& wing_panels, const std::vector<SurfaceDims>& wing_vertices) {
         verts_wing_init.alloc(MultiSurface{wing_vertices, 4});
         verts_wing.alloc(MultiSurface{wing_vertices, 4});
-        area.alloc(MultiSurface{wing_panels, 1});
 
         // Sete last row to 1 for homogeneous coordinatesverts_wing_init.h_view().layout
         verts_wing_init.memory.fill(Location::Host, verts_wing_init.h_view().ptr + verts_wing_init.h_view().layout(0,3), 1, 1.f, verts_wing_init.h_view().layout.stride());

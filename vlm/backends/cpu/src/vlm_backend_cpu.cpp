@@ -427,7 +427,7 @@ f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_win
 }
 
 // Note: this doesnt work with wing slices (because of usage of linear index instead of proper indexing)
-f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
+f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
     f32 cl = 0.0f;
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
     const linalg::alias::float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
@@ -482,7 +482,7 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
     const TensorView2D<Location::Device>& gamma,
     const TensorView2D<Location::Device>& gamma_prev,
     const View<f32, SingleSurface>& velocities,
-    const View<f32, SingleSurface>& areas,
+    const TensorView2D<Location::Device>& areas,
     const TensorView3D<Location::Device>& normals,
     View<f32, SingleSurface>& forces,
     const linalg::alias::float3& freestream,
@@ -584,13 +584,13 @@ f32 BackendCPU::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wak
 // }
 
 // TODO: change this to use the per panel local alpha (in global frame)
-void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& areas) {
+void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) {
     // parallel for
     for (int m = 0; m < colloc.size(); m++) {
         auto& colloc_i = colloc[m];
         auto& normals_i = normals[m];
+        auto& areas_i = areas[m];
         const f32* verts_wing_ptr = verts_wing.ptr + verts_wing.layout.offset(m);
-        f32* areas_ptr = areas.ptr + areas.layout.offset(m);
         // parallel for
         for (i64 i = 0; i < colloc_i.shape(1); i++) {
             // inner vectorized loop
@@ -618,7 +618,7 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>
                 const linalg::alias::float3 vec_b = vertex2 - vertex0;
                 const linalg::alias::float3 vec_e = vertex1 - vertex0;
 
-                areas_ptr[lidx] = 0.5f * (linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e)));
+                areas_i(j, i) = 0.5f * (linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e)));
                 
                 // High AoA correction (Aerodynamic Optimization of Aircraft Wings Using a Coupled VLM2.5D RANS Approach) Eq 3.4 p21
                 // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf
@@ -642,7 +642,7 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>
 /// @param j first panel index spanwise
 /// @param n number of panels spanwise
 /// @return mean chord of the set of panels
-f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) {
+f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& areas) {
     // Leading edge vertex
     f32* leading_edge_ptr = verts_wing.ptr;
     f32* trailing_edge_ptr = verts_wing.ptr + (verts_wing.layout.nc() - 1) * verts_wing.layout.ns();
@@ -650,7 +650,7 @@ f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<
     f32 mac = 0.0f;
     // loop over panel chordwise sections in spanwise direction
     // Note: can be done optimally with vertical fused simd
-    for (i64 v = 0; v < areas.layout.ns(); v++) {
+    for (i64 v = 0; v < areas.shape(0); v++) {
         // left and right chord lengths
         const f32 dx0 = trailing_edge_ptr[0*verts_wing.layout.stride() + v + 0] - leading_edge_ptr[0*verts_wing.layout.stride() + v + 0];
         const f32 dy0 = trailing_edge_ptr[1*verts_wing.layout.stride() + v + 0] - leading_edge_ptr[1*verts_wing.layout.stride() + v + 0];
@@ -670,11 +670,7 @@ f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<
     }
     // Since we divide by half the total wing area (both sides) we dont need to multiply by 2
 
-    f32 wing_area = 0.0f;
-    for (i64 i = 0; i < areas.layout.size(); i++) {
-        wing_area += areas[i];
-    }
-    return mac / wing_area;
+    return mac / sum(areas);
 }
 
 void BackendCPU::displace_wing(const TensorView<f32, 3, Location::Device>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) {
@@ -705,12 +701,22 @@ void BackendCPU::wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, 
     }
 }
 
-// TODO: this is wrong, wont work if the surface is a slice of non uniform surface
-// need to do a proper 2D loop and using the local ld
-f32 BackendCPU::mesh_area(const View<f32, SingleSurface>& areas) {
-    f32 wing_area = 0.0f;
-    for (i64 i = 0; i < areas.layout.size(); i++) {
-        wing_area += areas[i];
+// TODO: parallelize
+f32 BackendCPU::sum(const TensorView1D<Location::Device>& tensor) {
+    f32 sum = 0.0f;
+    for (i64 i = 0; i < tensor.shape(0); i++) {
+        sum += tensor(i);
     }
-    return wing_area;
+    return sum;
+}
+
+// TODO: parallelize
+f32 BackendCPU::sum(const TensorView2D<Location::Device>& tensor) {
+    f32 sum = 0.0f;
+    for (i64 j = 0; j < tensor.shape(1); j++) {
+        for (i64 i = 0; i < tensor.shape(0); i++) {
+            sum += tensor(i, j);
+        }
+    }
+    return sum;
 }

@@ -123,18 +123,18 @@ void dump_buffer(std::ofstream& stream, T* start, i32 size) {
 }
 
 void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final) {
-    mesh.verts_wing_init.to_device(); // raw mesh vertices from file
-    for (i64 m = 0; m < kinematics.size(); m++) {
-        initial_pose[m].store(transforms_h.view().ptr() + transforms_h.view().offset({0, 0, m}), transforms_h.view().stride(1));
-    }
-    transforms_h.view().to(transforms.view());
-    backend->displace_wing(transforms.view(), verts_wing_pos.d_view(), mesh.verts_wing_init.d_view());
-    for (i32 body = 0; body < nb_meshes; body++) {
-        backend->memory->copy(Location::Host, colloc_pos.h_view().ptr + colloc_pos.h_view().layout.offset(body), 1, Location::Device, colloc_d.views()[body].ptr(), 1, sizeof(f32), colloc_d.views()[body].size());
-    }
-    backend->memory->copy(Location::Device, mesh.verts_wing.d_view().ptr, 1, Location::Device, verts_wing_pos.d_view().ptr, 1, sizeof(f32), verts_wing_pos.d_view().size());
-    lhs.view().fill(0.f);
-    backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), colloc_d.views(), normals_d.views(), mesh.area.d_view());
+    // mesh.verts_wing_init.to_device(); // raw mesh vertices from file
+    // for (i64 m = 0; m < kinematics.size(); m++) {
+    //     initial_pose[m].store(transforms_h.view().ptr() + transforms_h.view().offset({0, 0, m}), transforms_h.view().stride(1));
+    // }
+    // transforms_h.view().to(transforms.view());
+    // backend->displace_wing(transforms.view(), verts_wing_pos.d_view(), mesh.verts_wing_init.d_view());
+    // for (i32 body = 0; body < nb_meshes; body++) {
+    //     backend->memory->copy(Location::Host, colloc_pos.h_view().ptr + colloc_pos.h_view().layout.offset(body), 1, Location::Device, colloc_d.views()[body].ptr(), 1, sizeof(f32), colloc_d.views()[body].size());
+    // }
+    // backend->memory->copy(Location::Device, mesh.verts_wing.d_view().ptr, 1, Location::Device, verts_wing_pos.d_view().ptr, 1, sizeof(f32), verts_wing_pos.d_view().size());
+    // lhs.view().fill(0.f);
+    // backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), colloc_d.views(), normals_d.views(), mesh.area.d_view());
 
     // 1. Compute static time step for the simulation
     // auto first_wing = mesh_verts_wing.view().slice(Range{0, assembly.size(0)}, All});

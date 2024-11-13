@@ -514,10 +514,10 @@ class MultiTensor {
 template<Location L> using Tensor1D = Tensor<f32, 1, L>;
 template<Location L> using Tensor2D = Tensor<f32, 2, L>;
 template<Location L> using Tensor3D = Tensor<f32, 3, L>;
-template<Location L> using TensorView1D = TensorView<f32, 2, L>;
+template<Location L> using TensorView1D = TensorView<f32, 1, L>;
 template<Location L> using TensorView2D = TensorView<f32, 2, L>;
 template<Location L> using TensorView3D = TensorView<f32, 3, L>;
-template<Location L> using MultiTensor1D = MultiTensor<f32, 2, L>;
+template<Location L> using MultiTensor1D = MultiTensor<f32, 1, L>;
 template<Location L> using MultiTensor2D = MultiTensor<f32, 2, L>;
 template<Location L> using MultiTensor3D = MultiTensor<f32, 3, L>;
 template<Location L> using MultiTensorView1D = std::vector<TensorView1D<L>>;

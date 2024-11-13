@@ -20,12 +20,14 @@ class BackendCUDA final : public Backend {
         // Per mesh kernels
         f32 coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) override;
         f32 coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) override;
-        f32 coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& local_velocities, const View<f32, SingleSurface>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) override;
-        void coeff_unsteady_cl_single_forces(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const TensorView3D<Location::Device>& normals, View<f32, SingleSurface>& forces, const linalg::alias::float3& freestream, f32 dt) override;
+        f32 coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& local_velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) override;
+        void coeff_unsteady_cl_single_forces(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, View<f32, SingleSurface>& forces, const linalg::alias::float3& freestream, f32 dt) override;
 
-        void mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& areas) override;
-        f32 mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) override;
-        f32 mesh_area(const View<f32, SingleSurface>& areas) override;
+        void mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) override;
+        f32 mesh_mac(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& areas) override;
+
+        f32 sum(const TensorView1D<Location::Device>& tensor) override;
+        f32 sum(const TensorView2D<Location::Device>& tensor) override;
 
         std::unique_ptr<Memory> create_memory_manager() override;
         // std::unique_ptr<Kernels> create_kernels() override;

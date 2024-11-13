@@ -79,6 +79,26 @@ __global__ void kernel_reduce(i64 N, T* buf, T* val) {
 }
 
 template<typename T>
+__global__ void kernel_reduce_2D(i64 m, i64 n, T* data, i64 data_ld, T* total_sum) {
+    i64 tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    T sum = 0.0f;
+
+    // Grid-stride loop
+    for (i64 i = tid; i < m * n; i += blockDim.x * gridDim.x) {
+        i64 row = i % m;
+        i64 col = i / m;
+        sum += data[col * data_ld + row]; // Map the virtual linear index to the true linear index
+    }
+    
+    sum = block_reduce_sum(sum); // Reduce over threads of a block
+    
+    if (threadIdx.x == 0) {
+        atomicAdd(total_sum, sum); // Reduce over blocks
+    }
+}
+
+template<typename T>
 __global__ void kernel_fill(T* buffer, i64 stride, T value, i64 n) {
     const i64 tid = cg::this_grid().thread_rank();
     
@@ -179,16 +199,6 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_influence(i64 m, i64 n, f32* lhs
         const float3 normal = {sharedNormalX[threadIdx.x], sharedNormalY[threadIdx.x], sharedNormalZ[threadIdx.x]};
         lhs[j * ld_lhs + i] += dot(inf, normal);
     }
-}
-
-template<i32 X, i32 Y = 1, i32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_gamma_delta(i64 m, i64 n, f32* gamma_wing_delta, const f32* gamma_wing) {
-    const i64 i = blockIdx.x * blockDim.x + threadIdx.x;
-    const i64 j = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (j >= n || i >= m) return;
-
-    gamma_wing_delta[i * n + j] = gamma_wing[i * n + j] - gamma_wing[(i-1) * n + j];
 }
 
 template<i32 X, i32 Y = 1, i32 Z = 1>

@@ -42,6 +42,7 @@ class VLM final: public Simulation {
 
         MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
         MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
+        MultiTensor2D<Location::Device> areas_d{backend->memory.get()};
         
         Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
         Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
@@ -75,6 +76,7 @@ class NLVLM final: public Simulation {
 
         MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
         MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
+        MultiTensor2D<Location::Device> areas_d{backend->memory.get()};
 
         Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
         Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
@@ -101,6 +103,7 @@ class UVLM final: public Simulation {
 
         MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
         MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
+        MultiTensor2D<Location::Device> areas_d{backend->memory.get()};
 
         // Mesh
         Buffer<f32, Location::HostDevice, MultiSurface> verts_wing_pos{*backend->memory}; // (nc+1)*(ns+1)*3
