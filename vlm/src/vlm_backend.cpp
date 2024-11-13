@@ -37,6 +37,10 @@ std::vector<std::string> vlm::get_available_backends() {
     return backends;
 }
 
+Backend::Backend(std::unique_ptr<Memory> memory_, std::unique_ptr<BLAS> blas_) : memory(std::move(memory_)), blas(std::move(blas_)) {
+    d_val = (f32*)memory->alloc(Location::Device, sizeof(f32));
+}
+
 Backend::~Backend() {
     // Free device-device ptrs
     memory->free(Location::Device, d_solver_info);
@@ -45,15 +49,19 @@ Backend::~Backend() {
     memory->free(Location::Device, d_val);
 }
 
-f32 Backend::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow, const View<f32, MultiSurface>& areas) {
+f32 Backend::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_delta, const FlowData& flow, const View<f32, MultiSurface>& areas) {
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
     for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
         const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
-        const auto gamma_delta_local = gamma_delta.layout.subview(gamma_delta.ptr, i);
         const auto areas_local = areas.layout.subview(areas.ptr, i);
         const f32 area_local = mesh_area(areas_local);
-        const f32 wing_cl = coeff_steady_cl_single(verts_wing_local, gamma_delta_local, flow, area_local);
+        const f32 wing_cl = coeff_steady_cl_single(
+            verts_wing_local,
+            gamma_delta[i],
+            flow,
+            area_local
+        );
         cl += wing_cl * area_local;
         total_area += area_local;
     }
@@ -61,23 +69,20 @@ f32 Backend::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, co
     return cl;
 }
 
-f32 Backend::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt) {
+f32 Backend::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt) {
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
     for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
         const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
         const auto areas_local = areas.layout.subview(areas.ptr, i);
-        const auto gamma_delta_local = gamma_wing_delta.layout.subview(gamma_wing_delta.ptr, i);
-        const auto gamma_wing_local = gamma_wing.layout.subview(gamma_wing.ptr, i);
-        const auto gamma_wing_prev_local = gamma_wing_prev.layout.subview(gamma_wing_prev.ptr, i);
         const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
 
         const f32 area_local = mesh_area(areas_local);
         const f32 wing_cl = coeff_unsteady_cl_single(
             verts_wing_local,
-            gamma_delta_local,
-            gamma_wing_local,
-            gamma_wing_prev_local,
+            gamma_wing_delta[i],
+            gamma_wing[i],
+            gamma_wing_prev[i],
             velocities_local,
             areas_local,
             normals[i],
@@ -92,21 +97,18 @@ f32 Backend::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, 
     return cl;
 }
 
-void Backend::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {
+void Backend::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {
     // todo: parallel
     for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
         const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
         const auto areas_local = areas.layout.subview(areas.ptr, i);
-        const auto gamma_delta_local = gamma_wing_delta.layout.subview(gamma_wing_delta.ptr, i);
-        const auto gamma_wing_local = gamma_wing.layout.subview(gamma_wing.ptr, i);
-        const auto gamma_wing_prev_local = gamma_wing_prev.layout.subview(gamma_wing_prev.ptr, i);
         const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
         auto forces_local = forces.layout.subview(forces.ptr, i);
         coeff_unsteady_cl_single_forces(
             verts_wing_local, 
-            gamma_delta_local,
-            gamma_wing_local,
-            gamma_wing_prev_local,
+            gamma_wing_delta[i],
+            gamma_wing[i],
+            gamma_wing_prev[i],
             velocities_local,
             areas_local,
             normals[i],
@@ -117,16 +119,20 @@ void Backend::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& vert
     }
 }
 
-f32 Backend::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& gamma_wake, const FlowData& flow, const View<f32, MultiSurface>& areas) {
+f32 Backend::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const MultiTensorView2D<Location::Device>& gamma_wake, const FlowData& flow, const View<f32, MultiSurface>& areas) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cd = 0.0f;
     f32 total_area = 0.0f;
     for (i64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
         const auto verts_wake_local = verts_wake.layout.subview(verts_wake.ptr, i);
-        const auto gamma_wake_local = gamma_wake.layout.subview(gamma_wake.ptr, i);
         const auto areas_local = areas.layout.subview(areas.ptr, i);
         const f32 area_local = mesh_area(areas_local);
-        const f32 wing_cd = coeff_steady_cd_single(verts_wake_local, gamma_wake_local, flow, area_local);
+        const f32 wing_cd = coeff_steady_cd_single(
+            verts_wake_local,
+            gamma_wake[i],
+            flow,
+            area_local
+        );
         cd += wing_cd * area_local;
         total_area += area_local;
     }

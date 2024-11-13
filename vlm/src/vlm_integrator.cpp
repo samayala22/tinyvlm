@@ -3,7 +3,7 @@
 using namespace vlm;
 
 void NewmarkBeta::init(TensorView<f32, 2, Location::Device>& M,
-    TensorView<f32, 2, Location::Device>& C,
+    const TensorView<f32, 2, Location::Device>& C,
     TensorView<f32, 2, Location::Device>& K, f32 dt) 
 {
     m_K_eff.init({M.shape(0), M.shape(1)});
@@ -23,7 +23,7 @@ void NewmarkBeta::init(TensorView<f32, 2, Location::Device>& M,
 
 void NewmarkBeta::step(
     TensorView<f32, 2, Location::Device>& M,
-    TensorView<f32, 2, Location::Device>& C,
+    const TensorView<f32, 2, Location::Device>& C,
     TensorView<f32, 1, Location::Device>& v_i,
     TensorView<f32, 1, Location::Device>& a_i,
     TensorView<f32, 1, Location::Device>& du,

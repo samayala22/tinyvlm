@@ -164,7 +164,7 @@ class CUDA_Memory final : public Memory {
         __host__ void fill(Location location, double *ptr, i64 stride, double value, i64 size) const override { launch_fill_kernel(location, ptr, stride, value, size); }
 };
 
-BackendCUDA::BackendCUDA() : Backend(std::make_unique<CUDA_Memory>())  {
+BackendCUDA::BackendCUDA() : Backend(create_memory_manager(), create_blas())  {
     print_cuda_info();
     CtxManager::getInstance().create();
 }
@@ -175,41 +175,6 @@ BackendCUDA::~BackendCUDA() {
 
 std::unique_ptr<Memory> BackendCUDA::create_memory_manager() { return std::make_unique<CUDA_Memory>(); }
 // std::unique_ptr<Kernels> create_kernels() { return std::make_unique<CPU_Kernels>(); }
-
-void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) {
-    assert(gamma_delta.layout.dims() == 1);
-    assert(gamma.layout.dims() == 1);
-    
-    for (const auto& surf : gamma_delta.layout.surfaces())  {
-        f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
-        const f32* s_gamma = gamma.ptr + surf.offset;
-        memory->copy(Location::Device, s_gamma_delta, 1, Location::Device, s_gamma, 1, sizeof(*s_gamma_delta), surf.ns);
-        
-        constexpr Dim3<i32> block{32, 32};
-        const Dim3<i64> n{surf.nc-1, surf.ns};
-        kernel_gamma_delta<block.x, block.y><<<grid_size(block, n)(), block()>>>(n.x, n.y, s_gamma_delta + surf.ns, s_gamma + surf.ns);
-        CHECK_CUDA(cudaGetLastError());
-    };
-
-    // tf::Taskflow taskflow;
-
-    // auto kernels = taskflow.emplace([&](tf::cudaFlow& cf){
-    //     for (const auto& surf : gamma_delta.layout.surfaces())  {
-    //         f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
-    //         const f32* s_gamma = gamma.ptr + surf.offset;
-    //         tf::cudaTask copy = cf.copy(s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
-                
-    //         constexpr Dim3<i32> block{32, 32};
-    //         const Dim3<i64> n{surf.nc-1, surf.ns};
-    //         tf::cudaTask kernel = cf.kernel(grid_size(block, n), block, 0, kernel_gamma_delta, n.x, n.y, s_gamma_delta + surf.ns, s_gamma + surf.ns).succede(copy);
-    //     };
-    // });
-    // auto check = taskflow.emplace([&](){
-    //     CHECK_CUDA(cudaGetLastError());
-    // }).succede(kernels);
-
-    // Executor::get().run(taskflow).wait();
-}
 
 /// @brief Assemble the left hand side matrix
 /// @details
@@ -427,13 +392,14 @@ void BackendCUDA::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& 
     }
 }
 
-void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& verts_wake, i32 iteration) {
+void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& verts_wake, i32 iteration) {
     if (iteration == 0) return; // cuda doesnt support 0 sized domain
     constexpr Dim3<i32> block{32, 16};
 
     for (i32 i = 0; i < normals.size(); i++) {
         const auto& colloc_i = colloc[i];
         const auto& normals_i = normals[i];
+        const auto& gamma_wake_i = gamma_wake[i];
         const i64 wake_m  = iteration;
         const i64 wake_n  = verts_wake.layout.ns(i) - 1;
         const Dim3<i64> n{wake_m * wake_n, rhs.size()};
@@ -447,7 +413,7 @@ void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Devic
             normals_i.stride(2),
             verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i),
             verts_wake.layout.stride(),
-            gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration) * gamma_wake.layout.ns(i),
+            gamma_wake_i.ptr() + gamma_wake_i.offset({0, gamma_wake_i.shape(1) - iteration}),
             rhs.ptr(),
             sigma_vatistas
         );
@@ -455,35 +421,23 @@ void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Devic
     }
 }
 
-void BackendCUDA::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, i32 iteration) {
+void BackendCUDA::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wake, f32 dt, i32 iteration) {
     // TODO
 }
 
-void BackendCUDA::gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, i32 iteration) {
-    // const tiny::ScopedTimer timer("Shed Gamma");
-
-    memory->copy(Location::Device, gamma_wing_prev.ptr, 1, Location::Device, gamma_wing.ptr, 1, sizeof(f32), gamma_wing.size());
-    for (i64 i = 0; i < gamma_wake.layout.surfaces().size(); i++) {
-        assert(iteration < gamma_wake.layout.nc(i));
-        f32* gamma_wake_ptr = gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration - 1) * gamma_wake.layout.ns(i);
-        f32* gamma_wing_ptr = gamma_wing.ptr + gamma_wing.layout.offset(i) + (gamma_wing.layout.nc(i) - 1) * gamma_wing.layout.ns(i); // last row
-        memory->copy(Location::Device, gamma_wake_ptr, 1, Location::Device, gamma_wing_ptr, 1, sizeof(f32), gamma_wing.layout.ns(i));
-    }
-}
-
-f32 BackendCUDA::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const FlowData& flow, f32 area) {
+f32 BackendCUDA::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) {
     f32 h_cl = 0.0f;
     cudaMemset(d_val, 0, sizeof(f32));
     constexpr Dim3<i32> block{32, 16};
-    const Dim3<i64> n{gamma_delta.layout.ns(), gamma_delta.layout.nc()};
+    const Dim3<i64> n{gamma_delta.shape(0), gamma_delta.shape(1)};
     kernel_coeff_steady_cl_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
         n.y,
         n.x,
         verts_wing.ptr,
         verts_wing.layout.ld(),
         verts_wing.layout.stride(),
-        gamma_delta.ptr,
-        gamma_delta.layout.ld(),
+        gamma_delta.ptr(),
+        gamma_delta.stride(1),
         float3{flow.freestream.x, flow.freestream.y, flow.freestream.z},
         float3{flow.lift_axis.x, flow.lift_axis.y, flow.lift_axis.z},
         flow.rho,
@@ -496,21 +450,21 @@ f32 BackendCUDA::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wi
     return h_cl / (0.5f * flow.rho * linalg::length2(flow.freestream) * area);
 }
 
-f32 BackendCUDA::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
+f32 BackendCUDA::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
     f32 h_cl = 0.0f;
     cudaMemset(d_val, 0, sizeof(f32));
     constexpr Dim3<i32> block{32, 16};
-    const Dim3<i64> n{gamma.layout.ns(), gamma.layout.nc()};
+    const Dim3<i64> n{gamma_delta.shape(0), gamma_delta.shape(1)};
     kernel_coeff_unsteady_cl_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
         n.y,
         n.x,
-        gamma.layout.ld(),
+        gamma.stride(1),
         verts_wing.ptr,
         verts_wing.layout.stride(),
-        gamma_delta.ptr,
-        gamma.ptr,
-        gamma_prev.ptr,
+        gamma_delta.ptr(),
+        gamma.ptr(),
+        gamma_prev.ptr(),
         velocities.ptr,
         velocities.layout.stride(),
         areas.ptr,
@@ -527,9 +481,9 @@ f32 BackendCUDA::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_
     return h_cl / (0.5f * rho * linalg::length2(freestream) * area);
 }
 
-void BackendCUDA::coeff_unsteady_cl_single_forces(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const TensorView3D<Location::Device>& normals, View<f32, SingleSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {}
+void BackendCUDA::coeff_unsteady_cl_single_forces(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const TensorView3D<Location::Device>& normals, View<f32, SingleSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {}
 
-f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) {
+f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
     f32 h_cd = 0.0f;
     cudaMemset(d_val, 0, sizeof(f32));
     constexpr Dim3<i32> block{64, 8};
@@ -539,7 +493,7 @@ f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wa
         verts_wake.layout.stride(),
         verts_wake.layout.nc(),
         verts_wake.layout.ns(),
-        gamma_wake.ptr,
+        gamma_wake.ptr(),
         sigma_vatistas,
         d_val
     );

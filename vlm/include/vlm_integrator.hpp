@@ -13,12 +13,12 @@ class NewmarkBeta {
         ~NewmarkBeta() = default;
 
         void init(TensorView<f32, 2, Location::Device>& M,
-            TensorView<f32, 2, Location::Device>& C,
+            const TensorView<f32, 2, Location::Device>& C,
             TensorView<f32, 2, Location::Device>& K, f32 dt);
 
         void step(
             TensorView<f32, 2, Location::Device>& M,
-            TensorView<f32, 2, Location::Device>& C,
+            const TensorView<f32, 2, Location::Device>& C,
             TensorView<f32, 1, Location::Device>& v_i,
             TensorView<f32, 1, Location::Device>& a_i,
             TensorView<f32, 1, Location::Device>& du,

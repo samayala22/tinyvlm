@@ -45,10 +45,11 @@ class VLM final: public Simulation {
         
         Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
         Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
-        Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wing{backend->memory.get()}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wake{backend->memory.get()}; // nw*ns
+        MultiTensor2D<Location::Device> gamma_wing_prev{backend->memory.get()}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wing_delta{backend->memory.get()}; // nc*ns
+
         Buffer<f32, Location::HostDevice, MultiSurface> local_velocities{*backend->memory}; // ns*nc*3
         Tensor2D<Location::Host> wake_transform{backend->memory.get()};
         Tensor3D<Location::Device> transforms{backend->memory.get()};
@@ -77,10 +78,11 @@ class NLVLM final: public Simulation {
 
         Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
         Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
-        Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wing{backend->memory.get()}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wake{backend->memory.get()}; // nw*ns
+        MultiTensor2D<Location::Device> gamma_wing_prev{backend->memory.get()}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wing_delta{backend->memory.get()}; // nc*ns
+
         Buffer<f32, Location::HostDevice, MultiSurface> local_velocities{*backend->memory}; // ns*nc*3
         Buffer<f32, Location::Host, MultiSurface> strip_alphas{*backend->memory}; // ns
         Tensor2D<Location::Host> wake_transform{backend->memory.get()};
@@ -107,10 +109,11 @@ class UVLM final: public Simulation {
         // Data
         Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
         Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
-        Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wing{backend->memory.get()}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wake{backend->memory.get()}; // nw*ns
+        MultiTensor2D<Location::Device> gamma_wing_prev{backend->memory.get()}; // nc*ns
+        MultiTensor2D<Location::Device> gamma_wing_delta{backend->memory.get()}; // nc*ns
+
         Buffer<f32, Location::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
         Tensor3D<Location::Host> transforms_h{backend->memory.get()};
         Tensor3D<Location::Device> transforms{backend->memory.get()};
