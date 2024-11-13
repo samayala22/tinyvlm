@@ -38,8 +38,8 @@ int main(int, char**) {
         const std::unique_ptr<Backend> backend = create_backend(backend_name);
         const std::unique_ptr<Memory> memory = backend->create_memory_manager();
 
-        Tensor<f32, 3, Location::Host> tensor_h{*memory};
-        Tensor<f32, 3, Location::Device> tensor_d{*memory};
+        Tensor<f32, 3, Location::Host> tensor_h{memory.get()};
+        Tensor<f32, 3, Location::Device> tensor_d{memory.get()};
 
         const i64 m = 3;
         const i64 n = 3;
@@ -173,7 +173,7 @@ int main(int, char**) {
         }
 
         {
-            Tensor<f32, 1, Location::Host> t{*memory};
+            Tensor<f32, 1, Location::Host> t{memory.get()};
             t.init({10});
             const auto& tv = t.view();
             auto b = tv.reshape(10, 1, 1);

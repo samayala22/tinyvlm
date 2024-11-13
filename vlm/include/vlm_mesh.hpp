@@ -11,7 +11,7 @@
 
 namespace vlm {
 
-// TODO: move functions into cpp file
+// TODO: deprecate this class
 class Mesh {
     public:
     Buffer<f32, Location::HostDevice, MultiSurface> verts_wing_init; // (nc+1)*(ns+1)*3
@@ -45,40 +45,40 @@ class Mesh {
     }
 };
 
-template<i32 N>
-class Assembly {
-    using Shape = std::array<i64, N>;
-    private:
-        std::vector<Shape> m_shapes;
-        std::vector<i64> m_offsets;
+// template<i32 N>
+// class Assembly {
+//     using Shape = std::array<i64, N>;
+//     private:
+//         std::vector<Shape> m_shapes;
+//         std::vector<i64> m_offsets;
 
-        i64 shape_size(const Shape& shape) const {
-            i64 size = 1;
-            for (i64 i = 0; i < N; i++) size *= shape[i];
-            return size;
-        }
-    public:
-        Shape shape(i64 i) const { assert(i < N); return m_shapes[i]; }
-        i64 begin(i64 i) const { assert(i < N); return m_offsets[i]; }
-        i64 end(i64 i) const { assert(i < N); return begin(i) + shape_size(shape(i)); }
-        i64 size() const { return m_shapes.size(); }
-        void add(const Shape& shape) {
-            m_shapes.push_back(shape);
-            if (m_offsets.size() == 0) {
-                m_offsets.push_back(0);
-            } else {
-                m_offsets.push_back(m_offsets.back() + shape_size(shape));
-            }
-        }
-        void clear() {
-            m_shapes.clear();
-            m_offsets.clear();
-        }
-};
+//         i64 shape_size(const Shape& shape) const {
+//             i64 size = 1;
+//             for (i64 i = 0; i < N; i++) size *= shape[i];
+//             return size;
+//         }
+//     public:
+//         Shape shape(i64 i) const { assert(i < N); return m_shapes[i]; }
+//         i64 begin(i64 i) const { assert(i < N); return m_offsets[i]; }
+//         i64 end(i64 i) const { assert(i < N); return begin(i) + shape_size(shape(i)); }
+//         i64 size() const { return m_shapes.size(); }
+//         void add(const Shape& shape) {
+//             m_shapes.push_back(shape);
+//             if (m_offsets.size() == 0) {
+//                 m_offsets.push_back(0);
+//             } else {
+//                 m_offsets.push_back(m_offsets.back() + shape_size(shape));
+//             }
+//         }
+//         void clear() {
+//             m_shapes.clear();
+//             m_offsets.clear();
+//         }
+// };
 
-using Assembly3D = Assembly<3>;
-using Assembly2D = Assembly<2>;
-using Assembly1D = Assembly<1>;
+// using Assembly3D = Assembly<3>;
+// using Assembly2D = Assembly<2>;
+// using Assembly1D = Assembly<1>;
 
 using SurfDims = std::pair<i64, i64>; // nc, ns
 

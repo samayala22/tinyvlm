@@ -25,39 +25,41 @@ class UVLM_2DOF final: public Simulation {
         Buffer<f32, Location::Host, MultiSurface> colloc_pos{*backend->memory}; // (nc)*(ns)*3
 
         // Aero
-        Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
-        Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
+        MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
+        MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
+        Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
+        Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
         Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
         Buffer<f32, Location::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
-        Tensor3D<Location::Host> transforms_h{*backend->memory};
-        Tensor3D<Location::Device> transforms{*backend->memory}; // 4*4*nb_meshes
-        Tensor3D<Location::Device> panel_forces{*backend->memory}; // panels x 3 x timesteps
+        Tensor3D<Location::Host> transforms_h{backend->memory.get()};
+        Tensor3D<Location::Device> transforms{backend->memory.get()}; // 4*4*nb_meshes
+        Tensor3D<Location::Device> panel_forces{backend->memory.get()}; // panels x 3 x timesteps
 
         // Boilerplate (todo: delete this ugly stuff)
         std::vector<i32> condition0;
         std::vector<linalg::alias::float4x4> body_frames; // todo: move this somewhere else
 
         // Structure
-        Tensor2D<Location::Host> M_h{*backend->memory};
-        Tensor2D<Location::Host> C_h{*backend->memory};
-        Tensor2D<Location::Host> K_h{*backend->memory};
-        Tensor2D<Location::Host> u_h{*backend->memory};
-        Tensor2D<Location::Host> v_h{*backend->memory};
-        Tensor2D<Location::Host> a_h{*backend->memory};
-        Tensor1D<Location::Host> t_h{*backend->memory};
+        Tensor2D<Location::Host> M_h{backend->memory.get()};
+        Tensor2D<Location::Host> C_h{backend->memory.get()};
+        Tensor2D<Location::Host> K_h{backend->memory.get()};
+        Tensor2D<Location::Host> u_h{backend->memory.get()};
+        Tensor2D<Location::Host> v_h{backend->memory.get()};
+        Tensor2D<Location::Host> a_h{backend->memory.get()};
+        Tensor1D<Location::Host> t_h{backend->memory.get()};
 
-        Tensor2D<Location::Device> M_d{*backend->memory};
-        Tensor2D<Location::Device> C_d{*backend->memory};
-        Tensor2D<Location::Device> K_d{*backend->memory};
-        Tensor2D<Location::Device> u_d{*backend->memory}; // dof x tsteps
-        Tensor2D<Location::Device> v_d{*backend->memory}; // dof x tsteps
-        Tensor2D<Location::Device> a_d{*backend->memory}; // dof x tsteps
-        Tensor1D<Location::Device> du{*backend->memory}; // dof
-        Tensor1D<Location::Device> dv{*backend->memory}; // dof
-        Tensor1D<Location::Device> da{*backend->memory}; // dof
+        Tensor2D<Location::Device> M_d{backend->memory.get()};
+        Tensor2D<Location::Device> C_d{backend->memory.get()};
+        Tensor2D<Location::Device> K_d{backend->memory.get()};
+        Tensor2D<Location::Device> u_d{backend->memory.get()}; // dof x tsteps
+        Tensor2D<Location::Device> v_d{backend->memory.get()}; // dof x tsteps
+        Tensor2D<Location::Device> a_d{backend->memory.get()}; // dof x tsteps
+        Tensor1D<Location::Device> du{backend->memory.get()}; // dof
+        Tensor1D<Location::Device> dv{backend->memory.get()}; // dof
+        Tensor1D<Location::Device> da{backend->memory.get()}; // dof
 
         NewmarkBeta integrator{backend.get()};
 
@@ -77,6 +79,12 @@ void UVLM_2DOF::alloc_buffers() {
     // Mesh
     verts_wing_pos.alloc(MultiSurface{wing_vertices, 4});
     colloc_pos.alloc(MultiSurface{wing_panels, 3});
+    MultiDim<3> panels_3D;
+    for (auto& [ns, nc] : assembly_wings) {
+        panels_3D.push_back({ns, nc, 3});
+    }
+    normals_d.init(panels_3D);
+    colloc_d.init(panels_3D);
 
     // Data
     lhs.init({n, n});
@@ -121,10 +129,12 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
     }
     transforms_h.view().to(transforms.view());
     backend->displace_wing(transforms.view(), verts_wing_pos.d_view(), mesh.verts_wing_init.d_view());
-    backend->memory->copy(Location::Host, colloc_pos.h_view().ptr, 1, Location::Device, mesh.colloc.d_view().ptr, 1, sizeof(f32), mesh.colloc.d_view().size());
+    for (i32 body = 0; body < nb_meshes; body++) {
+        backend->memory->copy(Location::Host, colloc_pos.h_view().ptr + colloc_pos.h_view().layout.offset(body), 1, Location::Device, colloc_d.views()[body].ptr(), 1, sizeof(f32), colloc_d.views()[body].size());
+    }
     backend->memory->copy(Location::Device, mesh.verts_wing.d_view().ptr, 1, Location::Device, verts_wing_pos.d_view().ptr, 1, sizeof(f32), verts_wing_pos.d_view().size());
     lhs.view().fill(0.f);
-    backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), mesh.colloc.d_view(), mesh.normals.d_view(), mesh.area.d_view());
+    backend->mesh_metrics(0.0f, mesh.verts_wing.d_view(), colloc_d.views(), normals_d.views(), mesh.area.d_view());
 
     // 1. Compute static time step for the simulation
     // auto first_wing = mesh_verts_wing.view().slice(Range{0, assembly.size(0)}, All});

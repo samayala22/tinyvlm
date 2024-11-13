@@ -100,7 +100,7 @@ export void kernel_influence(uniform i64 m, uniform f32* uniform lhs, uniform f3
     uniform float3 vertex2 = {v[0 * v_ld + v_rld +1], v[1 * v_ld + v_rld +1], v[2 * v_ld + v_rld +1]};
     uniform float3 vertex3 = {v[0 * v_ld + v_rld]   , v[1 * v_ld + v_rld]   , v[2 * v_ld + v_rld]   };
 
-    // print("Influencer %: \n", lidx);
+    // print("Influencer: \n");
     // print("Vertex 0: % % %\n", vertex0.x, vertex0.y, vertex0.z);
     // print("Vertex 1: % % %\n", vertex1.x, vertex1.y, vertex1.z);
     // print("Vertex 2: % % %\n", vertex2.x, vertex2.y, vertex2.z);
@@ -110,7 +110,7 @@ export void kernel_influence(uniform i64 m, uniform f32* uniform lhs, uniform f3
         const float3 colloc = {collocs[0 * collocs_ld + i], collocs[1 * collocs_ld + i], collocs[2 * collocs_ld + i]};
         const float3 normal = {normals[0 * normals_ld + i], normals[1 * normals_ld + i], normals[2 * normals_ld + i]};
         
-        // print("Influenced: %\n", ia2);
+        // print("Influenced:\n");
         // print("Colloc: \n % \n % \n %\n", colloc.x, colloc.y, colloc.z);
         // print("Normal: \n % \n % \n %\n", normal.x, normal.y, normal.z);
 

@@ -127,7 +127,7 @@ __inline__ __device__ void kernel_symmetry(float3* inf, float3 colloc, const flo
 
 /// @param v ptr to a upper left vertex of a panel that is along the chord root
 template<i32 X, i32 Y = 1, i32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_influence(i64 m, i64 n, f32* lhs, f32* collocs, i64 collocs_ld, f32* v, i64 v_ld, i64 v_n, f32* normals, i64 normals_ld, f32 sigma) {
+__global__ void __launch_bounds__(X*Y*Z) kernel_influence(i64 m, i64 n, f32* lhs, i64 ld_lhs,f32* collocs, i64 collocs_ld, f32* v, i64 v_ld, i64 v_n, f32* normals, i64 normals_ld, f32 sigma) {
     assert(n % (v_n-1) == 0); // kernel runs on a span wise section of the surface
     const i64 j = blockIdx.y * blockDim.y + threadIdx.y;
     const i64 i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -177,7 +177,7 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_influence(i64 m, i64 n, f32* lhs
     }
     {
         const float3 normal = {sharedNormalX[threadIdx.x], sharedNormalY[threadIdx.x], sharedNormalZ[threadIdx.x]};
-        lhs[j * m + i] += dot(inf, normal);
+        lhs[j * ld_lhs + i] += dot(inf, normal);
     }
 }
 

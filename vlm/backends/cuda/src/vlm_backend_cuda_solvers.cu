@@ -45,10 +45,10 @@ class CUDA_LU final : public LU {
         void factorize(const TensorView<f32, 2, Location::Device>& A) override;
         void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) override;
     private:
-        Tensor<i32, 1, Location::Device> ipiv{*m_memory};
-        Tensor<f32, 1, Location::Device> buffer{*m_memory};
-        Tensor<i32, 1, Location::Device> info_d{*m_memory}; // single value
-        Tensor<i32, 1, Location::Host> info_h{*m_memory}; // single value
+        Tensor<i32, 1, Location::Device> ipiv{m_memory.get()};
+        Tensor<f32, 1, Location::Device> buffer{m_memory.get()};
+        Tensor<i32, 1, Location::Device> info_d{m_memory.get()}; // single value
+        Tensor<i32, 1, Location::Host> info_h{m_memory.get()}; // single value
 };
 
 std::unique_ptr<LU> BackendCUDA::create_lu_solver() { return std::make_unique<CUDA_LU>(create_memory_manager()); }

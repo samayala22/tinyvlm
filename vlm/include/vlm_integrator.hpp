@@ -31,8 +31,8 @@ class NewmarkBeta {
         std::unique_ptr<BLAS> m_blas;
         std::unique_ptr<LU> m_solver;
         
-        Tensor<f32, 2, Location::Device> m_K_eff{*m_memory};
-        Tensor<f32, 1, Location::Device> m_factor{*m_memory};
+        Tensor<f32, 2, Location::Device> m_K_eff{m_memory.get()};
+        Tensor<f32, 1, Location::Device> m_factor{m_memory.get()};
         
         const f32 m_beta;
         const f32 m_gamma;

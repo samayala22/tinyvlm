@@ -80,7 +80,7 @@ class CPU_LU final : public LU {
         void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) override;
 
     private:
-        Tensor<i32, 1, Location::Device> ipiv{*m_memory};
+        Tensor<i32, 1, Location::Device> ipiv{m_memory.get()};
 };
 
 CPU_LU::CPU_LU(std::unique_ptr<Memory> memory) : LU(std::move(memory)) {}
@@ -248,8 +248,6 @@ std::unique_ptr<LU> BackendCPU::create_lu_solver() { return std::make_unique<CPU
 std::unique_ptr<BLAS> BackendCPU::create_blas() { return std::make_unique<CPU_BLAS>(); }
 
 
-// void kernel_inf(i64 m, f32* lhs, f32* influenced, i64 influenced_ld, f32* influencer, i64 influencer_ld, i64 influencer_rld, f32* normals, i64 normals_ld);
-
 /// @brief Assemble the left hand side matrix
 /// @details
 /// Assemble the left hand side matrix of the VLM system. The matrix is
@@ -263,8 +261,6 @@ std::unique_ptr<BLAS> BackendCPU::create_blas() { return std::make_unique<CPU_BL
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
 void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<i32>& condition, i32 iteration) {
     // tiny::ScopedTimer timer("LHS");
-
-    assert(condition.size() == colloc.layout.surfaces().size());
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
 
     tf::Taskflow graph;
@@ -272,47 +268,60 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const M
     auto begin = graph.placeholder();
     auto end = graph.placeholder();
 
-    for (i32 i = 0; i < colloc.layout.surfaces().size(); i++) {
-        f32* lhs_section = lhs.ptr() + colloc.layout.offset(i) * lhs.stride(1);
-        
-        f32* vwing_section = verts_wing.ptr + verts_wing.layout.offset(i);
-        f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(i);
-        const i64 zero = 0;
-        const i64 end_wing = (colloc.layout.nc(i) - 1) * colloc.layout.ns(i);
-        
-        auto wing_pass = graph.for_each_index(zero, end_wing, [&, lhs_section, vwing_section, i] (i64 lidx) {
-            f32* lhs_slice = lhs_section + lidx * lhs.stride(1);
-            f32* vwing_slice = vwing_section + lidx + lidx / colloc.layout.ns(i);
-            ispc::kernel_influence(lhs.shape(0), lhs_slice, colloc.ptr, colloc.layout.stride(), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
-        });
+    i64 offset_j = 0;
+    for (i32 m_j = 0; m_j < colloc.size(); m_j++) {
+        i64 offset_i = 0;
+        for (i32 m_i = 0; m_i < colloc.size(); m_i++) {
+            const i64 condition_idx = m_i + m_j * colloc.size();
+            auto colloc_i = colloc[m_i];
+            auto colloc_j = colloc[m_j];
+            auto normals_i = normals[m_i];
 
-        auto last_row = graph.for_each_index(end_wing, colloc.layout.ns(i) * colloc.layout.nc(i), [&, lhs_section, vwing_section, i] (i64 lidx) {
-            f32* lhs_slice = lhs_section + lidx * lhs.stride(1);
-            f32* vwing_slice = vwing_section + lidx + lidx / colloc.layout.ns(i);
-            ispc::kernel_influence(lhs.shape(0), lhs_slice, colloc.ptr, colloc.layout.stride(), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
-        });
+            f32* lhs_section = lhs.ptr() + offset_i + offset_j * lhs.stride(1);
+            f32* vwing_section = verts_wing.ptr + verts_wing.layout.offset(m_j);
+            f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(m_j);
 
-        auto cond = graph.emplace([&, iteration, i]{
-            return condition[i] < iteration ? 0 : 1; // 0 means continue, 1 means break (exit loop)
-        });
-        auto wake_pass = graph.for_each_index(zero, colloc.layout.ns(i), [&, lhs_section, vwake_section, end_wing, i] (i64 j) {
-            f32* lhs_slice = lhs_section + (j+end_wing) * lhs.stride(1);
-            f32* vwake_slice = vwake_section + (verts_wake.layout.nc(i) - condition[i] - 2) * verts_wake.layout.ns(i) + j;
-            ispc::kernel_influence(lhs.shape(0), lhs_slice, colloc.ptr, colloc.layout.stride(), vwake_slice, verts_wake.layout.stride(), verts_wake.layout.ns(i), normals.ptr, normals.layout.stride(), sigma_vatistas);
-        });
-        auto back = graph.emplace([&, i]{
-            condition[i]++;
-            return 0; // 0 means continue
-        });
+            const i64 zero = 0;
+            const i64 end_wing = (colloc_j.shape(1) - 1) * colloc_j.shape(0);
+            
+            auto wing_pass = graph.for_each_index(zero, end_wing, [=] (i64 lidx) {
+                f32* lhs_slice = lhs_section + lidx * lhs.stride(1);
+                f32* vwing_slice = vwing_section + lidx + lidx / colloc_j.shape(0);
+                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(m_j), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
+            }).name("wing pass");
 
-        begin.precede(wing_pass, last_row);
-        wing_pass.precede(end);
-        last_row.precede(cond);
-        cond.precede(wake_pass, end); // 0 and 1
-        wake_pass.precede(back);
-        back.precede(cond);
+            auto last_row = graph.for_each_index(end_wing, colloc_j.stride(2), [=] (i64 lidx) {
+                f32* lhs_slice = lhs_section + lidx * lhs.stride(1);
+                f32* vwing_slice = vwing_section + lidx + lidx / colloc_j.shape(0);
+                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(m_j), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
+            }).name("last_row");
+
+            auto cond = graph.emplace([=, &condition] {
+                return condition[condition_idx] < iteration ? 0 : 1; // 0 means continue, 1 means break (exit loop)
+            }).name("condition");
+            auto wake_pass = graph.for_each_index(zero, colloc_j.shape(0), [=, &condition] (i64 j) {
+                f32* lhs_slice = lhs_section + (j+end_wing) * lhs.stride(1);
+                f32* vwake_slice = vwake_section + (verts_wake.layout.nc(m_j) - condition[condition_idx] - 2) * verts_wake.layout.ns(m_j) + j;
+                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwake_slice, verts_wake.layout.stride(), verts_wake.layout.ns(m_j), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
+            }).name("wake pass");
+            auto back = graph.emplace([=, &condition]{
+                ++condition[condition_idx];
+                return 0; // 0 means continue
+            }).name("while back");
+
+            begin.precede(wing_pass, last_row);
+            wing_pass.precede(end);
+            last_row.precede(cond);
+            cond.precede(wake_pass, end); // 0 and 1
+            wake_pass.precede(back);
+            back.precede(cond);
+
+            offset_i += colloc[m_i].stride(2); // this is assuming contiguous view
+        }
+        offset_j += colloc[m_j].stride(2);  // this is assuming contiguous view
     }
 
+    // graph.dump(std::cout);
     Executor::get().run(graph).wait();
 }
 
@@ -325,21 +334,28 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const M
 void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& velocities) {
     // const tiny::ScopedTimer timer("RHS");
     assert(rhs.size() == rhs.size()); // single dim
-    assert(rhs.size() == normals.layout.stride());
     assert(rhs.size() == velocities.layout.stride());
 
     tf::Taskflow taskflow;
+    auto end = taskflow.placeholder();
 
-    taskflow.for_each_index((i64)0, (i64)rhs.size(), [&] (i64 i) {
-        *(rhs.ptr() + i) += - (
-            velocities[i + 0 * velocities.layout.stride()] * normals[i + 0 * normals.layout.stride()] +
-            velocities[i + 1 * velocities.layout.stride()] * normals[i + 1 * normals.layout.stride()] +
-            velocities[i + 2 * velocities.layout.stride()] * normals[i + 2 * normals.layout.stride()]);
-    });
+    i64 offset = 0;
+    for (i64 m = 0; m < normals.size(); m++) {
+        auto& normals_i = normals[m];
+        f32* normals_ptr = normals_i.ptr();
+        auto task = taskflow.for_each_index((i64)0, normals_i.stride(2), [&, normals_ptr, offset] (i64 i) {
+            i64 lidx = offset + i;
+            *(rhs.ptr() + lidx) += - (
+                velocities[lidx + 0 * velocities.layout.stride()] * normals_ptr[i + 0 * normals_i.stride(2)] +
+                velocities[lidx + 1 * velocities.layout.stride()] * normals_ptr[i + 1 * normals_i.stride(2)] +
+                velocities[lidx + 2 * velocities.layout.stride()] * normals_ptr[i + 2 * normals_i.stride(2)]);
+        });
+        task.precede(end);
+        offset += normals_i.stride(2);
+    }
     Executor::get().run(taskflow).wait();
 }
 
-// TODO: this doesnt work with multi-mesh rn
 void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const View<f32, MultiSurface>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& verts_wake, i32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
 
@@ -349,8 +365,23 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device
     auto end = taskflow.placeholder();
 
     auto wake_influence = taskflow.for_each_index((i64)0, (i64)rhs.size(), [&] (i64 idx) {
-        for (i32 i = 0; i < normals.layout.surfaces().size(); i++) {
-            ispc::kernel_wake_influence(colloc.ptr + idx, colloc.layout.stride(), normals.ptr + idx, normals.layout.stride(), verts_wake.ptr + verts_wake.layout.offset(i), verts_wake.layout.stride(), verts_wake.layout.nc(i), verts_wake.layout.ns(i), gamma_wake.ptr + gamma_wake.layout.offset(i), rhs.ptr() + idx, sigma_vatistas, iteration);
+        for (i32 i = 0; i < normals.size(); i++) {
+            auto& normals_i = normals[i];
+            auto& colloc_i = colloc[i];
+            ispc::kernel_wake_influence(
+                colloc_i.ptr() + idx,
+                colloc_i.stride(2),
+                normals_i.ptr() + idx,
+                normals_i.stride(2),
+                verts_wake.ptr + verts_wake.layout.offset(i),
+                verts_wake.layout.stride(),
+                verts_wake.layout.nc(i),
+                verts_wake.layout.ns(i),
+                gamma_wake.ptr + gamma_wake.layout.offset(i), 
+                rhs.ptr() + idx,
+                sigma_vatistas,
+                iteration
+            );
         }
     });
 
@@ -428,28 +459,7 @@ f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_win
     return cl;
 }
 
-f32 BackendCPU::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow, const View<f32, MultiSurface>& areas) {
-    // const tiny::ScopedTimer timer("Compute CL");
-    f32 cl = 0.0f;
-    f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i, 0, verts_wing.layout.nc(i), 0, verts_wing.layout.ns(i));
-        const auto gamma_delta_local = gamma_delta.layout.subview(gamma_delta.ptr, i, 0, gamma_delta.layout.nc(i), 0, gamma_delta.layout.ns(i));
-        f32 area_local = 0.f;
-        const f32* areas_local = areas.ptr + areas.layout.offset(i);
-        for (i64 j = 0; j < areas.layout.surface(i).size(); j++) {
-            area_local += areas_local[j];
-        }
-
-        const f32 wing_cl = coeff_steady_cl_single(verts_wing_local, gamma_delta_local, flow, area_local);
-        cl += wing_cl * area_local;
-        total_area += area_local;
-    }
-    cl /= total_area;
-    return cl;
-}
-
-f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const View<f32, SingleSurface>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
+f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
     f32 cl = 0.0f;
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
     const linalg::alias::float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
@@ -472,7 +482,7 @@ f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_w
 
             const linalg::alias::float3 vertex0{verts_wing[0*verts_wing.layout.stride() + v0], verts_wing[1*verts_wing.layout.stride() + v0], verts_wing[2*verts_wing.layout.stride() + v0]}; // upper left
             const linalg::alias::float3 vertex1{verts_wing[0*verts_wing.layout.stride() + v1], verts_wing[1*verts_wing.layout.stride() + v1], verts_wing[2*verts_wing.layout.stride() + v1]}; // upper right
-            const linalg::alias::float3 normal{normals[0*normals.layout.stride() + idx], normals[1*normals.layout.stride() + idx], normals[2*normals.layout.stride() + idx]}; // normal
+            const linalg::alias::float3 normal{normals(j, i, 0), normals(j, i, 1), normals(j, i, 2)};
 
             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
             const f32 gamma_dt = (gamma[idx] - gamma_prev[idx]) / dt; // backward difference
@@ -507,7 +517,7 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
     const View<f32, SingleSurface>& gamma_prev,
     const View<f32, SingleSurface>& velocities,
     const View<f32, SingleSurface>& areas,
-    const View<f32, SingleSurface>& normals,
+    const TensorView3D<Location::Device>& normals,
     View<f32, SingleSurface>& forces,
     const linalg::alias::float3& freestream,
     f32 dt
@@ -530,7 +540,7 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
 
             const linalg::alias::float3 vertex0{verts_wing[0*verts_wing.layout.stride() + v0], verts_wing[1*verts_wing.layout.stride() + v0], verts_wing[2*verts_wing.layout.stride() + v0]}; // upper left
             const linalg::alias::float3 vertex1{verts_wing[0*verts_wing.layout.stride() + v1], verts_wing[1*verts_wing.layout.stride() + v1], verts_wing[2*verts_wing.layout.stride() + v1]}; // upper right
-            const linalg::alias::float3 normal{normals[0*normals.layout.stride() + idx], normals[1*normals.layout.stride() + idx], normals[2*normals.layout.stride() + idx]}; // normal
+            const linalg::alias::float3 normal{normals(j, i, 0), normals(j, i, 1), normals(j, i, 2)};
 
             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
             const f32 gamma_dt = (gamma[idx] - gamma_prev[idx]) / dt; // backward difference
@@ -544,42 +554,6 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
             forces[2*forces.layout.stride() + idx] = force.z;
         }
     }
-}
-
-void BackendCPU::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
-        const auto areas_local = areas.layout.subview(areas.ptr, i);
-        const auto gamma_delta_local = gamma_wing_delta.layout.subview(gamma_wing_delta.ptr, i);
-        const auto gamma_wing_local = gamma_wing.layout.subview(gamma_wing.ptr, i);
-        const auto gamma_wing_prev_local = gamma_wing_prev.layout.subview(gamma_wing_prev.ptr, i);
-        const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
-        const auto normals_local = normals.layout.subview(normals.ptr, i);
-        auto forces_local = forces.layout.subview(forces.ptr, i);
-        coeff_unsteady_cl_single_forces(verts_wing_local, gamma_delta_local, gamma_wing_local, gamma_wing_prev_local, velocities_local, areas_local, normals_local, forces_local, freestream, dt);
-    }
-}
-
-f32 BackendCPU::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt) {
-    // const tiny::ScopedTimer timer("Compute CL");
-    f32 cl = 0.0f;
-    f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
-        const auto areas_local = areas.layout.subview(areas.ptr, i);
-        const auto gamma_delta_local = gamma_wing_delta.layout.subview(gamma_wing_delta.ptr, i);
-        const auto gamma_wing_local = gamma_wing.layout.subview(gamma_wing.ptr, i);
-        const auto gamma_wing_prev_local = gamma_wing_prev.layout.subview(gamma_wing_prev.ptr, i);
-        const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
-        const auto normals_local = normals.layout.subview(normals.ptr, i);
-
-        f32 area_local = mesh_area(areas_local);
-        const f32 wing_cl = coeff_unsteady_cl_single(verts_wing_local, gamma_delta_local, gamma_wing_local, gamma_wing_prev_local, velocities_local, areas_local, normals_local, freestream, dt, area_local);
-        cl += wing_cl * area_local;
-        total_area += area_local;
-    }
-    cl /= total_area;
-    return cl;
 }
 
 // linalg::alias::float3 BackendCPU::coeff_steady_cm(
@@ -626,27 +600,6 @@ f32 BackendCPU::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wak
     return cd;
 }
 
-f32 BackendCPU::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& gamma_wake, const FlowData& flow, const View<f32, MultiSurface>& areas) {
-    // const tiny::ScopedTimer timer("Compute CL");
-    f32 cd = 0.0f;
-    f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
-        const auto verts_wake_local = verts_wake.layout.subview(verts_wake.ptr, i, 0, verts_wake.layout.nc(i), 0, verts_wake.layout.ns(i));
-        const auto gamma_wake_local = gamma_wake.layout.subview(gamma_wake.ptr, i, 0, gamma_wake.layout.nc(i), 0, gamma_wake.layout.ns(i));
-        f32 area_local = 0.f;
-        const f32* areas_local = areas.ptr + areas.layout.offset(i);
-        for (i64 j = 0; j < areas.layout.surface(i).size(); j++) {
-            area_local += areas_local[j];
-        }
-
-        const f32 wing_cd = coeff_steady_cd_single(verts_wake_local, gamma_wake_local, flow, area_local);
-        cd += wing_cd * area_local;
-        total_area += area_local;
-    }
-    cd /= total_area;
-    return cd;
-}
-
 // Using Trefftz plane
 // f32 BackendCPU::compute_coefficient_cl(
 //     const FlowData& flow,
@@ -669,16 +622,16 @@ f32 BackendCPU::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake,
 // TODO: change this to use the per panel local alpha (in global frame)
 void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& areas) {
     // parallel for
-    for (int m = 0; m < colloc.layout.surfaces().size(); m++) {
+    for (int m = 0; m < colloc.size(); m++) {
+        auto& colloc_i = colloc[m];
+        auto& normals_i = normals[m];
         const f32* verts_wing_ptr = verts_wing.ptr + verts_wing.layout.offset(m);
-        f32* colloc_ptr = colloc.ptr + colloc.layout.offset(m);
-        f32* normals_ptr = normals.ptr + normals.layout.offset(m);
         f32* areas_ptr = areas.ptr + areas.layout.offset(m);
         // parallel for
-        for (i64 i = 0; i < colloc.layout.nc(m); i++) {
+        for (i64 i = 0; i < colloc_i.shape(1); i++) {
             // inner vectorized loop
-            for (i64 j = 0; j < colloc.layout.ns(m); j++) {
-                const i64 lidx = i * colloc.layout.ns(m) + j;
+            for (i64 j = 0; j < colloc_i.shape(0); j++) {
+                const i64 lidx = i * colloc_i.shape(0) + j;
                 const i64 v0 = (i+0) * verts_wing.layout.ns(m) + j;
                 const i64 v1 = (i+0) * verts_wing.layout.ns(m) + j + 1;
                 const i64 v2 = (i+1) * verts_wing.layout.ns(m) + j + 1;
@@ -690,9 +643,9 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>
                 const linalg::alias::float3 vertex3{verts_wing_ptr[0*verts_wing.layout.stride() + v3], verts_wing_ptr[1*verts_wing.layout.stride() + v3], verts_wing_ptr[2*verts_wing.layout.stride() + v3]}; // lower left
 
                 const linalg::alias::float3 normal_vec = linalg::normalize(linalg::cross(vertex3 - vertex1, vertex2 - vertex0));
-                normals_ptr[0*normals.layout.stride() + lidx] = normal_vec.x;
-                normals_ptr[1*normals.layout.stride() + lidx] = normal_vec.y;
-                normals_ptr[2*normals.layout.stride() + lidx] = normal_vec.z;
+                normals_i(j, i, 0) = normal_vec.x;
+                normals_i(j, i, 1) = normal_vec.y;
+                normals_i(j, i, 2) = normal_vec.z;
 
                 // 3 vectors f (P0P3), b (P0P2), e (P0P1) to compute the area:
                 // area = 0.5 * (||f x b|| + ||b x e||)
@@ -708,10 +661,10 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>
                 const f32 factor = (alpha_rad < EPS_f) ? 0.5f : 0.5f * (alpha_rad / (std::sin(alpha_rad) + EPS_f));
                 const linalg::alias::float3 chord_vec = 0.5f * (vertex2 + vertex3 - vertex0 - vertex1);
                 const linalg::alias::float3 colloc_pt = 0.5f * (vertex0 + vertex1) + factor * chord_vec;
-                
-                colloc_ptr[0*colloc.layout.stride() + lidx] = colloc_pt.x;
-                colloc_ptr[1*colloc.layout.stride() + lidx] = colloc_pt.y;
-                colloc_ptr[2*colloc.layout.stride() + lidx] = colloc_pt.z;
+
+                colloc_i(j, i, 0) = colloc_pt.x;
+                colloc_i(j, i, 1) = colloc_pt.y;
+                colloc_i(j, i, 2) = colloc_pt.z;
             }
         }
     }

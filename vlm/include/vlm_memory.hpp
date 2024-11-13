@@ -237,11 +237,12 @@ struct CountRanges<First, Rest...> {
     static constexpr i64 value = std::is_same<Range, std::decay_t<First>>::value + CountRanges<Rest...>::value;
 };
 
-template<typename T, int Dim, Location L>
+template<typename T, i64 Dim, Location L>
 class TensorView {
     using DimArray = std::array<i64, Dim>;
     public:
-        TensorView(const Memory& memory, const DimArray& shape, const DimArray& stride, T* const ptr) : m_memory(memory), m_shape(shape), m_stride(stride), m_ptr(ptr) {}
+        TensorView() = default;
+        TensorView(Memory* memory, const DimArray& shape, const DimArray& stride, T* ptr) : m_memory(memory), m_shape(shape), m_stride(stride), m_ptr(ptr) {}
         ~TensorView() = default;
 
         inline i64 size() const {
@@ -252,18 +253,21 @@ class TensorView {
 
         inline i64 size_bytes() const { return size() * sizeof(T); }
         inline const DimArray& stride() const { return m_stride; }
-        inline i64 stride(u32 dim) const { assert(dim < Dim); return m_stride[dim]; }
+        inline i64 stride(i64 dim) const { assert(dim < Dim); return m_stride[dim]; }
         inline const DimArray& shape() const { return m_shape; }
-        inline i64 shape(u32 dim) const { assert(dim < Dim); return m_shape[dim]; }
-        inline constexpr u32 dim() const { return Dim;}
+        inline i64 shape(i64 dim) const { assert(dim < Dim); return m_shape[dim]; }
+        inline constexpr i64 dim() const { return Dim;}
         inline constexpr Location location() const { return L; }
         inline T* ptr() const {return m_ptr;}
 
-        template<typename... Idx> inline constexpr T& operator()(Idx... idx)       { static_assert(L == Location::Host); return m_ptr[offset({idx...})]; }
-        template<typename... Idx> inline constexpr T& operator()(Idx... idx) const { static_assert(L == Location::Host); return m_ptr[offset({idx...})]; }
+        template<typename... Idx> inline constexpr T& operator()(Idx... idx)       { return m_ptr[offset({idx...})]; }
+        template<typename... Idx> inline constexpr T& operator()(Idx... idx) const { return m_ptr[offset({idx...})]; }
 
-        inline constexpr T& operator()(const DimArray& indices)       { static_assert(L == Location::Host); return m_ptr[offset(indices)]; }
-        inline constexpr T& operator()(const DimArray& indices) const { static_assert(L == Location::Host); return m_ptr[offset(indices)]; }
+        inline constexpr T& operator()(const DimArray& indices)       { return m_ptr[offset(indices)]; }
+        inline constexpr T& operator()(const DimArray& indices) const { return m_ptr[offset(indices)]; }
+
+        inline constexpr T& operator[](i64 i)       { return ptr()[i]; }
+        inline constexpr T& operator[](i64 i) const { return ptr()[i]; }
 
         template<typename... Args>
         inline constexpr auto slice(Args... args) const {
@@ -353,9 +357,9 @@ class TensorView {
 
             DimArray dim_idx{0};
 
-            std::function<void(u32)> copy_lambda = [&](u32 di) {
+            std::function<void(i64)> copy_lambda = [&](i64 di) {
                 if (di == i-1) {
-                    m_memory.copy(
+                    m_memory->copy(
                         dst.location(),
                         dst.ptr() + dst.offset(dim_idx),
                         dst.stride(0),
@@ -366,7 +370,7 @@ class TensorView {
                         contiguous
                     );
                 } else {
-                    for (u32 dii = 0; dii < shape(di); dii++) {
+                    for (i64 dii = 0; dii < shape(di); dii++) {
                         dim_idx[di] = dii;
                         copy_lambda(di-1);
                     }
@@ -385,9 +389,9 @@ class TensorView {
 
             DimArray dim_idx{0};
 
-            std::function<void(u32)> fill_lambda = [&](u32 di) {
+            std::function<void(i64)> fill_lambda = [&](i64 di) {
                 if (di == i-1) {
-                    m_memory.fill(
+                    m_memory->fill(
                         this->location(),
                         this->ptr() + this->offset(dim_idx),
                         this->stride(0),
@@ -395,7 +399,7 @@ class TensorView {
                         contiguous
                     );
                 } else {
-                    for (u32 dii = 0; dii < shape(di); dii++) {
+                    for (i64 dii = 0; dii < shape(di); dii++) {
                         dim_idx[di] = dii;
                         fill_lambda(di-1);
                     }
@@ -403,8 +407,6 @@ class TensorView {
             };
             fill_lambda(Dim-1);
         }
-
-        inline T& operator[](i64 i) { static_assert(L == Location::Host); return ptr()[i]; }
 
         inline constexpr i64 offset(const DimArray& indices) const {
             i64 index = 0;
@@ -415,12 +417,12 @@ class TensorView {
             return index;
         }
 
-        const Memory& m_memory;
+        Memory* m_memory = nullptr;
     private:
 
-        const DimArray m_shape{0};
-        const DimArray m_stride{0};
-        T* const m_ptr = nullptr;
+        DimArray m_shape;
+        DimArray m_stride;
+        T* m_ptr = nullptr;
 };
  
 template<typename T, int Dim, Location L>
@@ -431,11 +433,11 @@ private:
     View m_view;
     
 public:
-    Tensor(const Memory& memory) : 
+    Tensor(Memory* memory) : 
         m_view(memory, {}, {}, nullptr) {}
     
     ~Tensor() {
-        m_view.m_memory.free(L, m_view.ptr());
+        m_view.m_memory->free(L, m_view.ptr());
     }
 
     Tensor(const Tensor&) = delete; // no copy constructor
@@ -449,10 +451,9 @@ public:
     Tensor& operator=(Tensor&& other) noexcept = delete;
 
     void init(const DimArray& shape) {
-        auto& mem = m_view.m_memory;
         if (shape == m_view.shape()) return; // dont reallocate if same shape
         // todo: dont reallocate if same size, only change the view shape and strides
-        mem.free(L, m_view.ptr());
+        m_view.m_memory->free(L, m_view.ptr());
         i64 size = shape[0];
         DimArray stride;
         stride[0] = 1;
@@ -460,10 +461,11 @@ public:
             size *= shape[i];
             stride[i] = stride[i - 1] * shape[i - 1];
         }
-        T* const ptr = static_cast<T*>(mem.alloc(L, size * sizeof(T)));
+        T* ptr = static_cast<T*>(m_view.m_memory->alloc(L, size * sizeof(T)));
+        // m_view = View(m_view.m_memory, shape, stride, ptr);
 
         m_view.~View();
-        new (&m_view) View(mem, shape, stride, ptr);
+        new (&m_view) View(m_view.m_memory, shape, stride, ptr);
     }
 
     [[nodiscard]] Tensor<T, Dim, L> clone() {
@@ -480,7 +482,7 @@ public:
     inline const View& view() const { return m_view; }
     inline View& view() { return m_view; }
 
-    inline T& operator[](i64 i) { static_assert(L == Location::Host); return ptr()[i]; }
+    inline T& operator[](i64 i) { return ptr()[i]; }
 };
 
 template<i32 N> using MultiDim = std::vector<std::array<i64, N>>;
@@ -488,7 +490,7 @@ template<i32 N> using MultiDim = std::vector<std::array<i64, N>>;
 template<typename T, int Dim, Location L>
 class MultiTensor {
     public:
-        MultiTensor(const Memory& memory) : m_memory(memory) {}
+        MultiTensor(Memory* memory) : m_memory(memory) {}
         void init(const MultiDim<Dim>& shapes) {
             m_tensors.clear();
             m_tensors.reserve(shapes.size());
@@ -504,7 +506,7 @@ class MultiTensor {
         std::vector<TensorView<T, Dim, L>>& views() const { return m_tensor_views; }
 
     private:
-        const Memory& m_memory;
+        Memory* m_memory;
         std::vector<Tensor<T, Dim, L>> m_tensors;
         std::vector<TensorView<T, Dim, L>> m_tensor_views;
 };

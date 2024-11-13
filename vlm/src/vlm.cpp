@@ -24,7 +24,7 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     for (const auto& m_name : meshes) {
         const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
         auto [nc,ns] = mesh_io.get_dims(m_name);
-        assembly_wings.emplace_back(ns, nc);
+        assembly_wings.push_back({ns, nc});
         wing_panels.emplace_back(SurfaceDims{nc, ns, off_wing_p});
         wing_vertices.emplace_back(SurfaceDims{nc+1, ns+1, off_wing_v});
         off_wing_p += wing_panels.back().size();
@@ -45,8 +45,7 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     }
 };
 
-VLM::VLM(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes), 
-    lhs(*backend->memory), rhs(*backend->memory), gamma_wing(*backend->memory), gamma_wake(*backend->memory), gamma_wing_prev(*backend->memory), gamma_wing_delta(*backend->memory), local_velocities(*backend->memory), transforms(*backend->memory) {
+VLM::VLM(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes) {
     
     solver = backend->create_lu_solver();
 
@@ -67,7 +66,7 @@ VLM::VLM(const std::string& backend_name, const std::vector<std::string>& meshes
 
 void VLM::alloc_buffers() {
     const i64 n = wing_panels.back().offset + wing_panels.back().size();
-    condition0.resize(wing_panels.size());
+    condition0.resize(nb_meshes*nb_meshes);
     MultiDim<3> panels_3D;
     for (auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
@@ -128,8 +127,7 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     };
 }
 
-NLVLM::NLVLM(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes), 
-    lhs(*backend->memory), rhs(*backend->memory), gamma_wing(*backend->memory), gamma_wake(*backend->memory), gamma_wing_prev(*backend->memory), gamma_wing_delta(*backend->memory), local_velocities(*backend->memory), strip_alphas(*backend->memory), transforms(*backend->memory) {
+NLVLM::NLVLM(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes) {
     
     solver = backend->create_lu_solver();
 
@@ -150,7 +148,7 @@ NLVLM::NLVLM(const std::string& backend_name, const std::vector<std::string>& me
 
 void NLVLM::alloc_buffers() {
     const i64 n = wing_panels.back().offset + wing_panels.back().size();
-    condition0.resize(wing_panels.size());
+    condition0.resize(nb_meshes*nb_meshes);
     MultiDim<3> panels_3D;
     for (auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
@@ -289,7 +287,7 @@ void UVLM::alloc_buffers() {
     solver->init(lhs.view());
 
     local_dt.resize(nb_meshes);
-    condition0.resize(nb_meshes);
+    condition0.resize(nb_meshes*nb_meshes);
 }
 
 void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final) {

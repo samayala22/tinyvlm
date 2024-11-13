@@ -40,18 +40,18 @@ class VLM final: public Simulation {
 
         std::vector<i32> condition0; // TODO: remove
 
-        MultiTensor3D<Location::Device> colloc_d{*backend->memory};
-        MultiTensor3D<Location::Device> normals_d{*backend->memory};
+        MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
+        MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
         
-        Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
-        Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
+        Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
+        Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
         Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
         Buffer<f32, Location::HostDevice, MultiSurface> local_velocities{*backend->memory}; // ns*nc*3
-        Tensor2D<Location::Host> wake_transform{*backend->memory};
-        Tensor3D<Location::Device> transforms{*backend->memory};
+        Tensor2D<Location::Host> wake_transform{backend->memory.get()};
+        Tensor3D<Location::Device> transforms{backend->memory.get()};
 
         std::unique_ptr<LU> solver;
     private:
@@ -72,19 +72,19 @@ class NLVLM final: public Simulation {
         const f64 tol = DEFAULT_TOL;
         std::vector<i32> condition0;
 
-        MultiTensor3D<Location::Device> colloc_d{*backend->memory};
-        MultiTensor3D<Location::Device> normals_d{*backend->memory};
+        MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
+        MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
 
-        Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
-        Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
-        Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wake; // nw*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev; // nc*ns
-        Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta; // nc*ns
-        Buffer<f32, Location::HostDevice, MultiSurface> local_velocities; // ns*nc*3
-        Buffer<f32, Location::Host, MultiSurface> strip_alphas; // ns
-        Tensor2D<Location::Host> wake_transform{*backend->memory};
-        Tensor3D<Location::Device> transforms{*backend->memory};
+        Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
+        Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
+        Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
+        Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
+        Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
+        Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
+        Buffer<f32, Location::HostDevice, MultiSurface> local_velocities{*backend->memory}; // ns*nc*3
+        Buffer<f32, Location::Host, MultiSurface> strip_alphas{*backend->memory}; // ns
+        Tensor2D<Location::Host> wake_transform{backend->memory.get()};
+        Tensor3D<Location::Device> transforms{backend->memory.get()};
 
         std::unique_ptr<LU> solver;
     private:
@@ -97,23 +97,23 @@ class UVLM final: public Simulation {
         ~UVLM() = default;
         void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final);
 
-        MultiTensor3D<Location::Device> colloc_d{*backend->memory};
-        MultiTensor3D<Location::Device> normals_d{*backend->memory};
+        MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
+        MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
 
         // Mesh
         Buffer<f32, Location::HostDevice, MultiSurface> verts_wing_pos{*backend->memory}; // (nc+1)*(ns+1)*3
         Buffer<f32, Location::Host, MultiSurface> colloc_pos{*backend->memory}; // (nc)*(ns)*3
 
         // Data
-        Tensor2D<Location::Device> lhs{*backend->memory}; // (ns*nc)^2
-        Tensor1D<Location::Device> rhs{*backend->memory}; // ns*nc
+        Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
+        Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
         Buffer<f32, Location::HostDevice, MultiSurface> gamma_wing{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wake{*backend->memory}; // nw*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_prev{*backend->memory}; // nc*ns
         Buffer<f32, Location::Device, MultiSurface> gamma_wing_delta{*backend->memory}; // nc*ns
         Buffer<f32, Location::HostDevice, MultiSurface> velocities{*backend->memory}; // ns*nc*3
-        Tensor3D<Location::Host> transforms_h{*backend->memory};
-        Tensor3D<Location::Device> transforms{*backend->memory};
+        Tensor3D<Location::Host> transforms_h{backend->memory.get()};
+        Tensor3D<Location::Device> transforms{backend->memory.get()};
         
         std::unique_ptr<LU> solver;
 
