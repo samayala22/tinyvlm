@@ -1,5 +1,6 @@
 #include "vlm_backend.hpp"
 #include "vlm_mesh.hpp"
+#include "vlm_utils.hpp"
 
 #include <string>
 
@@ -49,14 +50,13 @@ Backend::~Backend() {
     memory->free(Location::Device, d_val);
 }
 
-f32 Backend::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_delta, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas) {
+f32 Backend::coeff_steady_cl_multi(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_delta, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas) {
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
+    for (i64 i = 0; i < verts_wing.size(); i++) {
         const f32 area_local = sum(areas[i]);
         const f32 wing_cl = coeff_steady_cl_single(
-            verts_wing_local,
+            verts_wing[i],
             gamma_delta[i],
             flow,
             area_local
@@ -68,20 +68,18 @@ f32 Backend::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, co
     return cl;
 }
 
-f32 Backend::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt) {
+f32 Backend::coeff_unsteady_cl_multi(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt) {
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
-        const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
+    for (i64 i = 0; i < verts_wing.size(); i++) {
 
         const f32 area_local = sum(areas[i]);
         const f32 wing_cl = coeff_unsteady_cl_single(
-            verts_wing_local,
+            verts_wing[i],
             gamma_wing_delta[i],
             gamma_wing[i],
             gamma_wing_prev[i],
-            velocities_local,
+            velocities[i],
             areas[i],
             normals[i],
             freestream,
@@ -95,36 +93,32 @@ f32 Backend::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, 
     return cl;
 }
 
-void Backend::coeff_unsteady_cl_multi_forces(const View<f32, MultiSurface>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, View<f32, MultiSurface>& forces, const linalg::alias::float3& freestream, f32 dt) {
+void Backend::coeff_unsteady_cl_multi_forces(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, MultiTensorView3D<Location::Device>& forces, const linalg::alias::float3& freestream, f32 dt) {
     // todo: parallel
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
-        const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
-        auto forces_local = forces.layout.subview(forces.ptr, i);
+    for (i64 i = 0; i < verts_wing.size(); i++) {
         coeff_unsteady_cl_single_forces(
-            verts_wing_local, 
+            verts_wing[i], 
             gamma_wing_delta[i],
             gamma_wing[i],
             gamma_wing_prev[i],
-            velocities_local,
+            velocities[i],
             areas[i],
             normals[i],
-            forces_local,
+            forces[i],
             freestream,
             dt
         );
     }
 }
 
-f32 Backend::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const MultiTensorView2D<Location::Device>& gamma_wake, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas) {
+f32 Backend::coeff_steady_cd_multi(const MultiTensorView3D<Location::Device>& verts_wake, const MultiTensorView2D<Location::Device>& gamma_wake, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cd = 0.0f;
     f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
-        const auto verts_wake_local = verts_wake.layout.subview(verts_wake.ptr, i);
+    for (i64 i = 0; i < verts_wake.size(); i++) {
         const f32 area_local = sum(areas[i]);
         const f32 wing_cd = coeff_steady_cd_single(
-            verts_wake_local,
+            verts_wake[i],
             gamma_wake[i],
             flow,
             area_local
@@ -134,4 +128,10 @@ f32 Backend::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, co
     }
     cd /= total_area;
     return cd;
+}
+
+void Backend::wake_shed(const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wake, i32 iteration) {
+    for (const auto& [wing, wake] : zip(verts_wing, verts_wake)) {
+        wing.slice(All, -1, All).to(wake.slice(All, -1-iteration, All));
+    }
 }

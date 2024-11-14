@@ -220,7 +220,7 @@ std::unique_ptr<BLAS> BackendCPU::create_blas() { return std::make_unique<CPU_BL
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<i32>& condition, i32 iteration) {
+void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView3D<Location::Device>& verts_wake, std::vector<i32>& condition, i32 iteration) {
     // tiny::ScopedTimer timer("LHS");
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
 
@@ -237,24 +237,24 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const M
             auto colloc_i = colloc[m_i];
             auto colloc_j = colloc[m_j];
             auto normals_i = normals[m_i];
+            auto verts_wing_j = verts_wing[m_j];
+            auto verts_wake_j = verts_wake[m_j];
 
             f32* lhs_section = lhs.ptr() + offset_i + offset_j * lhs.stride(1);
-            f32* vwing_section = verts_wing.ptr + verts_wing.layout.offset(m_j);
-            f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(m_j);
-
+            
             const i64 zero = 0;
             const i64 end_wing = (colloc_j.shape(1) - 1) * colloc_j.shape(0);
             
             auto wing_pass = graph.for_each_index(zero, end_wing, [=] (i64 lidx) {
                 f32* lhs_slice = lhs_section + lidx * lhs.stride(1);
-                f32* vwing_slice = vwing_section + lidx + lidx / colloc_j.shape(0);
-                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(m_j), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
+                f32* vwing_slice = verts_wing_j.ptr() + lidx + lidx / colloc_j.shape(0);
+                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwing_slice, verts_wing_j.stride(2), verts_wing_j.stride(1), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
             }).name("wing pass");
 
             auto last_row = graph.for_each_index(end_wing, colloc_j.stride(2), [=] (i64 lidx) {
                 f32* lhs_slice = lhs_section + lidx * lhs.stride(1);
-                f32* vwing_slice = vwing_section + lidx + lidx / colloc_j.shape(0);
-                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwing_slice, verts_wing.layout.stride(), verts_wing.layout.ns(m_j), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
+                f32* vwing_slice = verts_wing_j.ptr() + lidx + lidx / colloc_j.shape(0);
+                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwing_slice, verts_wing_j.stride(2), verts_wing_j.stride(1), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
             }).name("last_row");
 
             auto cond = graph.emplace([=, &condition] {
@@ -262,8 +262,8 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const M
             }).name("condition");
             auto wake_pass = graph.for_each_index(zero, colloc_j.shape(0), [=, &condition] (i64 j) {
                 f32* lhs_slice = lhs_section + (j+end_wing) * lhs.stride(1);
-                f32* vwake_slice = vwake_section + (verts_wake.layout.nc(m_j) - condition[condition_idx] - 2) * verts_wake.layout.ns(m_j) + j;
-                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwake_slice, verts_wake.layout.stride(), verts_wake.layout.ns(m_j), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
+                f32* vwake_slice = verts_wake_j.ptr() + verts_wake_j.offset({j, -2-condition[condition_idx], 0});
+                ispc::kernel_influence(colloc_i.stride(2), lhs_slice, colloc_i.ptr(), colloc_i.stride(2), vwake_slice, verts_wake_j.stride(2), verts_wake_j.stride(1), normals_i.ptr(), normals_i.stride(2), sigma_vatistas);
             }).name("wake pass");
             auto back = graph.emplace([=, &condition]{
                 ++condition[condition_idx];
@@ -292,24 +292,24 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const M
 /// @param rhs right hand side vector
 /// @param normals normals of all surfaces
 /// @param velocities displacement velocities of all surfaces
-void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& velocities) {
+void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& velocities) {
     // const tiny::ScopedTimer timer("RHS");
-    assert(rhs.size() == rhs.size()); // single dim
-    assert(rhs.size() == velocities.layout.stride());
 
     tf::Taskflow taskflow;
     auto end = taskflow.placeholder();
 
     i64 offset = 0;
     for (i64 m = 0; m < normals.size(); m++) {
-        auto& normals_i = normals[m];
-        f32* normals_ptr = normals_i.ptr();
-        auto task = taskflow.for_each_index((i64)0, normals_i.stride(2), [&, normals_ptr, offset] (i64 i) {
-            i64 lidx = offset + i;
-            *(rhs.ptr() + lidx) += - (
-                velocities[lidx + 0 * velocities.layout.stride()] * normals_ptr[i + 0 * normals_i.stride(2)] +
-                velocities[lidx + 1 * velocities.layout.stride()] * normals_ptr[i + 1 * normals_i.stride(2)] +
-                velocities[lidx + 2 * velocities.layout.stride()] * normals_ptr[i + 2 * normals_i.stride(2)]);
+        const auto& normals_i = normals[m];
+        const auto& velocities_i = velocities[m];
+        auto task = taskflow.for_each_index((i64)0, normals_i.shape(1), [=] (i64 j) {
+            for (i64 i = 0; i < normals_i.shape(0); i++) {
+                const i64 lidx = offset + i + j * normals_i.stride(1);
+                rhs(lidx) += - (
+                    velocities_i(i, j, 0) * normals_i(i, j, 0) +
+                    velocities_i(i, j, 1) * normals_i(i, j, 1) +
+                    velocities_i(i, j, 2) * normals_i(i, j, 2));
+            }
         });
         task.precede(end);
         offset += normals_i.stride(2);
@@ -317,7 +317,7 @@ void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& r
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const View<f32, MultiSurface>& verts_wake, i32 iteration) {
+void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, i32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
 
     tf::Taskflow taskflow;
@@ -330,15 +330,16 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device
             auto& normals_i = normals[i];
             auto& colloc_i = colloc[i];
             auto& gamma_wake_i = gamma_wake[i];
+            auto& verts_wake_i = verts_wake[i];
             ispc::kernel_wake_influence(
                 colloc_i.ptr() + idx,
                 colloc_i.stride(2),
                 normals_i.ptr() + idx,
                 normals_i.stride(2),
-                verts_wake.ptr + verts_wake.layout.offset(i),
-                verts_wake.layout.stride(),
-                verts_wake.layout.nc(i),
-                verts_wake.layout.ns(i),
+                verts_wake_i.ptr(),
+                verts_wake_i.stride(2),
+                verts_wake_i.shape(1),
+                verts_wake_i.shape(0),
                 gamma_wake_i.ptr(), 
                 rhs.ptr() + idx,
                 sigma_vatistas,
@@ -353,71 +354,72 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wake, f32 dt, i32 iteration) {
-    // const tiny::ScopedTimer timer("Wake Rollup");
-    tf::Taskflow taskflow;
+// TODO: reactivate this function taking care to take into account the multibody interactions
+// We should be passing two different pointers of the influenced wake vertex and the start of the influencing wake vertices
+void BackendCPU::displace_wake_rollup(MultiTensorView3D<Location::Device>& wake_rollup, const MultiTensorView3D<Location::Device>& verts_wake, const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wake, f32 dt, i32 iteration) {
+    // // const tiny::ScopedTimer timer("Wake Rollup");
+    // tf::Taskflow taskflow;
 
-    auto begin = taskflow.placeholder();
-    auto end = taskflow.placeholder();
+    // auto begin = taskflow.placeholder();
+    // auto end = taskflow.placeholder();
 
-    for (i64 m = 0; m < gamma_wing.size(); m++) {
-        auto& gamma_wing_i = gamma_wing[m];
-        auto& gamma_wake_i = gamma_wake[m];
-        const i64 wake_begin = (verts_wake.layout.nc(m) - iteration) * (verts_wake.layout.ns(m));
-        const i64 wake_end = verts_wake.layout.nc(m) * (verts_wake.layout.ns(m));
-        auto rollup = taskflow.for_each_index(wake_begin, wake_end, [&] (i64 vidx) {
-            for (i64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
-                ispc::kernel_rollup(
-                    verts_wake.ptr + verts_wake.layout.offset(i),
-                    verts_wake.layout.stride(),
-                    verts_wake.layout.nc(i),
-                    verts_wake.layout.ns(i),
-                    vidx,
-                    verts_wing.ptr + verts_wing.layout.offset(i),
-                    verts_wing.layout.stride(),
-                    verts_wing.layout.nc(i),
-                    verts_wing.layout.ns(i),
-                    wake_rollup.ptr + wake_rollup.layout.offset(i),
-                    wake_rollup.layout.stride(),
-                    gamma_wing_i.ptr(),
-                    gamma_wake_i.ptr(),
-                    sigma_vatistas,
-                    dt,
-                    iteration
-                );
-            }
-        });
-        auto copy = taskflow.emplace([&, wake_begin, wake_end, m]{
-            memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 0*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 0*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
-            memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 1*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 1*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
-            memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 2*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 2*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
-        });
-        begin.precede(rollup);
-        rollup.precede(copy);
-        copy.precede(end);
-    }
+    // for (i64 m = 0; m < gamma_wing.size(); m++) {
+    //     auto& gamma_wing_m = gamma_wing[m];
+    //     auto& gamma_wake_m = gamma_wake[m];
+    //     auto& verts_wake_m = verts_wake[m];
+    //     const i64 wake_begin = (verts_wake_m.shape(1) - iteration) * (verts_wake_m.shape(0));
+    //     const i64 wake_end = verts_wake_m.shape(1) * (verts_wake_m.shape(0));
+    //     auto rollup = taskflow.for_each_index(wake_begin, wake_end, [&] (i64 vidx) {
+    //         for (i64 i = 0; i < verts_wake.size(); i++) {
+    //             ispc::kernel_rollup(
+    //                 verts_wake.ptr + verts_wake.layout.offset(i),
+    //                 verts_wake.layout.stride(),
+    //                 verts_wake.layout.nc(i),
+    //                 verts_wake.layout.ns(i),
+    //                 vidx,
+    //                 verts_wing.ptr + verts_wing.layout.offset(i),
+    //                 verts_wing.layout.stride(),
+    //                 verts_wing.layout.nc(i),
+    //                 verts_wing.layout.ns(i),
+    //                 wake_rollup.ptr + wake_rollup.layout.offset(i),
+    //                 wake_rollup.layout.stride(),
+    //                 gamma_wing_i.ptr(),
+    //                 gamma_wake_i.ptr(),
+    //                 sigma_vatistas,
+    //                 dt,
+    //                 iteration
+    //             );
+    //         }
+    //     });
+    //     auto copy = taskflow.emplace([&, wake_begin, wake_end, m]{
+    //         memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 0*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 0*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
+    //         memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 1*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 1*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
+    //         memory->copy(Location::Device, verts_wake.ptr + verts_wake.layout.offset(m) + wake_begin + 2*verts_wake.layout.stride(), 1, Location::Device, wake_rollup.ptr + wake_rollup.layout.offset(m) + wake_begin + 2*wake_rollup.layout.stride(), 1, sizeof(f32), (wake_end - wake_begin));
+    //     });
+    //     begin.precede(rollup);
+    //     rollup.precede(copy);
+    //     copy.precede(end);
+    // }
 
-    Executor::get().run(taskflow).wait();
+    // Executor::get().run(taskflow).wait();
 }
 
-f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) {
+f32 BackendCPU::coeff_steady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cl = 0.0f;
 
-    for (i64 i = 0; i < gamma_delta.shape(1); i++) {
-        for (i64 j = 0; j < gamma_delta.shape(0); j++) {
-            const i64 v0 = (i+0) * verts_wing.layout.ld() + j;
-            const i64 v1 = (i+0) * verts_wing.layout.ld() + j + 1;
-            const linalg::alias::float3 vertex0{verts_wing.ptr[0*verts_wing.layout.stride() + v0], verts_wing.ptr[1*verts_wing.layout.stride() + v0], verts_wing.ptr[2*verts_wing.layout.stride() + v0]}; // upper left
-            const linalg::alias::float3 vertex1{verts_wing.ptr[0*verts_wing.layout.stride() + v1], verts_wing.ptr[1*verts_wing.layout.stride() + v1], verts_wing.ptr[2*verts_wing.layout.stride() + v1]}; // upper right
-            // const linalg::alias::float3 v3 = mesh.get_v3(li);
+    for (i64 j = 0; j < gamma_delta.shape(1); j++) {
+        for (i64 i = 0; i < gamma_delta.shape(0); i++) {
+            const linalg::alias::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
+            const linalg::alias::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
+
             // Leading edge vector pointing outward from wing root
             const linalg::alias::float3 dl = vertex1 - vertex0;
             // const linalg::alias::float3 local_left_chord = linalg::normalize(v3 - v0);
             // const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
             // dl -= projected_vector; // orthogonal leading edge vector
             // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * gamma_delta(j, i);
+            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * gamma_delta(i, j);
             cl += linalg::dot(force, flow.lift_axis); // projection on the body lift axis
         }
     }
@@ -426,36 +428,27 @@ f32 BackendCPU::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_win
     return cl;
 }
 
-// Note: this doesnt work with wing slices (because of usage of linear index instead of proper indexing)
-f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const View<f32, SingleSurface>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
+f32 BackendCPU::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
     f32 cl = 0.0f;
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
     const linalg::alias::float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
     const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
 
-    for (i64 i = 0; i < gamma_delta.shape(1); i++) {
-        for (i64 j = 0; j < gamma_delta.shape(0); j++) {
-            const i64 idx = gamma_delta.offset({j, i});
+    for (i64 j = 0; j < gamma_delta.shape(1); j++) {
+        for (i64 i = 0; i < gamma_delta.shape(0); i++) {
 
-            linalg::alias::float3 V{
-                velocities[0*velocities.layout.stride() + idx],
-                velocities[1*velocities.layout.stride() + idx],
-                velocities[2*velocities.layout.stride() + idx]
-            }; // local velocity (freestream + displacement vel)
+            const linalg::alias::float3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
 
-            const i64 v0 = (i+0) * verts_wing.layout.ld() + j;
-            const i64 v1 = (i+0) * verts_wing.layout.ld() + j + 1;
-
-            const linalg::alias::float3 vertex0{verts_wing[0*verts_wing.layout.stride() + v0], verts_wing[1*verts_wing.layout.stride() + v0], verts_wing[2*verts_wing.layout.stride() + v0]}; // upper left
-            const linalg::alias::float3 vertex1{verts_wing[0*verts_wing.layout.stride() + v1], verts_wing[1*verts_wing.layout.stride() + v1], verts_wing[2*verts_wing.layout.stride() + v1]}; // upper right
-            const linalg::alias::float3 normal{normals(j, i, 0), normals(j, i, 1), normals(j, i, 2)};
+            const linalg::alias::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
+            const linalg::alias::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
+            const linalg::alias::float3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
 
             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
-            const f32 gamma_dt = (gamma[idx] - gamma_prev[idx]) / dt; // backward difference
+            const f32 gamma_dt = (gamma(i, j) - gamma_prev(i, j)) / dt; // backward difference
 
             // Joukowski method
-            force += rho * gamma_delta[idx] * linalg::cross(V, vertex1 - vertex0); // steady contribution
-            force += rho * gamma_dt * areas[idx] * normal; // unsteady contribution
+            force += rho * gamma_delta(i, j) * linalg::cross(V, vertex1 - vertex0); // steady contribution
+            force += rho * gamma_dt * areas(i, j) * normal; // unsteady contribution
 
             // Katz Plotkin method
             // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
@@ -477,45 +470,37 @@ f32 BackendCPU::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_w
 }
 
 void BackendCPU::coeff_unsteady_cl_single_forces(
-    const View<f32, SingleSurface>& verts_wing,
+    const TensorView3D<Location::Device>& verts_wing,
     const TensorView2D<Location::Device>& gamma_delta,
     const TensorView2D<Location::Device>& gamma,
     const TensorView2D<Location::Device>& gamma_prev,
-    const View<f32, SingleSurface>& velocities,
+    const TensorView3D<Location::Device>& velocities,
     const TensorView2D<Location::Device>& areas,
     const TensorView3D<Location::Device>& normals,
-    View<f32, SingleSurface>& forces,
+    TensorView3D<Location::Device>& forces,
     const linalg::alias::float3& freestream,
     f32 dt
     ) {
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
-    for (i64 i = 0; i < gamma_delta.shape(1); i++) {
-        for (i64 j = 0; j < gamma_delta.shape(0); j++) {
-            const i64 idx = gamma_delta.offset({j, i});
+    for (i64 j = 0; j < gamma_delta.shape(1); j++) {
+        for (i64 i = 0; i < gamma_delta.shape(0); i++) {
 
-            linalg::alias::float3 V{
-                velocities[0*velocities.layout.stride() + idx],
-                velocities[1*velocities.layout.stride() + idx],
-                velocities[2*velocities.layout.stride() + idx]
-            }; // local velocity (freestream + displacement vel)
+            const linalg::alias::float3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
 
-            const i64 v0 = (i+0) * verts_wing.layout.ld() + j;
-            const i64 v1 = (i+0) * verts_wing.layout.ld() + j + 1;
-
-            const linalg::alias::float3 vertex0{verts_wing[0*verts_wing.layout.stride() + v0], verts_wing[1*verts_wing.layout.stride() + v0], verts_wing[2*verts_wing.layout.stride() + v0]}; // upper left
-            const linalg::alias::float3 vertex1{verts_wing[0*verts_wing.layout.stride() + v1], verts_wing[1*verts_wing.layout.stride() + v1], verts_wing[2*verts_wing.layout.stride() + v1]}; // upper right
-            const linalg::alias::float3 normal{normals(j, i, 0), normals(j, i, 1), normals(j, i, 2)};
+            const linalg::alias::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
+            const linalg::alias::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
+            const linalg::alias::float3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
 
             linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
-            const f32 gamma_dt = (gamma[idx] - gamma_prev[idx]) / dt; // backward difference
+            const f32 gamma_dt = (gamma(i, j) - gamma_prev(i, j)) / dt; // backward difference
 
             // Joukowski method
-            force += rho * gamma_delta[idx] * linalg::cross(V, vertex1 - vertex0); // steady contribution
-            force += rho * gamma_dt * areas[idx] * normal; // unsteady contribution
+            force += rho * gamma_delta(i, j) * linalg::cross(V, vertex1 - vertex0); // steady contribution
+            force += rho * gamma_dt * areas(i, j) * normal; // unsteady contribution
 
-            forces[0*forces.layout.stride() + idx] = force.x;
-            forces[1*forces.layout.stride() + idx] = force.y;
-            forces[2*forces.layout.stride() + idx] = force.z;
+            forces(i, j, 0) = force.x;
+            forces(i, j, 1) = force.y;
+            forces(i, j, 2) = force.z;
         }
     }
 }
@@ -557,9 +542,9 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
 //     return cm;
 // }
 
-f32 BackendCPU::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
+f32 BackendCPU::coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
     // tiny::ScopedTimer timer("Compute CD");
-    f32 cd = ispc::kernel_trefftz_cd(verts_wake.ptr, verts_wake.layout.stride(), verts_wake.layout.nc(), verts_wake.layout.ns(), gamma_wake.ptr(), sigma_vatistas);
+    f32 cd = ispc::kernel_trefftz_cd(verts_wake.ptr(), verts_wake.stride(2), verts_wake.shape(1), verts_wake.shape(0), gamma_wake.ptr(), sigma_vatistas);
     cd /= linalg::length2(flow.freestream) * area;
     return cd;
 }
@@ -584,32 +569,26 @@ f32 BackendCPU::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wak
 // }
 
 // TODO: change this to use the per panel local alpha (in global frame)
-void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) {
+void BackendCPU::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) {
     // parallel for
     for (int m = 0; m < colloc.size(); m++) {
-        auto& colloc_i = colloc[m];
-        auto& normals_i = normals[m];
-        auto& areas_i = areas[m];
-        const f32* verts_wing_ptr = verts_wing.ptr + verts_wing.layout.offset(m);
+        auto& colloc_m = colloc[m];
+        auto& normals_m = normals[m];
+        auto& areas_m = areas[m];
+        auto& verts_wing_m = verts_wing[m];
         // parallel for
-        for (i64 i = 0; i < colloc_i.shape(1); i++) {
+        for (i64 j = 0; j < colloc_m.shape(1); j++) {
             // inner vectorized loop
-            for (i64 j = 0; j < colloc_i.shape(0); j++) {
-                const i64 lidx = i * colloc_i.shape(0) + j;
-                const i64 v0 = (i+0) * verts_wing.layout.ns(m) + j;
-                const i64 v1 = (i+0) * verts_wing.layout.ns(m) + j + 1;
-                const i64 v2 = (i+1) * verts_wing.layout.ns(m) + j + 1;
-                const i64 v3 = (i+1) * verts_wing.layout.ns(m) + j;
-
-                const linalg::alias::float3 vertex0{verts_wing_ptr[0*verts_wing.layout.stride() + v0], verts_wing_ptr[1*verts_wing.layout.stride() + v0], verts_wing_ptr[2*verts_wing.layout.stride() + v0]}; // upper left
-                const linalg::alias::float3 vertex1{verts_wing_ptr[0*verts_wing.layout.stride() + v1], verts_wing_ptr[1*verts_wing.layout.stride() + v1], verts_wing_ptr[2*verts_wing.layout.stride() + v1]}; // upper right
-                const linalg::alias::float3 vertex2{verts_wing_ptr[0*verts_wing.layout.stride() + v2], verts_wing_ptr[1*verts_wing.layout.stride() + v2], verts_wing_ptr[2*verts_wing.layout.stride() + v2]}; // lower right
-                const linalg::alias::float3 vertex3{verts_wing_ptr[0*verts_wing.layout.stride() + v3], verts_wing_ptr[1*verts_wing.layout.stride() + v3], verts_wing_ptr[2*verts_wing.layout.stride() + v3]}; // lower left
+            for (i64 i = 0; i < colloc_m.shape(0); i++) {
+                const linalg::alias::float3 vertex0{verts_wing_m(i, j, 0), verts_wing_m(i, j, 1), verts_wing_m(i, j, 2)}; // upper left
+                const linalg::alias::float3 vertex1{verts_wing_m(i+1, j, 0), verts_wing_m(i+1, j, 1), verts_wing_m(i+1, j, 2)}; // upper right
+                const linalg::alias::float3 vertex2{verts_wing_m(i+1, j+1, 0), verts_wing_m(i+1, j+1, 1), verts_wing_m(i+1, j+1, 2)}; // lower right
+                const linalg::alias::float3 vertex3{verts_wing_m(i, j+1, 0), verts_wing_m(i, j+1, 1), verts_wing_m(i, j+1, 2)}; // lower left
 
                 const linalg::alias::float3 normal_vec = linalg::normalize(linalg::cross(vertex3 - vertex1, vertex2 - vertex0));
-                normals_i(j, i, 0) = normal_vec.x;
-                normals_i(j, i, 1) = normal_vec.y;
-                normals_i(j, i, 2) = normal_vec.z;
+                normals_m(i, j, 0) = normal_vec.x;
+                normals_m(i, j, 1) = normal_vec.y;
+                normals_m(i, j, 2) = normal_vec.z;
 
                 // 3 vectors f (P0P3), b (P0P2), e (P0P1) to compute the area:
                 // area = 0.5 * (||f x b|| + ||b x e||)
@@ -618,7 +597,7 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>
                 const linalg::alias::float3 vec_b = vertex2 - vertex0;
                 const linalg::alias::float3 vec_e = vertex1 - vertex0;
 
-                areas_i(j, i) = 0.5f * (linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e)));
+                areas_m(i, j) = 0.5f * (linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e)));
                 
                 // High AoA correction (Aerodynamic Optimization of Aircraft Wings Using a Coupled VLM2.5D RANS Approach) Eq 3.4 p21
                 // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf
@@ -626,9 +605,9 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>
                 const linalg::alias::float3 chord_vec = 0.5f * (vertex2 + vertex3 - vertex0 - vertex1);
                 const linalg::alias::float3 colloc_pt = 0.5f * (vertex0 + vertex1) + factor * chord_vec;
 
-                colloc_i(j, i, 0) = colloc_pt.x;
-                colloc_i(j, i, 1) = colloc_pt.y;
-                colloc_i(j, i, 2) = colloc_pt.z;
+                colloc_m(i, j, 0) = colloc_pt.x;
+                colloc_m(i, j, 1) = colloc_pt.y;
+                colloc_m(i, j, 2) = colloc_pt.z;
             }
         }
     }
@@ -642,28 +621,24 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>
 /// @param j first panel index spanwise
 /// @param n number of panels spanwise
 /// @return mean chord of the set of panels
-f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const TensorView2D<Location::Device>& areas) {
-    // Leading edge vertex
-    f32* leading_edge_ptr = verts_wing.ptr;
-    f32* trailing_edge_ptr = verts_wing.ptr + (verts_wing.layout.nc() - 1) * verts_wing.layout.ns();
-
+f32 BackendCPU::mesh_mac(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& areas) {
     f32 mac = 0.0f;
     // loop over panel chordwise sections in spanwise direction
     // Note: can be done optimally with vertical fused simd
-    for (i64 v = 0; v < areas.shape(0); v++) {
+    for (i64 i = 0; i < areas.shape(0); i++) {
         // left and right chord lengths
-        const f32 dx0 = trailing_edge_ptr[0*verts_wing.layout.stride() + v + 0] - leading_edge_ptr[0*verts_wing.layout.stride() + v + 0];
-        const f32 dy0 = trailing_edge_ptr[1*verts_wing.layout.stride() + v + 0] - leading_edge_ptr[1*verts_wing.layout.stride() + v + 0];
-        const f32 dz0 = trailing_edge_ptr[2*verts_wing.layout.stride() + v + 0] - leading_edge_ptr[2*verts_wing.layout.stride() + v + 0];
-        const f32 dx1 = trailing_edge_ptr[0*verts_wing.layout.stride() + v + 1] - leading_edge_ptr[0*verts_wing.layout.stride() + v + 1];
-        const f32 dy1 = trailing_edge_ptr[1*verts_wing.layout.stride() + v + 1] - leading_edge_ptr[1*verts_wing.layout.stride() + v + 1];
-        const f32 dz1 = trailing_edge_ptr[2*verts_wing.layout.stride() + v + 1] - leading_edge_ptr[2*verts_wing.layout.stride() + v + 1];
+        const f32 dx0 = verts_wing(i+0, 0, 0) - verts_wing(i+0, -1, 0);
+        const f32 dy0 = verts_wing(i+0, 0, 1) - verts_wing(i+0, -1, 0);
+        const f32 dz0 = verts_wing(i+0, 0, 2) - verts_wing(i+0, -1, 0);
+        const f32 dx1 = verts_wing(i+1, 0, 0) - verts_wing(i+1, -1, 0);
+        const f32 dy1 = verts_wing(i+1, 0, 1) - verts_wing(i+1, -1, 0);
+        const f32 dz1 = verts_wing(i+1, 0, 2) - verts_wing(i+1, -1, 0);
         const f32 c0 = std::sqrt(dx0 * dx0 + dy0 * dy0 + dz0 * dz0);
         const f32 c1 = std::sqrt(dx1 * dx1 + dy1 * dy1 + dz1 * dz1);
         // Panel width
-        const f32 dx3 = leading_edge_ptr[0*verts_wing.layout.stride() + v + 1] - leading_edge_ptr[0*verts_wing.layout.stride() + v + 0];
-        const f32 dy3 = leading_edge_ptr[1*verts_wing.layout.stride() + v + 1] - leading_edge_ptr[1*verts_wing.layout.stride() + v + 0];
-        const f32 dz3 = leading_edge_ptr[2*verts_wing.layout.stride() + v + 1] - leading_edge_ptr[2*verts_wing.layout.stride() + v + 0];
+        const f32 dx3 = verts_wing(i+1, 0, 0) - verts_wing(i+0, 0, 0);
+        const f32 dy3 = verts_wing(i+1, 0, 1) - verts_wing(i+0, 0, 1);
+        const f32 dz3 = verts_wing(i+1, 0, 2) - verts_wing(i+0, 0, 2);
         const f32 width = std::sqrt(dx3 * dx3 + dy3 * dy3 + dz3 * dz3);
 
         mac += 0.5f * (c0 * c0 + c1 * c1) * width;
@@ -673,31 +648,31 @@ f32 BackendCPU::mesh_mac(const View<f32, SingleSurface>& verts_wing, const Tenso
     return mac / sum(areas);
 }
 
-void BackendCPU::displace_wing(const TensorView<f32, 3, Location::Device>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) {
+// TODO: replace with wrapped blas call
+void BackendCPU::displace_wing(const TensorView<f32, 3, Location::Device>& transforms, MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wing_init) {
     // const tiny::ScopedTimer t("Mesh::move");
-    assert(transforms.shape(2) == verts_wing.layout.surfaces().size());
-    assert(verts_wing.layout.size() == verts_wing_init.layout.size());
 
     // TODO: parallel for
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        f32* vwing_ptr = verts_wing.ptr + verts_wing.layout.offset(i);
-        f32* vwing_init_ptr = verts_wing_init.ptr + verts_wing_init.layout.offset(i);
-
-        cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, 4, static_cast<i32>(verts_wing.layout.surface(i).size()), 4, 1.0f, transforms.ptr() + transforms.offset({0,0,i}), 4, vwing_init_ptr, static_cast<i32>(verts_wing_init.layout.stride()), 0.0f, vwing_ptr, static_cast<i32>(verts_wing.layout.stride()));
-    }
-}
-
-void BackendCPU::wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, i32 iteration) {
-    assert(verts_wing.layout.surfaces().size() == verts_wake.layout.surfaces().size());
-
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        assert(iteration < verts_wake.layout.nc(i));
-        f32* vwing = verts_wing.ptr + verts_wing.layout.offset(i) + (verts_wing.layout.nc(i) - 1) * verts_wing.layout.ns(i);
-        f32* vwake = verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i);
-
-        memory->copy(Location::Device, vwake + 0*verts_wake.layout.stride(), 1, Location::Device, vwing + 0*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
-        memory->copy(Location::Device, vwake + 1*verts_wake.layout.stride(), 1, Location::Device, vwing + 1*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
-        memory->copy(Location::Device, vwake + 2*verts_wake.layout.stride(), 1, Location::Device, vwing + 2*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
+    for (i64 m = 0; m < verts_wing.size(); m++) {
+        const auto& verts_wing_m = verts_wing[m];
+        const auto& verts_wing_init_m = verts_wing_init[m];
+        assert(verts_wing_m.stride(2) == verts_wing_m.shape(0) * verts_wing_m.shape(1));
+        cblas_sgemm(
+            CblasRowMajor,
+            CblasTrans,
+            CblasNoTrans,
+            4,
+            verts_wing_m.stride(2),
+            4,
+            1.0f,
+            transforms.ptr() + transforms.offset({0,0,m}),
+            4,
+            verts_wing_init_m.ptr(),
+            verts_wing_init_m.stride(2),
+            0.0f,
+            verts_wing_m.ptr(),
+            verts_wing_m.stride(2)
+        );
     }
 }
 

@@ -12,32 +12,21 @@
 
 using namespace vlm;
 
-void mesh_quarterchord(View<f32, SingleSurface>& vertices) {
-    f32* vx = vertices.ptr + 0 * vertices.layout.stride();
-    f32* vy = vertices.ptr + 1 * vertices.layout.stride();
-    f32* vz = vertices.ptr + 2 * vertices.layout.stride();
-
-
-    for (i64 i = 0; i < vertices.layout.nc() - 1; i++) {
-        for (i64 j = 0; j < vertices.layout.ns(); j++) {
-            const i64 v0 = (i+0) * vertices.layout.ns() + j;
-            const i64 v3 = (i+1) * vertices.layout.ns() + j;
-
-            vx[v0] = 0.75f * vx[v0] + 0.25f * vx[v3];
-            vy[v0] = 0.75f * vy[v0] + 0.25f * vy[v3];
-            vz[v0] = 0.75f * vz[v0] + 0.25f * vz[v3];
+void mesh_quarterchord(const TensorView3D<Location::Host>& v) {
+    for (i64 j = 0; j < v.shape(1) - 1; j++) {
+        for (i64 i = 0; i < v.shape(0); i++) {
+            v(i, j, 0) = 0.75f * v(i, j, 0) + 0.25f * v(i, j+1, 0);
+            v(i, j, 1) = 0.75f * v(i, j, 1) + 0.25f * v(i, j+1, 1);
+            v(i, j, 2) = 0.75f * v(i, j, 2) + 0.25f * v(i, j+1, 2);
         }
     }
 
     // Trailing edge vertices
-    const i64 i = vertices.layout.nc() - 2;
-    for (i64 j = 0; j < vertices.layout.ns(); j++) {
-        const i64 v0 = (i+0) * vertices.layout.ns() + j;
-        const i64 v3 = (i+1) * vertices.layout.ns() + j;
-        
-        vx[v3] = (4.f/3.f) * vx[v3] - (1.f/3.f) * vx[v0];
-        vy[v3] = (4.f/3.f) * vy[v3] - (1.f/3.f) * vy[v0];
-        vz[v3] = (4.f/3.f) * vz[v3] - (1.f/3.f) * vz[v0];
+    const i64 j = v.shape(1) - 2;
+    for (i64 i = 0; i < v.shape(0); i++) {
+        v(i, j, 0) = (4.f/3.f) * v(i, j, 0) - (1.f/3.f) * v(i, j-1, 0);
+        v(i, j, 1) = (4.f/3.f) * v(i, j, 1) - (1.f/3.f) * v(i, j-1, 1);
+        v(i, j, 2) = (4.f/3.f) * v(i, j, 2) - (1.f/3.f) * v(i, j-1, 2);
     }
 }
 
@@ -56,31 +45,31 @@ public:
         return {ni-1, nj-1};
     }
 
-    void read(std::ifstream& f, View<f32, SingleSurface>& vertices) const override {
+    void read(std::ifstream& f, const TensorView3D<Location::Host>& vertices) const override {
         i64 ni, nj, nk, blocks;
         f32 x, y, z;
         f >> blocks;
         f >> ni >> nj >> nk;
-        assert(vertices.layout.ns() == nj);
-        assert(vertices.layout.nc() == ni);
-        assert(vertices.layout.dim() == 4);
+        assert(vertices.shape(0) == nj);
+        assert(vertices.shape(1) == ni);
+        assert(vertices.shape(2) == 4);
         
         for (i64 j = 0; j < nj; j++) {
             for (i64 i = 0; i < ni; i++) {
                 f >> x;
-                vertices[vertices.layout.stride() * 0 + nj*i + j] = x;
+                vertices(j, i, 0) = x;
             }
         }
         for (i64 j = 0; j < nj; j++) {
             for (i64 i = 0; i < ni; i++) {
                 f >> y;
-                vertices[vertices.layout.stride() * 1 + nj*i + j] = y;
+                vertices(j, i, 1) = y;
             }
         }
         for (i64 j = 0; j < nj; j++) {
             for (i64 i = 0; i < ni; i++) {
                 f >> z;
-                vertices[vertices.layout.stride() * 2 + nj*i + j] = z;
+                vertices(j, i, 2) = z;
             }
         }
 
@@ -90,9 +79,9 @@ public:
         // if (std::abs(m.v.x[0]) != eps || std::abs(m.v.y[0]) != eps) {
         //     throw std::runtime_error("First vertex of plot3d mesh must be at origin");
         // }
-        const f32 first_y = vertices[vertices.layout.stride() * 1 + 0];
+        const f32 first_y = vertices(0,0,1);
         for (i64 i = 1; i < ni; i++) {
-            if ( vertices[vertices.layout.stride() * 1 + i*nj] != first_y) {
+            if ( vertices(0, i, 1) != first_y) {
                 throw std::runtime_error("Mesh vertices should be ordered in chordwise direction"); // todo get rid of throw
             }
         }
@@ -117,7 +106,7 @@ SurfDims MeshIO::get_dims(const std::string& filename) const {
     return dims;
 }
 
-void MeshIO::read(const std::string& filename, View<f32, SingleSurface>& vertices) const {
+void MeshIO::read(const std::string& filename, const TensorView3D<Location::Host>& vertices) const {
     std::ifstream file_stream(filename);
     if (!file_stream.is_open()) {
         throw std::runtime_error("Failed to open mesh file");
