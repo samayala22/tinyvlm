@@ -21,10 +21,10 @@ int main(int  /*argc*/, char ** /*argv*/) {
         {
             "../../../../mesh/infinite_rectangular_2x2_part0.x",
             "../../../../mesh/infinite_rectangular_2x2_part1.x"
-        },
-        { "../../../../mesh/infinite_rectangular_2x4.x" },
-        { "../../../../mesh/infinite_rectangular_10x5.x" },
-        { "../../../../mesh/infinite_rectangular_20x5.x" }
+        }
+        // { "../../../../mesh/infinite_rectangular_2x4.x" },
+        // { "../../../../mesh/infinite_rectangular_10x5.x" },
+        // { "../../../../mesh/infinite_rectangular_20x5.x" }
     };
 
     // vlm::Executor::instance(1);

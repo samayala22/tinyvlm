@@ -8,8 +8,6 @@
 #include <taskflow/cuda/cudaflow.hpp>
 
 // CUDA
-#include <cusolverDn.h>
-#include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include "helper_math.cuh"
 #include <vector_types.h>
@@ -30,27 +28,6 @@ using namespace vlm;
         } \
     } while (0)
 
-#define CHECK_CUSOLVER(call) \
-    do { \
-        const cusolverStatus_t err = (call); \
-        if (err != CUSOLVER_STATUS_SUCCESS) { \
-            fprintf(stderr, "cuSolver Error in %s at line %d: %d\n", \
-                    __FILE__, __LINE__, err); \
-            exit(EXIT_FAILURE); \
-        } \
-    } while (0)
-
-#define CHECK_CUBLAS(call) \
-    do { \
-        const cublasStatus_t err = (call); \
-        if (err != CUBLAS_STATUS_SUCCESS) { \
-            fprintf(stderr, "cuBLAS Error in %s at line %d: %d\n", \
-                    __FILE__, __LINE__, err); \
-            exit(EXIT_FAILURE); \
-        } \
-    } while (0)
-
-
 void print_cuda_info() {
     cudaDeviceProp device_props;
     cudaGetDeviceProperties(&device_props, 0);
@@ -67,31 +44,19 @@ public:
     }
 
     void create() {
-        // Create handlers
-        CHECK_CUSOLVER(cusolverDnCreate(&m_cusolver));
-        CHECK_CUBLAS(cublasCreate(&m_cublas));
         // Create CUDA stream
         CHECK_CUDA(cudaStreamCreate(&m_stream));
-        // Set handler streams
-        CHECK_CUSOLVER(cusolverDnSetStream(m_cusolver, m_stream));
-        CHECK_CUBLAS(cublasSetStream(m_cublas, m_stream));
     }
 
     void destroy() {
-        CHECK_CUSOLVER(cusolverDnDestroy(m_cusolver));
-        CHECK_CUBLAS(cublasDestroy(m_cublas));
         CHECK_CUDA(cudaStreamDestroy(m_stream)); // destroy stream last
     }
 
-    cusolverDnHandle_t cusolver() {return(m_cusolver);}
     cudaStream_t stream() {return(m_stream);}
-    cublasHandle_t cublas() {return(m_cublas);}
     void sync() {CHECK_CUDA(cudaStreamSynchronize(m_stream));}
 
 private:
-    cusolverDnHandle_t m_cusolver = nullptr;
     cudaStream_t m_stream = nullptr;
-    cublasHandle_t m_cublas = nullptr;
     
     CtxManager() = default;
     ~CtxManager() = default;
@@ -204,10 +169,10 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
             auto colloc_i = colloc[m_i];
             auto colloc_j = colloc[m_j];
             auto normals_i = normals[m_i];
+            auto verts_wing_j = verts_wing[m_j];
+            auto verts_wake_j = verts_wake[m_j];
 
             f32* lhs_section = lhs.ptr() + offset_i + offset_j * lhs.stride(1);
-            f32* vwing_section = verts_wing.ptr + verts_wing.layout.offset(m_j);
-            f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(m_j);
 
             const i64 zero = 0;
             const i64 end_wing = (colloc_j.shape(1) - 1) * colloc_j.shape(0);
@@ -221,9 +186,9 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
                     lhs.stride(1),
                     colloc_i.ptr(),
                     colloc_i.stride(2),
-                    vwing_section,
-                    verts_wing.layout.stride(),
-                    verts_wing.layout.ns(m_j),
+                    verts_wing_j.ptr(),
+                    verts_wing_j.stride(2),
+                    verts_wing_j.stride(1),
                     normals_i.ptr(),
                     normals_i.stride(2),
                     sigma_vatistas
@@ -240,9 +205,9 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
                     lhs.stride(1),
                     colloc_i.ptr(),
                     colloc_i.stride(2),
-                    vwing_section + (verts_wing.layout.nc(m_j)-2)*verts_wing.layout.ns(m_j),
-                    verts_wing.layout.stride(),
-                    verts_wing.layout.ns(m_j),
+                    verts_wing_j.ptr() + verts_wing_j.offset({0, -2, 0}),
+                    verts_wing_j.stride(2),
+                    verts_wing_j.stride(1),
                     normals_i.ptr(),
                     normals_i.stride(2),
                     sigma_vatistas
@@ -263,9 +228,9 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
                     lhs.stride(1),
                     colloc_i.ptr(),
                     colloc_i.stride(2),
-                    vwake_section + (verts_wake.layout.nc(m_j) - condition[condition_idx] - 2) * verts_wake.layout.ns(m_j),
-                    verts_wake.layout.stride(),
-                    verts_wake.layout.ns(m_j), 
+                    verts_wake_j.ptr() + verts_wake_j.offset({0, -2-condition[condition_idx], 0}),
+                    verts_wake_j.stride(2),
+                    verts_wake_j.stride(1),
                     normals_i.ptr(),
                     normals_i.stride(2),
                     sigma_vatistas
@@ -307,13 +272,14 @@ void BackendCUDA::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& 
     for (i64 m = 0; m < normals.size(); m++) {
         assert(offset <= rhs.size());
         const auto& normals_i = normals[m];
+        const auto& velocities_m = velocities[m];
         constexpr Dim3<i32> block{768};
         const Dim3<i64> n{normals_i.stride(2)};
         kernel_rhs_assemble_velocities<block.x><<<grid_size(block, n)(), block()>>>(
             n.x,
             rhs.ptr() + offset,
-            velocities.ptr,
-            velocities.layout.stride(),
+            velocities_m.ptr(),
+            velocities_m.stride(2),
             normals_i.ptr(),
             normals_i.stride(2)
         );
@@ -329,8 +295,9 @@ void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Devic
         const auto& colloc_i = colloc[i];
         const auto& normals_i = normals[i];
         const auto& gamma_wake_i = gamma_wake[i];
+        const auto& verts_wake_i = verts_wake[i];
         const i64 wake_m  = iteration;
-        const i64 wake_n  = verts_wake.layout.ns(i) - 1;
+        const i64 wake_n  = verts_wake_i.shape(0) - 1;
         const Dim3<i64> n{wake_m * wake_n, rhs.size()};
         kernel_wake_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
             wake_m, 
@@ -340,8 +307,8 @@ void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Devic
             colloc_i.stride(2),
             normals_i.ptr(),
             normals_i.stride(2),
-            verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i),
-            verts_wake.layout.stride(),
+            verts_wake_i.ptr() + verts_wake_i.offset({0, -1-iteration, 0}),
+            verts_wake_i.stride(2),
             gamma_wake_i.ptr() + gamma_wake_i.offset({0, gamma_wake_i.shape(1) - iteration}),
             rhs.ptr(),
             sigma_vatistas
@@ -362,9 +329,9 @@ f32 BackendCUDA::coeff_steady_cl_single(const TensorView3D<Location::Device>& ve
     kernel_coeff_steady_cl_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
         n.y,
         n.x,
-        verts_wing.ptr,
-        verts_wing.layout.ld(),
-        verts_wing.layout.stride(),
+        verts_wing.ptr(),
+        verts_wing.stride(1),
+        verts_wing.stride(2),
         gamma_delta.ptr(),
         gamma_delta.stride(1),
         float3{flow.freestream.x, flow.freestream.y, flow.freestream.z},
@@ -389,13 +356,13 @@ f32 BackendCUDA::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& 
         n.y,
         n.x,
         gamma.stride(1),
-        verts_wing.ptr,
-        verts_wing.layout.stride(),
+        verts_wing.ptr(),
+        verts_wing.stride(2),
         gamma_delta.ptr(),
         gamma.ptr(),
         gamma_prev.ptr(),
-        velocities.ptr,
-        velocities.layout.stride(),
+        velocities.ptr(),
+        velocities.stride(2),
         areas.ptr(),
         normals.ptr(),
         normals.stride(2),
@@ -416,12 +383,12 @@ f32 BackendCUDA::coeff_steady_cd_single(const TensorView3D<Location::Device>& ve
     f32 h_cd = 0.0f;
     cudaMemset(d_val, 0, sizeof(f32));
     constexpr Dim3<i32> block{64, 8};
-    const Dim3<i64> n{verts_wake.layout.ns()-1, verts_wake.layout.ns()-1};
+    const Dim3<i64> n{verts_wake.shape(0)-1, verts_wake.shape(0)-1};
     kernel_coeff_steady_cd_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
-        verts_wake.ptr,
-        verts_wake.layout.stride(),
-        verts_wake.layout.nc(),
-        verts_wake.layout.ns(),
+        verts_wake.ptr(),
+        verts_wake.stride(2),
+        verts_wake.shape(1),
+        verts_wake.shape(0),
         gamma_wake.ptr(),
         sigma_vatistas,
         d_val
@@ -437,7 +404,7 @@ void BackendCUDA::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Loca
         const auto& colloc_i = colloc[m];
         const auto& normals_i = normals[m];
         const auto& areas_i = areas[m];
-        const f32* verts_wing_ptr = verts_wing.ptr + verts_wing.layout.offset(m);
+        const auto& verts_wing_m = verts_wing[m];
 
         constexpr Dim3<i32> block{24, 32}; // ns, nc
         const Dim3<i64> n{colloc_i.shape(0), colloc_i.shape(1)};
@@ -449,8 +416,8 @@ void BackendCUDA::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Loca
             normals_i.ptr(),
             normals_i.stride(2),
             areas_i.ptr(),
-            verts_wing_ptr,
-            verts_wing.layout.stride(),
+            verts_wing_m.ptr(),
+            verts_wing_m.stride(2),
             alpha_rad
         );
     }
@@ -459,48 +426,6 @@ void BackendCUDA::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Loca
 f32 BackendCUDA::mesh_mac(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& areas) {
     // TODO
     return 0.0f;
-}
-
-void BackendCUDA::displace_wing(const TensorView<f32, 3, Location::Device>& transforms, MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wing_init) {
-    // const tiny::ScopedTimer t("Mesh::move");
-    assert(transforms.shape(2) == verts_wing.layout.surfaces().size());
-    assert(verts_wing.layout.size() == verts_wing_init.layout.size());
-
-    const f32 alpha = 1.0f;
-    const f32 beta = 0.0f;
-
-    // TODO: parallel for
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        CHECK_CUBLAS(cublasSgemm(
-            CtxManager::getInstance().cublas(),
-            CUBLAS_OP_N,
-            CUBLAS_OP_T,
-            static_cast<int>(verts_wing.layout.surface(i).size()),
-            4,            
-            4,
-            &alpha,
-            verts_wing_init.ptr + verts_wing_init.layout.offset(i),
-            static_cast<int>(verts_wing_init.layout.stride()),
-            transforms.ptr() + transforms.offset({0,0,i}),
-            4,
-            &beta,
-            verts_wing.ptr + verts_wing.layout.offset(i),
-            static_cast<int>(verts_wing.layout.stride())
-        ));
-    }
-}
-
-void BackendCUDA::wake_shed(const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wake, i32 iteration) {
-    assert(verts_wing.layout.surfaces().size() == verts_wake.layout.surfaces().size());
-    for (i64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        assert(iteration < verts_wake.layout.nc(i));
-        f32* vwing = verts_wing.ptr + verts_wing.layout.offset(i) + (verts_wing.layout.nc(i) - 1) * verts_wing.layout.ns(i);
-        f32* vwake = verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i);
-
-        memory->copy(Location::Device, vwake + 0*verts_wake.layout.stride(), 1, Location::Device, vwing + 0*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
-        memory->copy(Location::Device, vwake + 1*verts_wake.layout.stride(), 1, Location::Device, vwing + 1*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
-        memory->copy(Location::Device, vwake + 2*verts_wake.layout.stride(), 1, Location::Device, vwing + 2*verts_wing.layout.stride(), 1, sizeof(f32), verts_wing.layout.ns(i));
-    }
 }
 
 f32 BackendCUDA::sum(const TensorView1D<Location::Device>& tensor) {

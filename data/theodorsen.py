@@ -68,7 +68,8 @@ fig, axs = plt.subplot_mosaic(
 )
 
 files = [
-    "cl_data"
+    "cl_data",
+    "cl_data_correct"
     # "cl_data_025",
     # "cl_data_050",
     # "cl_data_075",

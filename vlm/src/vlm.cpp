@@ -94,11 +94,54 @@ void VLM::alloc_buffers() {
     for (const auto& wake : verts_wake.views()) wake.slice(All, All, 3).fill(1.f);
 }
 
+void print(const TensorView2D<Location::Device>& tensor) {
+    for (i64 i = 0; i < tensor.shape(0); i++) {
+        for (i64 j = 0; j < tensor.shape(1); j++) {
+            std::printf("%6.6f ", tensor(i, j));
+        }
+        std::printf("\n");
+    }
+}
+
+void print(const char* name, const MultiTensorView3D<Location::Device>& tensor) {
+    std::printf("%s\n", name);
+    for (i64 m = 0; m < tensor.size(); m++) {
+        std::printf("Surface %lld\n", m);
+        for (i64 j = 0; j < tensor[m].shape(1); j++) {
+            for (i64 i = 0; i < tensor[m].shape(0); i++) {
+                std::printf("x: %6.6f y: %6.6f z: %6.6f\n", tensor[m](i, j, 0), tensor[m](i, j, 1), tensor[m](i, j, 2));
+            }
+        }
+    }
+}
+
+template<Location L>
+void print(const TensorView3D<L>& tensor) {
+    for (i64 j = 0; j < tensor.shape(1); j++) {
+        for (i64 i = 0; i < tensor.shape(0); i++) {
+            std::printf("x: %6.6f y: %6.6f z: %6.6f\n", tensor(i, j, 0), tensor(i, j, 1), tensor(i, j, 2));
+        }
+    }
+}
+
+void print(const char* name, const MultiTensorView2D<Location::Device>& tensor) {
+    std::printf("%s\n", name);
+    for (i64 m = 0; m < tensor.size(); m++) {
+        auto& tensor_m = tensor[m];
+        for (i64 j = 0; j < tensor_m.shape(1); j++) {
+            for (i64 i = 0; i < tensor_m.shape(0); i++) {
+                std::printf("%6.6f \n", tensor_m(i, j));
+            }
+        }
+    }
+}
+
 AeroCoefficients VLM::run(const FlowData& flow) {
     // Reset buffer state
     lhs.view().fill(0.f);
     rhs.view().fill(0.f);
     for (const auto& [wing_init, wing] : zip(verts_wing_init.views(), verts_wing.views())) wing_init.to(wing);
+    
     // Move wing to create 100 chord long wake panels 
     auto init_pos = translation_matrix<f32>({
         -100.0f * flow.u_inf*std::cos(flow.alpha),
@@ -116,6 +159,7 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     backend->wake_shed(verts_wing.views(), verts_wake.views(), 1);
     
     backend->mesh_metrics(flow.alpha, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
+    
     backend->lhs_assemble(lhs.view(), colloc_d.views(), normals_d.views(), verts_wing.views(), verts_wake.views(), condition0,1);
     for (const auto& vel : local_velocities.views()) {
         vel.slice(All, All, 0).fill(flow.freestream.x);

@@ -135,3 +135,23 @@ void Backend::wake_shed(const MultiTensorView3D<Location::Device>& verts_wing, M
         wing.slice(All, -1, All).to(wake.slice(All, -1-iteration, All));
     }
 }
+
+void Backend::displace_wing(const TensorView<f32, 3, Location::Device>& transforms, MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wing_init) {
+    // const tiny::ScopedTimer t("Mesh::move");
+
+    // TODO: parallel for
+    for (i64 i = 0; i < verts_wing.size(); i++) {
+        const auto& verts_wing_i = verts_wing[i];
+        const auto& verts_wing_init_i = verts_wing_init[i];
+
+        blas->gemm(
+            1.0f,
+            verts_wing_init_i.reshape(verts_wing_init_i.shape(0)*verts_wing_init_i.shape(1), 4),
+            transforms.slice(All, All, i),
+            0.0f,
+            verts_wing_i.reshape(verts_wing_i.shape(0)*verts_wing_i.shape(1), 4),
+            BLAS::Trans::No,
+            BLAS::Trans::Yes
+        );
+    }
+}

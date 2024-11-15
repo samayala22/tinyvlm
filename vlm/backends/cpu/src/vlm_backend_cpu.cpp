@@ -648,34 +648,6 @@ f32 BackendCPU::mesh_mac(const TensorView3D<Location::Device>& verts_wing, const
     return mac / sum(areas);
 }
 
-// TODO: replace with wrapped blas call
-void BackendCPU::displace_wing(const TensorView<f32, 3, Location::Device>& transforms, MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wing_init) {
-    // const tiny::ScopedTimer t("Mesh::move");
-
-    // TODO: parallel for
-    for (i64 m = 0; m < verts_wing.size(); m++) {
-        const auto& verts_wing_m = verts_wing[m];
-        const auto& verts_wing_init_m = verts_wing_init[m];
-        assert(verts_wing_m.stride(2) == verts_wing_m.shape(0) * verts_wing_m.shape(1));
-        cblas_sgemm(
-            CblasRowMajor,
-            CblasTrans,
-            CblasNoTrans,
-            4,
-            verts_wing_m.stride(2),
-            4,
-            1.0f,
-            transforms.ptr() + transforms.offset({0,0,m}),
-            4,
-            verts_wing_init_m.ptr(),
-            verts_wing_init_m.stride(2),
-            0.0f,
-            verts_wing_m.ptr(),
-            verts_wing_m.stride(2)
-        );
-    }
-}
-
 // TODO: parallelize
 f32 BackendCPU::sum(const TensorView1D<Location::Device>& tensor) {
     f32 sum = 0.0f;

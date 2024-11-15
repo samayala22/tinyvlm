@@ -24,9 +24,9 @@ void mesh_quarterchord(const TensorView3D<Location::Host>& v) {
     // Trailing edge vertices
     const i64 j = v.shape(1) - 2;
     for (i64 i = 0; i < v.shape(0); i++) {
-        v(i, j, 0) = (4.f/3.f) * v(i, j, 0) - (1.f/3.f) * v(i, j-1, 0);
-        v(i, j, 1) = (4.f/3.f) * v(i, j, 1) - (1.f/3.f) * v(i, j-1, 1);
-        v(i, j, 2) = (4.f/3.f) * v(i, j, 2) - (1.f/3.f) * v(i, j-1, 2);
+        v(i, j+1, 0) = (4.f/3.f) * v(i, j+1, 0) - (1.f/3.f) * v(i, j, 0);
+        v(i, j+1, 1) = (4.f/3.f) * v(i, j+1, 1) - (1.f/3.f) * v(i, j, 1);
+        v(i, j+1, 2) = (4.f/3.f) * v(i, j+1, 2) - (1.f/3.f) * v(i, j, 2);
     }
 }
 
