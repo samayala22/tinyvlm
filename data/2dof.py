@@ -6,6 +6,8 @@ from scipy.integrate import solve_ivp
 from scipy.signal import find_peaks
 from scipy.optimize import curve_fit
 from tqdm import tqdm
+from csaps import csaps
+from numpy import genfromtxt
 
 EPS_sqrt_f = np.sqrt(1.19209e-07)
 
@@ -329,11 +331,12 @@ if __name__ == "__main__":
     eps2 = 0.3
 
     # Dimensionless params
-    # vec_U = np.linspace(1.0, 8, 10)
+    flutter_speed = 6.285
+    vec_U = np.linspace(1.0, 7, 50)
     flutter_ratio = 0.4
-    vec_U = [flutter_ratio * 6.285]
+    # vec_U = [flutter_ratio * flutter_speed]
     newton_err_thresh = 1e-12
-    torsional_spring = 1
+    torsional_spring = 2
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
     if (torsional_spring == 0):
@@ -368,9 +371,9 @@ if __name__ == "__main__":
         )
 
         # Dimensionless parameters
-        dt_nd = 0.05
+        dt_nd = 0.1
         # t_final_nd = U_vel * 200.0
-        t_final_nd = 1500.0
+        t_final_nd = 1000.0
         vec_t_nd = np.arange(0, t_final_nd, dt_nd)
         n = len(vec_t_nd)
 
@@ -441,32 +444,32 @@ if __name__ == "__main__":
             ])
 
         # Newmark V2
-        max_iter = 50
-        for i in range(n-1):
-            t = vec_t_nd[i]
-            F[:,i+1] = F[:,i]
-            delta_F = np.zeros(2)
-            du = np.zeros(2)
-            du_k = np.zeros(2) + 1
-            iteration = 0
-            while (np.linalg.norm(du_k - du) / len(du) > newton_err_thresh):
-                du_k = du[:]
-                # du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i+1] - F[:,i], dt_nd)
-                du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
+        # max_iter = 50
+        # for i in range(n-1):
+        #     t = vec_t_nd[i]
+        #     F[:,i+1] = F[:,i]
+        #     delta_F = np.zeros(2)
+        #     du = np.zeros(2)
+        #     du_k = np.zeros(2) + 1
+        #     iteration = 0
+        #     while (np.linalg.norm(du_k - du) / len(du) > newton_err_thresh):
+        #         du_k = du[:]
+        #         # du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i+1] - F[:,i], dt_nd)
+        #         du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
 
-                u[:,i+1] = u[:,i] + du
-                v[:,i+1] = v[:,i] + dv
-                a[:,i+1] = a[:,i] + da
-                F[:,i+1] = aero(i+1)
-                delta_F = F[:,i+1] - F[:,i]
-                delta_F[0] += - (ndv.omega / ndv.U)**2 * du[0]
-                # delta_F[1] += - 1/(ndv.U**2) * (u[1,i+1] - u[1,i])
-                delta_F[1] += - 1/(ndv.U**2) * (torsional_func(u[1,i+1]) - torsional_func(u[1,i]))
+        #         u[:,i+1] = u[:,i] + du
+        #         v[:,i+1] = v[:,i] + dv
+        #         a[:,i+1] = a[:,i] + da
+        #         F[:,i+1] = aero(i+1)
+        #         delta_F = F[:,i+1] - F[:,i]
+        #         delta_F[0] += - (ndv.omega / ndv.U)**2 * du[0]
+        #         # delta_F[1] += - 1/(ndv.U**2) * (u[1,i+1] - u[1,i])
+        #         delta_F[1] += - 1/(ndv.U**2) * (torsional_func(u[1,i+1]) - torsional_func(u[1,i]))
 
-                iteration += 1
-                if (iteration > max_iter):
-                    print("Newton process did not converge")
-                    break
+        #         iteration += 1
+        #         if (iteration > max_iter):
+        #             print("Newton process did not converge")
+        #             break
             # print("iters: ", iteration)
         
         # A = monolithic_aeroelastic_system(ndv)
@@ -543,12 +546,13 @@ if __name__ == "__main__":
 
             plt.show()
 
-
-        X = fft(u, axis=1)
+        # X = fft(u, axis=1)
+        X = fft(monolithic_sol.y[0:2, :], axis=1)
         freq = fftfreq(n, d= b * dt_nd / U)
         max_freq_idx = np.argmax(np.abs(X), axis=1)
         dominant_freqs = np.abs(freq[max_freq_idx])
         freqs[:, idx] = 2*np.pi * dominant_freqs / omega_a
+
         
         damping_ratios[0, idx] = get_damping_ratio(smoothed_h[offset:])
         damping_ratios[1, idx] = get_damping_ratio(u[1, offset:])
@@ -581,13 +585,25 @@ if __name__ == "__main__":
             constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
             figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
         )
-        axs["damping"].plot(vec_U, damping_ratios[0, :], "o", label="Heave (Iterative)")
-        axs["damping"].plot(vec_U, damping_ratios[1, :], "o", label="Pitch (Iterative)")
+        # axs["damping"].plot(vec_U, damping_ratios[0, :], "o", label="Heave (Iterative)")
+        # axs["damping"].plot(vec_U, damping_ratios[1, :], "o", label="Pitch (Iterative)")
         axs["damping"].plot(vec_U, damping_ratios_m[1, :], "o", label="Pitch (Monolithic)")
-        
-        axs["freq"].plot(vec_U, freqs[0, :], "o", label="Heave (Iterative)")
-        axs["freq"].plot(vec_U, freqs[1, :], "o", label="Pitch (Iterative)")
-        
+
+        xs = np.linspace(1, 7, 100)
+        ys0 = csaps(vec_U, freqs[0, :], xs, smooth=0.993)
+        ys1 = csaps(vec_U, freqs[1, :], xs, smooth=0.993)
+
+        zhao_heave = genfromtxt('./data/zhao_heave.csv', delimiter=',')
+        zhao_pitch = genfromtxt('./data/zhao_pitch.csv', delimiter=',')
+
+        # axs["freq"].plot(vec_U, freqs[0, :], "o", label="Heave (Iterative)")
+        # axs["freq"].plot(vec_U, freqs[1, :], "o", label="Pitch (Iterative)")
+        axs["freq"].plot(xs, ys0, "o", markerfacecolor='none', mew=2, label="Heave")
+        axs["freq"].plot(xs, ys1, "o", markerfacecolor='none', mew=2, label="Pitch")
+        axs["freq"].plot(zhao_heave[:, 0], zhao_heave[:, 1], "D", markerfacecolor='none', mew=2, label="Zhao 2004")
+        axs["freq"].plot(zhao_pitch[:, 0], zhao_pitch[:, 1], "D", markerfacecolor='none', mew=2, label="Zhao 2004")
+        axs["freq"].axvline(x=flutter_speed, color='r', linestyle='--', label='Flutter Speed')
+
         axs["damping"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
         axs["damping"].legend()
         axs["damping"].set_xlabel('U')
@@ -595,8 +611,7 @@ if __name__ == "__main__":
 
         axs["freq"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
         axs["freq"].legend()
-        axs["freq"].set_xlabel('U')
-        axs["freq"].set_ylabel('omega')
-
+        axs["freq"].set_xlabel(r'Reduced Velocity $\bar{U}$')
+        axs["freq"].set_ylabel(r"Frequency ratio $\omega / \omega_{\alpha}$")
 
         plt.show()
