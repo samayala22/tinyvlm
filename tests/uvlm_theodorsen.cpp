@@ -17,33 +17,15 @@
 #include "vlm_executor.hpp"
 #include "vlm_kinematics.hpp"
 
-// #define DEBUG_DISPLACEMENT_DATA
-
 using namespace vlm;
 using namespace linalg::ostream_overloads;
-
-template<typename T>
-void dump_buffer(std::ofstream& stream, T* start, T* end) {
-    for (T* it = start; it != end; it++) {
-        stream << *it << " ";
-    }
-    stream << "\n";
-}
-
-template<typename T>
-void print_buffer(const T* start, i64 size) {
-    std::cout << "[";
-    for (i64 i = 0; i < size; i++) {
-        std::cout << start[i] << ",";
-    }
-    std::cout << "]\n";
-}
 
 int main() {
     const i64 ni = 20;
     const i64 nj = 5;
     // vlm::Executor::instance(1);
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
+    // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x2.x"};
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
@@ -52,7 +34,7 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 10.0f;
+    const f32 cycles = 5.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 amplitude = 0.1f; // amplitude of the wing motion
     const f32 k = 0.5; // reduced frequency

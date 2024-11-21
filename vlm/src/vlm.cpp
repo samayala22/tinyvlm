@@ -116,7 +116,18 @@ void print(const char* name, const MultiTensorView3D<Location::Device>& tensor) 
 }
 
 template<Location L>
-void print(const TensorView3D<L>& tensor) {
+void print(const char* name, const TensorView2D<L>& tensor) {
+    std::printf("%s\n", name);
+    for (i64 j = 0; j < tensor.shape(1); j++) {
+        for (i64 i = 0; i < tensor.shape(0); i++) {
+            std::printf("i: %6lld j: %6lld %6.6f\n", i, j, tensor(i, j));
+        }
+    }
+}
+
+template<Location L>
+void print(const char* name, const TensorView3D<L>& tensor) {
+    std::printf("%s\n", name);
     for (i64 j = 0; j < tensor.shape(1); j++) {
         for (i64 i = 0; i < tensor.shape(0); i++) {
             std::printf("x: %6.6f y: %6.6f z: %6.6f\n", tensor(i, j, 0), tensor(i, j, 1), tensor(i, j, 2));
@@ -386,8 +397,8 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
     // 1.  Compute the fixed time step
     auto& verts_first_wing = verts_wing_init_h.views()[0];
     const f32 dx = verts_first_wing(0, -1, 0) - verts_first_wing(0, -2, 0);
-    const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 0);
-    const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 0);
+    const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
+    const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
     const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
     const auto freestream_transform = kinematics[0].displacement(0.0f);
     // Since freestream transform is linear it is constant for any point in space
@@ -451,11 +462,9 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
         for (i64 m = 0; m < assembly_wings.size(); m++) {
             auto& gamma_wing_i = gamma_wing.views()[m];
             auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
-            auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
             auto& gamma_wake_i = gamma_wake.views()[m];
             i64 end = begin + gamma_wing_i.size();
             rhs.view().slice(Range{begin, end}).to(gamma_wing_i.reshape(gamma_wing_i.size()));
-            gamma_wing_i.to(gamma_wing_prev_i); // save prev iteration
             gamma_wing_i.to(gamma_wing_delta_i);
             gamma_wing_i.slice(All, -1).to(gamma_wake_i.slice(All, -1-i)); // shed to wake
             backend->blas->axpy(-1.0f, gamma_wing_i.slice(All, Range{0, -2}), gamma_wing_delta_i.slice(All, Range{1, -1}));
@@ -472,12 +481,23 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
             }
             cl_data << t << " " << verts_wing_h.views()[0](0, 0, 2) << " " << cl_unsteady << " " << 0.f << "\n";
         }
-        
-        // parallel for
-        for (i64 m = 0; m < assembly_wings.size(); m++) {
-            const auto local_transform = dual_to_float(kinematics[m].displacement(t+dt));
-            local_transform.store(transforms_h.view().ptr() + transforms_h.view().offset({0, 0, m}), transforms_h.view().stride(1));
+
+        {
+            // parallel for
+            i64 begin = 0;
+            for (i64 m = 0; m < assembly_wings.size(); m++) {
+                auto& gamma_wing_i = gamma_wing.views()[m];
+                auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
+
+                i64 end = begin + gamma_wing_i.size();
+                gamma_wing_i.to(gamma_wing_prev_i); // shed gamma
+
+                const auto local_transform = dual_to_float(kinematics[m].displacement(t+dt));
+                local_transform.store(transforms_h.view().ptr() + transforms_h.view().offset({0, 0, m}), transforms_h.view().stride(1));
+                begin = end;
+            }
         }
+
         transforms_h.view().to(transforms.view());
         backend->displace_wing(transforms.view(), verts_wing.views(), verts_wing_pos.views());
         backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
