@@ -33,7 +33,8 @@ void mesh_quarterchord(const TensorView3D<Location::Host>& v) {
 class Plot3DFile : public MeshFile {
 public:
     SurfDims get_dims(std::ifstream& f) const override {
-        i64 ni, nj, nk, blocks;
+        i64 ni, nj, nk;
+        i64 blocks;
         f >> blocks;
         if (blocks != 1) {
             throw std::runtime_error("Only single block plot3d mesh is supported");
@@ -46,7 +47,8 @@ public:
     }
 
     void read(std::ifstream& f, const TensorView3D<Location::Host>& vertices) const override {
-        i64 ni, nj, nk, blocks;
+        i64 ni, nj, nk;
+        i64 blocks;
         f32 x, y, z;
         f >> blocks;
         f >> ni >> nj >> nk;

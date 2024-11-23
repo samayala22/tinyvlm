@@ -27,8 +27,8 @@ class CPU_Kernels;
 /// @brief Memory manager implementation for the CPU backend
 class CPU_Memory final : public Memory {
     public:
-        CPU_Memory() : Memory(true) {}
-        ~CPU_Memory() = default;
+        explicit CPU_Memory() : Memory(true) {}
+        ~CPU_Memory() override= default;
         void* alloc(Location location, i64 size_bytes) const override {return std::malloc(size_bytes);}
         void free(Location location, void* ptr) const override {std::free(ptr);}
         void copy(Location dst_loc, void* dst, i64 dst_stride, Location src_loc, const void* src, i64 src_stride, i64 elem_size, i64 size) const override {
@@ -72,8 +72,8 @@ void print_cpu_info() {
 
 class CPU_LU final : public LU {
     public:
-        CPU_LU(std::unique_ptr<Memory> memory);
-        ~CPU_LU() = default;
+        explicit CPU_LU(std::unique_ptr<Memory> memory);
+        ~CPU_LU() override = default;
         
         void init(const TensorView<f32, 2, Location::Device>& A) override;
         void factorize(const TensorView<f32, 2, Location::Device>& A) override;
@@ -110,8 +110,8 @@ void CPU_LU::solve(const TensorView<f32, 2, Location::Device>& A, const TensorVi
 
 class CPU_BLAS final : public BLAS {
     public:
-        CPU_BLAS() = default;
-        ~CPU_BLAS() = default;
+        explicit CPU_BLAS() = default;
+        ~CPU_BLAS() override= default;
 
         void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, const TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) override;
         void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
@@ -234,11 +234,11 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const M
         i64 offset_i = 0;
         for (i32 m_i = 0; m_i < colloc.size(); m_i++) {
             const i64 condition_idx = m_i + m_j * colloc.size();
-            auto colloc_i = colloc[m_i];
-            auto colloc_j = colloc[m_j];
-            auto normals_i = normals[m_i];
-            auto verts_wing_j = verts_wing[m_j];
-            auto verts_wake_j = verts_wake[m_j];
+            const auto& colloc_i = colloc[m_i];
+            const auto& colloc_j = colloc[m_j];
+            const auto& normals_i = normals[m_i];
+            const auto& verts_wing_j = verts_wing[m_j];
+            const auto& verts_wake_j = verts_wake[m_j];
 
             f32* lhs_section = lhs.ptr() + offset_i + offset_j * lhs.stride(1);
             
@@ -325,12 +325,12 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device
     auto begin = taskflow.placeholder();
     auto end = taskflow.placeholder();
 
-    auto wake_influence = taskflow.for_each_index((i64)0, (i64)rhs.size(), [&] (i64 idx) {
+    auto wake_influence = taskflow.for_each_index((i64)0, rhs.size(), [&] (i64 idx) {
         for (i32 i = 0; i < normals.size(); i++) {
-            auto& normals_i = normals[i];
-            auto& colloc_i = colloc[i];
-            auto& gamma_wake_i = gamma_wake[i];
-            auto& verts_wake_i = verts_wake[i];
+            const auto& normals_i = normals[i];
+            const auto& colloc_i = colloc[i];
+            const auto& gamma_wake_i = gamma_wake[i];
+            const auto& verts_wake_i = verts_wake[i];
             ispc::kernel_wake_influence(
                 colloc_i.ptr() + idx,
                 colloc_i.stride(2),

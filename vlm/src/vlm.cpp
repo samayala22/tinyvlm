@@ -26,7 +26,7 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     }
 
     MultiDim<3> verts_wing_3D;
-    for (auto& [ns, nc] : assembly_wings) {
+    for (const auto& [ns, nc] : assembly_wings) {
         verts_wing_3D.push_back({ns+1, nc+1, 4});
     }
 
@@ -68,7 +68,7 @@ void VLM::alloc_buffers() {
     MultiDim<2> wake_panels_2D;
     MultiDim<3> verts_wake_3D;
 
-    for (auto& [ns, nc] : assembly_wings) {
+    for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
         panels_2D.push_back({ns, nc});
         wake_panels_2D.push_back({ns, 1});
@@ -138,7 +138,7 @@ void print(const char* name, const TensorView3D<L>& tensor) {
 void print(const char* name, const MultiTensorView2D<Location::Device>& tensor) {
     std::printf("%s\n", name);
     for (i64 m = 0; m < tensor.size(); m++) {
-        auto& tensor_m = tensor[m];
+        const auto& tensor_m = tensor[m];
         for (i64 j = 0; j < tensor_m.shape(1); j++) {
             for (i64 i = 0; i < tensor_m.shape(0); i++) {
                 std::printf("%6.6f \n", tensor_m(i, j));
@@ -184,10 +184,10 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     
     i64 begin = 0;
     for (i64 m = 0; m < assembly_wings.size(); m++) {
-        auto& gamma_wing_i = gamma_wing.views()[m];
-        auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
-        auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
-        auto& gamma_wake_i = gamma_wake.views()[m];
+        const auto& gamma_wing_i = gamma_wing.views()[m];
+        const auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
+        const auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
+        const auto& gamma_wake_i = gamma_wake.views()[m];
         i64 end = begin + gamma_wing_i.size();
         rhs.view().slice(Range{begin, end}).to(gamma_wing_i.reshape(gamma_wing_i.size()));
         gamma_wing_i.to(gamma_wing_prev_i); // save prev iteration
@@ -218,7 +218,7 @@ void NLVLM::alloc_buffers() {
     MultiDim<3> verts_wake_3D;
     MultiDim<1> spanwise_1D;
 
-    for (auto& [ns, nc] : assembly_wings) {
+    for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
         panels_2D.push_back({ns, nc});
         wake_panels_2D.push_back({ns, 1});
@@ -293,10 +293,10 @@ AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
         
         i64 begin = 0;
         for (i64 m = 0; m < assembly_wings.size(); m++) {
-            auto& gamma_wing_i = gamma_wing.views()[m];
-            auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
-            auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
-            auto& gamma_wake_i = gamma_wake.views()[m];
+            const auto& gamma_wing_i = gamma_wing.views()[m];
+            const auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
+            const auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
+            const auto& gamma_wake_i = gamma_wake.views()[m];
             i64 end = begin + gamma_wing_i.size();
             rhs.view().slice(Range{begin, end}).to(gamma_wing_i.reshape(gamma_wing_i.size()));
             gamma_wing_i.to(gamma_wing_prev_i); // unused
@@ -353,7 +353,7 @@ void UVLM::alloc_buffers() {
     MultiDim<3> panels_3D;
     MultiDim<2> panels_2D;
     MultiDim<3> verts_wing_3D;
-    for (auto& [ns, nc] : assembly_wings) {
+    for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
         panels_2D.push_back({ns, nc});
         verts_wing_3D.push_back({ns+1, nc+1, 4});
@@ -395,7 +395,7 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
     lhs.view().fill(0.f);
 
     // 1.  Compute the fixed time step
-    auto& verts_first_wing = verts_wing_init_h.views()[0];
+    const auto& verts_first_wing = verts_wing_init_h.views()[0];
     const f32 dx = verts_first_wing(0, -1, 0) - verts_first_wing(0, -2, 0);
     const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
     const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
@@ -409,7 +409,7 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
     {
         MultiDim<2> wake_panels_2D;
         MultiDim<3> verts_wake_3D;
-        for (auto& [ns, nc] : assembly_wings) {
+        for (const auto& [ns, nc] : assembly_wings) {
             wake_panels_2D.push_back({ns, t_steps-1});
             verts_wake_3D.push_back({ns+1, t_steps, 4});
         }
@@ -460,9 +460,9 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
         
         i64 begin = 0;
         for (i64 m = 0; m < assembly_wings.size(); m++) {
-            auto& gamma_wing_i = gamma_wing.views()[m];
-            auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
-            auto& gamma_wake_i = gamma_wake.views()[m];
+            const auto& gamma_wing_i = gamma_wing.views()[m];
+            const auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
+            const auto& gamma_wake_i = gamma_wake.views()[m];
             i64 end = begin + gamma_wing_i.size();
             rhs.view().slice(Range{begin, end}).to(gamma_wing_i.reshape(gamma_wing_i.size()));
             gamma_wing_i.to(gamma_wing_delta_i);
@@ -486,8 +486,8 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
             // parallel for
             i64 begin = 0;
             for (i64 m = 0; m < assembly_wings.size(); m++) {
-                auto& gamma_wing_i = gamma_wing.views()[m];
-                auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
+                const auto& gamma_wing_i = gamma_wing.views()[m];
+                const auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
 
                 i64 end = begin + gamma_wing_i.size();
                 gamma_wing_i.to(gamma_wing_prev_i); // shed gamma

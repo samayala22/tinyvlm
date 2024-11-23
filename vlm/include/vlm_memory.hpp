@@ -57,32 +57,27 @@ class TensorView {
         explicit TensorView(Memory* memory, const DimArray& shape, const DimArray& stride, T* ptr) : m_memory(memory), m_shape(shape), m_stride(stride), m_ptr(ptr) {}
         ~TensorView() = default;
 
-        inline i64 size() const {
-            i64 size = 1;
-            for (i64 i = 0; i < Dim; i++) size *= m_shape[i];
-            return size;
-        }
-
+        inline i64 size() const { return shape_size(m_shape); }
         inline i64 size_bytes() const { return size() * sizeof(T); }
         inline const DimArray& stride() const { return m_stride; }
         inline i64 stride(i64 dim) const { assert(dim < Dim); return m_stride[dim]; }
         inline const DimArray& shape() const { return m_shape; }
         inline i64 shape(i64 dim) const { assert(dim < Dim); return m_shape[dim]; }
-        inline constexpr i64 dim() const { return Dim;}
-        inline constexpr Location location() const { return L; }
+        constexpr i64 dim() const { return Dim;}
+        constexpr Location location() const { return L; }
         inline T* ptr() const {return m_ptr;}
 
-        template<typename... Idx> inline constexpr T& operator()(Idx... idx)       { return m_ptr[offset({idx...})]; }
-        template<typename... Idx> inline constexpr T& operator()(Idx... idx) const { return m_ptr[offset({idx...})]; }
+        template<typename... Idx> constexpr T& operator()(Idx... idx)       { return m_ptr[offset({idx...})]; }
+        template<typename... Idx> constexpr T& operator()(Idx... idx) const { return m_ptr[offset({idx...})]; }
 
-        inline constexpr T& operator()(const DimArray& indices)       { return m_ptr[offset(indices)]; }
-        inline constexpr T& operator()(const DimArray& indices) const { return m_ptr[offset(indices)]; }
+        constexpr T& operator()(const DimArray& indices)       { return m_ptr[offset(indices)]; }
+        constexpr T& operator()(const DimArray& indices) const { return m_ptr[offset(indices)]; }
 
-        inline constexpr T& operator[](i64 i)       { return ptr()[i]; }
-        inline constexpr T& operator[](i64 i) const { return ptr()[i]; }
+        constexpr T& operator[](i64 i)       { return ptr()[i]; }
+        constexpr T& operator[](i64 i) const { return ptr()[i]; }
 
         template<typename... Args>
-        inline constexpr auto slice(Args... args) const {
+        constexpr auto slice(Args... args) const {
             constexpr i64 M = CountRanges<Args...>::value;
             static_assert(sizeof...(args) == Dim, "The number of indices must match the dimension N.");
             static_assert(M <= Dim, "Too many ranges provided compared to the view's dimensionality");
@@ -94,7 +89,7 @@ class TensorView {
 
             i64 argIndex = 0;
             ([&](auto& arg) {
-                if constexpr (std::is_same<std::decay_t<decltype(arg)>, Range>::value) {
+                if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, Range>) {
                     i64 first = arg[0];
                     i64 last = (arg[1] < 0) ? m_shape[argIndex] + arg[1] + 1 : arg[1];
                     assert((first >= 0) && (first < m_shape[argIndex]));
@@ -104,7 +99,7 @@ class TensorView {
                     new_shape[newDimIndex] = last - first;
                     newstride[newDimIndex] = m_stride[argIndex];
                     newDimIndex++;
-                } else if constexpr (std::is_integral<std::decay_t<decltype(arg)>>::value) {
+                } else if constexpr (std::is_integral_v<std::decay_t<decltype(arg)>>) {
                     i64 real_arg = (arg < 0) ? m_shape[argIndex] + arg : arg;
                     assert((real_arg >= 0) && (real_arg < m_shape[argIndex]));
                     newPtr += real_arg * m_stride[argIndex];
@@ -116,7 +111,7 @@ class TensorView {
         }
 
         template<typename... Args>
-        inline constexpr auto reshape(Args... args) const {
+        constexpr auto reshape(Args... args) const {
             constexpr i32 D = sizeof...(Args);
             std::array<i64, D> new_shape = { static_cast<i64>(args)... };
             std::array<i64, D> new_strides;
@@ -220,13 +215,19 @@ class TensorView {
             fill_lambda(Dim-1);
         }
 
-        inline constexpr i64 offset(const DimArray& indices) const {
+        constexpr i64 offset(const DimArray& indices) const {
             i64 index = 0;
             for (i64 i = 0; i < Dim; i++) {
                 i64 idx = (indices[i] < 0) ? indices[i] + m_shape[i] : indices[i];
                 index += idx * m_stride[i];
             }
             return index;
+        }
+
+        constexpr i64 shape_size(const DimArray& shape) const {
+            i64 size = 1;
+            for (i64 i = 0; i < Dim; i++) size *= shape[i];
+            return size;
         }
 
         Memory* m_memory = nullptr;
@@ -263,7 +264,7 @@ public:
 
     void init(const DimArray& shape) {
         if (shape == m_view.shape()) return; // dont reallocate if same shape
-        // todo: dont reallocate if same size, only change the view shape and strides
+        // TODO: dont reallocate if same size, only change the view shape and strides
         m_view.m_memory->free(L, m_view.ptr());
         i64 size = shape[0];
         DimArray stride;
@@ -272,7 +273,7 @@ public:
             size *= shape[i];
             stride[i] = stride[i - 1] * shape[i - 1];
         }
-        T* ptr = static_cast<T*>(m_view.m_memory->alloc(L, size * sizeof(T)));
+        auto ptr = static_cast<T*>(m_view.m_memory->alloc(L, size * sizeof(T)));
         m_view = View(m_view.m_memory, shape, stride, ptr);
     }
 
