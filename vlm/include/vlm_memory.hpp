@@ -19,7 +19,7 @@ enum class Location {
 
 class Memory {
     public:
-        Memory(bool unified) : m_unified(unified) {}
+        explicit Memory(bool unified) : m_unified(unified) {}
         virtual ~Memory() = default;
         virtual void* alloc(Location location, i64 size) const = 0;
         virtual void free(Location location, void* ptr) const = 0;
@@ -54,7 +54,7 @@ class TensorView {
     using DimArray = std::array<i64, Dim>;
     public:
         TensorView() = default;
-        TensorView(Memory* memory, const DimArray& shape, const DimArray& stride, T* ptr) : m_memory(memory), m_shape(shape), m_stride(stride), m_ptr(ptr) {}
+        explicit TensorView(Memory* memory, const DimArray& shape, const DimArray& stride, T* ptr) : m_memory(memory), m_shape(shape), m_stride(stride), m_ptr(ptr) {}
         ~TensorView() = default;
 
         inline i64 size() const {
@@ -245,7 +245,7 @@ private:
     View m_view;
     
 public:
-    Tensor(Memory* memory) : 
+    explicit Tensor(Memory* memory) : 
         m_view(memory, {}, {}, nullptr) {}
     
     ~Tensor() {
@@ -256,8 +256,7 @@ public:
     Tensor& operator=(const Tensor&) = delete; // no copy assignment
     Tensor(Tensor&& other) noexcept 
         : m_view(std::move(other.m_view)) {
-        other.m_view.~View();
-        new (&other.m_view) View(other.m_view.m_memory, {}, {}, nullptr);
+        other.m_view = View(m_view.m_memory, {}, {}, nullptr);
     }
 
     Tensor& operator=(Tensor&& other) noexcept = delete;
@@ -274,10 +273,7 @@ public:
             stride[i] = stride[i - 1] * shape[i - 1];
         }
         T* ptr = static_cast<T*>(m_view.m_memory->alloc(L, size * sizeof(T)));
-        // m_view = View(m_view.m_memory, shape, stride, ptr);
-
-        m_view.~View();
-        new (&m_view) View(m_view.m_memory, shape, stride, ptr);
+        m_view = View(m_view.m_memory, shape, stride, ptr);
     }
 
     [[nodiscard]] Tensor<T, Dim, L> clone() {
@@ -302,7 +298,7 @@ template<i32 N> using MultiDim = std::vector<std::array<i64, N>>;
 template<typename T, int Dim, Location L>
 class MultiTensor {
     public:
-        MultiTensor(Memory* memory) : m_memory(memory) {}
+        explicit MultiTensor(Memory* memory) : m_memory(memory) {}
         void init(const MultiDim<Dim>& shapes) {
             m_tensors.clear();
             m_tensors.reserve(shapes.size());

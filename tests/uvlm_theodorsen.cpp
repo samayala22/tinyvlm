@@ -47,8 +47,8 @@ int main() {
     const f32 initial_angle = 0.0f;
 
     const auto initial_pose = rotation_matrix(
-        linalg::alias::float3{0.0f, 0.0f, 0.0f}, // take into account quarter chord panel offset
-        linalg::alias::float3{0.0f, 1.0f, 0.0f},
+        linalg::float3{0.0f, 0.0f, 0.0f}, // take into account quarter chord panel offset
+        linalg::float3{0.0f, 1.0f, 0.0f},
         to_radians(initial_angle)
     );
 

@@ -66,7 +66,6 @@ class DVars:
         self.I_a = m * x_a**2 # second moment of inertia
 
 class NDVars:
-    @classmethod
     def from_dvars(self, d_vars):
         self.U = d_vars.u_inf / (self.omega_a * d_vars.b) # reduced velocity
         self.mu = d_vars.m / (np.pi * d_vars.rho * d_vars.b**2) # mass ratio

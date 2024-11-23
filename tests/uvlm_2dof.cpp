@@ -18,7 +18,7 @@ class UVLM_2DOF final: public Simulation {
     public:
         UVLM_2DOF(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~UVLM_2DOF() = default;
-        void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final);
+        void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::float4x4>& initial_pose, f32 t_final);
     
         // Mesh (initial position)
         // Buffer<f32, Location::HostDevice, MultiSurface> verts_wing_pos{*backend->memory}; // (nc+1)*(ns+1)*3
@@ -40,7 +40,7 @@ class UVLM_2DOF final: public Simulation {
 
         // Boilerplate (todo: delete this ugly stuff)
         std::vector<i32> condition0;
-        std::vector<linalg::alias::float4x4> body_frames; // todo: move this somewhere else
+        std::vector<linalg::float4x4> body_frames; // todo: move this somewhere else
 
         // Structure
         Tensor2D<Location::Host> M_h{backend->memory.get()};
@@ -122,7 +122,7 @@ void dump_buffer(std::ofstream& stream, T* start, i32 size) {
     stream << "\n";
 }
 
-void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final) {
+void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::float4x4>& initial_pose, f32 t_final) {
     // mesh.verts_wing_init.to_device(); // raw mesh vertices from file
     // for (i64 m = 0; m < kinematics.size(); m++) {
     //     initial_pose[m].store(transforms_h.view().ptr() + transforms_h.view().offset({0, 0, m}), transforms_h.view().stride(1));
@@ -221,12 +221,12 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
     // // WARNING: this only works for single body and 2D like movements
     // auto h_alpha = [&]() -> std::tuple<f32, f32> {
     //     // auto inv_transform = linalg::inverse(body_frames[0]);
-    //     linalg::alias::float4x4 inv_transform = linalg::identity;
+    //     linalg::float4x4 inv_transform = linalg::identity;
     //     auto& verts = mesh.verts_wing.h_view();
     //     i32 p0_idx = 0; // first vertex on chord
     //     i32 p1_idx = (verts.layout.nc(0)-1) * verts.layout.ns(0); // last vertex on chord
-    //     linalg::alias::float4 p0_global = {verts[0*verts.layout.stride() + p0_idx], verts[1*verts.layout.stride() + p0_idx], verts[2*verts.layout.stride() + p0_idx], 1.0f};
-    //     linalg::alias::float4 p1_global = {verts[0*verts.layout.stride() + p1_idx], verts[1*verts.layout.stride() + p1_idx], verts[2*verts.layout.stride() + p1_idx], 1.0f};
+    //     linalg::float4 p0_global = {verts[0*verts.layout.stride() + p0_idx], verts[1*verts.layout.stride() + p0_idx], verts[2*verts.layout.stride() + p0_idx], 1.0f};
+    //     linalg::float4 p1_global = {verts[0*verts.layout.stride() + p1_idx], verts[1*verts.layout.stride() + p1_idx], verts[2*verts.layout.stride() + p1_idx], 1.0f};
     //     auto p0 = linalg::mul(inv_transform, p0_global);
     //     auto p1 = linalg::mul(inv_transform, p1_global);
     //     f32 x0 = 0.25f; // point at quarter chord
@@ -255,7 +255,7 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
     //     // Aero 0
     //     {
 
-    //     const linalg::alias::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t,1), {0.f, 0.f, 0.f, 1.0f});
+    //     const linalg::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t,1), {0.f, 0.f, 0.f, 1.0f});
 
     //     backend->wake_shed(mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), i);
 
@@ -309,7 +309,7 @@ void UVLM_2DOF::run(const std::vector<Kinematics>& kinematics, const std::vector
 
     //     // // Aero 1
     //     // {
-    //     //     const linalg::alias::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t+dt,1), {0.f, 0.f, 0.f, 1.0f});
+    //     //     const linalg::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t+dt,1), {0.f, 0.f, 0.f, 1.0f});
     //     //     backend->wake_shed(mesh.verts_wing.d_view(), mesh.verts_wake.d_view(), i+1);
 
     //     //     // parallel for
@@ -391,8 +391,8 @@ int main() {
     const f32 initial_angle = 0.0f;
 
     const auto initial_pose = rotation_matrix(
-        linalg::alias::float3{0.0f, 0.0f, 0.0f}, // take into account quarter chord panel offset
-        linalg::alias::float3{0.0f, 1.0f, 0.0f},
+        linalg::float3{0.0f, 0.0f, 0.0f}, // take into account quarter chord panel offset
+        linalg::float3{0.0f, 1.0f, 0.0f},
         to_radians(initial_angle)
     );
     

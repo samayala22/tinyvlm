@@ -17,21 +17,21 @@ class FlowData {
     const f32 u_inf; // freestream velocity magnitude
     const f32 rho; // fluid density
 
-    const linalg::alias::float3 freestream;
-    const linalg::alias::float3 lift_axis;
-    const linalg::alias::float3 stream_axis;
+    const linalg::float3 freestream;
+    const linalg::float3 lift_axis;
+    const linalg::float3 stream_axis;
 
     FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_);
-    FlowData(const linalg::alias::float3& freestream_, const f32 rho_);
+    FlowData(const linalg::float3& freestream_, const f32 rho_);
 };
 
 class AeroCoefficients {
     public:
     const f32 cl;
     const f32 cd;
-    const linalg::alias::float3 cm;
+    const linalg::float3 cm;
 
-    AeroCoefficients(const f32 cl_, const f32 cd_, const linalg::alias::float3& cm_) :
+    AeroCoefficients(const f32 cl_, const f32 cd_, const linalg::float3& cm_) :
         cl(cl_),
         cd(cd_),
         cm(cm_)

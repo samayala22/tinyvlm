@@ -8,7 +8,7 @@ namespace vlm {
 
 using tmatrix = linalg::mat<fwd::Float,4,4>;
 
-inline linalg::alias::float4x4 dual_to_float(const tmatrix& m) {
+inline linalg::float4x4 dual_to_float(const tmatrix& m) {
     return {
         {m.x.x.val(), m.x.y.val(), m.x.z.val(), m.x.w.val()},
         {m.y.x.val(), m.y.y.val(), m.y.z.val(), m.y.w.val()},
@@ -22,8 +22,9 @@ class Kinematics {
     Kinematics() = default;
     ~Kinematics() = default;
 
-    void add(std::function<tmatrix(const fwd::Float& t)>&& joint) {
+    Kinematics& add(std::function<tmatrix(const fwd::Float& t)> joint) {
         m_joints.push_back(std::move(joint));
+        return *this;
     }
 
     tmatrix displacement(float t, i64 n) const {
@@ -36,17 +37,16 @@ class Kinematics {
     }
     tmatrix displacement(float t) const {return displacement(t, m_joints.size());}
 
-    linalg::alias::float3 velocity(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) const {
+    linalg::float3 velocity(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) const {
         linalg::vec<fwd::Float,4> new_pt = linalg::mul(transform, vertex);
         return {new_pt.x.grad(), new_pt.y.grad(), new_pt.z.grad()};
     }
 
-    f32 velocity_magnitude(const tmatrix& transform, const linalg::vec<fwd::Float,4> vertex) const {
-        return linalg::length(velocity(transform, vertex));
-    }
+    std::vector<std::function<tmatrix(const fwd::Float& t)>>& joints() { return m_joints; }
 
     private:
     std::vector<std::function<tmatrix(const fwd::Float& t)>> m_joints;
+    linalg::float4x4 m_transform;
 };
 
 template<class T> linalg::mat<T,4,4> translation_matrix(const linalg::vec<T,3> & translation) { return {{1,0,0,0},{0,1,0,0},{0,0,1,0},{translation,1}}; }
@@ -56,7 +56,7 @@ linalg::mat<T,3,3> skew_matrix (const linalg::vec<T,3> & a) {
  return {{0, a.z, -a.y}, {-a.z, 0, a.x}, {a.y, -a.x, 0}}; 
 }
 
-template<class T> linalg::mat<T,4,4> rotation_matrix   (const linalg::vec<T,3> & point, const linalg::vec<T,3> & axis, T angle) {
+template<class T> linalg::mat<T,4,4> rotation_matrix(const linalg::vec<T,3> & point, const linalg::vec<T,3> & axis, T angle) {
     using std::sin; using std::cos;
     using fwd::sin; using fwd::cos;
     const linalg::mat<T,3,3> skew_mat = skew_matrix<T>(axis);

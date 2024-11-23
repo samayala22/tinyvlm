@@ -95,7 +95,7 @@ class UVLM final: public Simulation {
     public:
         UVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~UVLM() = default;
-        void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final);
+        void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::float4x4>& initial_pose, f32 t_final);
 
         MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
         MultiTensor3D<Location::Host> colloc_h{backend->memory.get()};

@@ -410,16 +410,16 @@ f32 BackendCPU::coeff_steady_cl_single(const TensorView3D<Location::Device>& ver
 
     for (i64 j = 0; j < gamma_delta.shape(1); j++) {
         for (i64 i = 0; i < gamma_delta.shape(0); i++) {
-            const linalg::alias::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
-            const linalg::alias::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
+            const linalg::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
+            const linalg::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
 
             // Leading edge vector pointing outward from wing root
-            const linalg::alias::float3 dl = vertex1 - vertex0;
-            // const linalg::alias::float3 local_left_chord = linalg::normalize(v3 - v0);
-            // const linalg::alias::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
+            const linalg::float3 dl = vertex1 - vertex0;
+            // const linalg::float3 local_left_chord = linalg::normalize(v3 - v0);
+            // const linalg::float3 projected_vector = linalg::dot(dl, local_left_chord) * local_left_chord;
             // dl -= projected_vector; // orthogonal leading edge vector
             // Distance from the center of leading edge to the reference point
-            const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * gamma_delta(i, j);
+            const linalg::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * gamma_delta(i, j);
             cl += linalg::dot(force, flow.lift_axis); // projection on the body lift axis
         }
     }
@@ -428,22 +428,22 @@ f32 BackendCPU::coeff_steady_cl_single(const TensorView3D<Location::Device>& ver
     return cl;
 }
 
-f32 BackendCPU::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
+f32 BackendCPU::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt, f32 area) {    
     f32 cl = 0.0f;
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
-    const linalg::alias::float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
-    const linalg::alias::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
+    const linalg::float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
+    const linalg::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
 
     for (i64 j = 0; j < gamma_delta.shape(1); j++) {
         for (i64 i = 0; i < gamma_delta.shape(0); i++) {
 
-            const linalg::alias::float3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
+            const linalg::float3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
 
-            const linalg::alias::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
-            const linalg::alias::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
-            const linalg::alias::float3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
+            const linalg::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
+            const linalg::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
+            const linalg::float3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
 
-            linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
+            linalg::float3 force = {0.0f, 0.0f, 0.0f};
             const f32 gamma_dt = (gamma(i, j) - gamma_prev(i, j)) / dt; // backward difference
 
             // Joukowski method
@@ -451,7 +451,7 @@ f32 BackendCPU::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& v
             force += rho * gamma_dt * areas(i, j) * normal; // unsteady contribution
 
             // Katz Plotkin method
-            // linalg::alias::float3 delta_p = {0.0f, 0.0f, 0.0f};
+            // linalg::float3 delta_p = {0.0f, 0.0f, 0.0f};
             // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
             // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
             // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
@@ -478,20 +478,20 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
     const TensorView2D<Location::Device>& areas,
     const TensorView3D<Location::Device>& normals,
     TensorView3D<Location::Device>& forces,
-    const linalg::alias::float3& freestream,
+    const linalg::float3& freestream,
     f32 dt
     ) {
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
     for (i64 j = 0; j < gamma_delta.shape(1); j++) {
         for (i64 i = 0; i < gamma_delta.shape(0); i++) {
 
-            const linalg::alias::float3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
+            const linalg::float3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
 
-            const linalg::alias::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
-            const linalg::alias::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
-            const linalg::alias::float3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
+            const linalg::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
+            const linalg::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
+            const linalg::float3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
 
-            linalg::alias::float3 force = {0.0f, 0.0f, 0.0f};
+            linalg::float3 force = {0.0f, 0.0f, 0.0f};
             const f32 gamma_dt = (gamma(i, j) - gamma_prev(i, j)) / dt; // backward difference
 
             // Joukowski method
@@ -505,7 +505,7 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
     }
 }
 
-// linalg::alias::float3 BackendCPU::coeff_steady_cm(
+// linalg::float3 BackendCPU::coeff_steady_cm(
 //     const FlowData& flow,
 //     const f32 area,
 //     const f32 mac,
@@ -521,20 +521,20 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
 //     const i64 nwa = dd_mesh->nwa;
 //     const i64 nb_panels_wing = nc * ns;
 
-//     linalg::alias::float3 cm(0.f, 0.f, 0.f);
-//     const linalg::alias::float3 ref_pt{dd_mesh->frame + 12}; // frame origin as moment pt
+//     linalg::float3 cm(0.f, 0.f, 0.f);
+//     const linalg::float3 ref_pt{dd_mesh->frame + 12}; // frame origin as moment pt
 
 //     for (i64 u = 0; u < nc; u++) {
 //         for (i64 v = j; v < j + n; v++) {
 //             const i64 li = u * ns + v; // linear index
-//             const linalg::alias::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
-//             const linalg::alias::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
+//             const linalg::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
+//             const linalg::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
 //             // Leading edge vector pointing outward from wing root
-//             const linalg::alias::float3 dl = v1 - v0;
+//             const linalg::float3 dl = v1 - v0;
 //             // Distance from the center of leading edge to the reference point
-//             const linalg::alias::float3 dst_to_ref = ref_pt - 0.5f * (v0 + v1);
+//             const linalg::float3 dst_to_ref = ref_pt - 0.5f * (v0 + v1);
 //             // Distance from the center of leading edge to the reference point
-//             const linalg::alias::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * dd_data->delta_gamma[li];
+//             const linalg::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * dd_data->delta_gamma[li];
 //             cm += linalg::cross(force, dst_to_ref);
 //         }
 //     }
@@ -580,12 +580,12 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Locat
         for (i64 j = 0; j < colloc_m.shape(1); j++) {
             // inner vectorized loop
             for (i64 i = 0; i < colloc_m.shape(0); i++) {
-                const linalg::alias::float3 vertex0{verts_wing_m(i, j, 0), verts_wing_m(i, j, 1), verts_wing_m(i, j, 2)}; // upper left
-                const linalg::alias::float3 vertex1{verts_wing_m(i+1, j, 0), verts_wing_m(i+1, j, 1), verts_wing_m(i+1, j, 2)}; // upper right
-                const linalg::alias::float3 vertex2{verts_wing_m(i+1, j+1, 0), verts_wing_m(i+1, j+1, 1), verts_wing_m(i+1, j+1, 2)}; // lower right
-                const linalg::alias::float3 vertex3{verts_wing_m(i, j+1, 0), verts_wing_m(i, j+1, 1), verts_wing_m(i, j+1, 2)}; // lower left
+                const linalg::float3 vertex0{verts_wing_m(i, j, 0), verts_wing_m(i, j, 1), verts_wing_m(i, j, 2)}; // upper left
+                const linalg::float3 vertex1{verts_wing_m(i+1, j, 0), verts_wing_m(i+1, j, 1), verts_wing_m(i+1, j, 2)}; // upper right
+                const linalg::float3 vertex2{verts_wing_m(i+1, j+1, 0), verts_wing_m(i+1, j+1, 1), verts_wing_m(i+1, j+1, 2)}; // lower right
+                const linalg::float3 vertex3{verts_wing_m(i, j+1, 0), verts_wing_m(i, j+1, 1), verts_wing_m(i, j+1, 2)}; // lower left
 
-                const linalg::alias::float3 normal_vec = linalg::normalize(linalg::cross(vertex3 - vertex1, vertex2 - vertex0));
+                const linalg::float3 normal_vec = linalg::normalize(linalg::cross(vertex3 - vertex1, vertex2 - vertex0));
                 normals_m(i, j, 0) = normal_vec.x;
                 normals_m(i, j, 1) = normal_vec.y;
                 normals_m(i, j, 2) = normal_vec.z;
@@ -593,17 +593,17 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Locat
                 // 3 vectors f (P0P3), b (P0P2), e (P0P1) to compute the area:
                 // area = 0.5 * (||f x b|| + ||b x e||)
                 // this formula might also work: area = || 0.5 * ( f x b + b x e ) ||
-                const linalg::alias::float3 vec_f = vertex3 - vertex0;
-                const linalg::alias::float3 vec_b = vertex2 - vertex0;
-                const linalg::alias::float3 vec_e = vertex1 - vertex0;
+                const linalg::float3 vec_f = vertex3 - vertex0;
+                const linalg::float3 vec_b = vertex2 - vertex0;
+                const linalg::float3 vec_e = vertex1 - vertex0;
 
                 areas_m(i, j) = 0.5f * (linalg::length(linalg::cross(vec_f, vec_b)) + linalg::length(linalg::cross(vec_b, vec_e)));
                 
                 // High AoA correction (Aerodynamic Optimization of Aircraft Wings Using a Coupled VLM2.5D RANS Approach) Eq 3.4 p21
                 // https://publications.polymtl.ca/2555/1/2017_MatthieuParenteau.pdf
                 const f32 factor = (alpha_rad < EPS_f) ? 0.5f : 0.5f * (alpha_rad / (std::sin(alpha_rad) + EPS_f));
-                const linalg::alias::float3 chord_vec = 0.5f * (vertex2 + vertex3 - vertex0 - vertex1);
-                const linalg::alias::float3 colloc_pt = 0.5f * (vertex0 + vertex1) + factor * chord_vec;
+                const linalg::float3 chord_vec = 0.5f * (vertex2 + vertex3 - vertex0 - vertex1);
+                const linalg::float3 colloc_pt = 0.5f * (vertex0 + vertex1) + factor * chord_vec;
 
                 colloc_m(i, j, 0) = colloc_pt.x;
                 colloc_m(i, j, 1) = colloc_pt.y;

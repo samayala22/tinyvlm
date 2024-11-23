@@ -81,7 +81,6 @@ public:
         return val();
     }
 
-    // static const linalg::detail::Type _linalg_type = linalg::detail::Type::T;
 private:
     T value_{0};
     T derivative_{0};

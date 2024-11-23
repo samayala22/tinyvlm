@@ -379,7 +379,7 @@ void UVLM::alloc_buffers() {
     condition0.resize(assembly_wings.size()*assembly_wings.size());
 }
 
-void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::alias::float4x4>& initial_pose, f32 t_final) {
+void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::float4x4>& initial_pose, f32 t_final) {
     const tiny::ScopedTimer timer("UVLM");
     for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
         init_h.to(init_d);
@@ -402,7 +402,7 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
     const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
     const auto freestream_transform = kinematics[0].displacement(0.0f);
     // Since freestream transform is linear it is constant for any point in space
-    const f32 dt = last_panel_chord / kinematics[0].velocity_magnitude(freestream_transform, {0.f, 0.f, 0.f, 1.0f});
+    const f32 dt = last_panel_chord / linalg::length(kinematics[0].velocity(freestream_transform, {0.f, 0.f, 0.f, 1.0f}));
     const i64 t_steps = static_cast<i64>(t_final / dt);
     
     // 2. Allocate the wake geometry
@@ -431,7 +431,7 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
         const f32 t = (f32)i * dt;
         t_h.view()(i) = t;
         
-        const linalg::alias::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t,1), {0.f, 0.f, 0.f, 1.0f});
+        const linalg::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t,1), {0.f, 0.f, 0.f, 1.0f});
 
         backend->wake_shed(verts_wing.views(), verts_wake.views(), i);
 

@@ -68,7 +68,7 @@ f32 Backend::coeff_steady_cl_multi(const MultiTensorView3D<Location::Device>& ve
     return cl;
 }
 
-f32 Backend::coeff_unsteady_cl_multi(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt) {
+f32 Backend::coeff_unsteady_cl_multi(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt) {
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
     for (i64 i = 0; i < verts_wing.size(); i++) {
@@ -93,7 +93,7 @@ f32 Backend::coeff_unsteady_cl_multi(const MultiTensorView3D<Location::Device>& 
     return cl;
 }
 
-void Backend::coeff_unsteady_cl_multi_forces(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, MultiTensorView3D<Location::Device>& forces, const linalg::alias::float3& freestream, f32 dt) {
+void Backend::coeff_unsteady_cl_multi_forces(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, MultiTensorView3D<Location::Device>& forces, const linalg::float3& freestream, f32 dt) {
     // todo: parallel
     for (i64 i = 0; i < verts_wing.size(); i++) {
         coeff_unsteady_cl_single_forces(

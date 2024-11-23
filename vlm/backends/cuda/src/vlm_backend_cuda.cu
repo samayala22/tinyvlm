@@ -346,7 +346,7 @@ f32 BackendCUDA::coeff_steady_cl_single(const TensorView3D<Location::Device>& ve
     return h_cl / (0.5f * flow.rho * linalg::length2(flow.freestream) * area);
 }
 
-f32 BackendCUDA::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
+f32 BackendCUDA::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt, f32 area) {    
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
     f32 h_cl = 0.0f;
     cudaMemset(d_val, 0, sizeof(f32));
@@ -377,7 +377,7 @@ f32 BackendCUDA::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& 
     return h_cl / (0.5f * rho * linalg::length2(freestream) * area);
 }
 
-void BackendCUDA::coeff_unsteady_cl_single_forces(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, TensorView3D<Location::Device>& forces, const linalg::alias::float3& freestream, f32 dt) {}
+void BackendCUDA::coeff_unsteady_cl_single_forces(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, TensorView3D<Location::Device>& forces, const linalg::float3& freestream, f32 dt) {}
 
 f32 BackendCUDA::coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
     f32 h_cd = 0.0f;
