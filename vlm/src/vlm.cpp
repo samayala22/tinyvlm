@@ -67,12 +67,14 @@ void VLM::alloc_buffers() {
     MultiDim<2> panels_2D;
     MultiDim<2> wake_panels_2D;
     MultiDim<3> verts_wake_3D;
+    MultiDim<2> transforms_2D;
 
     for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
         panels_2D.push_back({ns, nc});
         wake_panels_2D.push_back({ns, 1});
         verts_wake_3D.push_back({ns+1, 2, 4}); // single row of wake panels
+        transforms_2D.push_back({4, 4});
     }
 
     // Allocate
@@ -88,7 +90,7 @@ void VLM::alloc_buffers() {
     gamma_wake.init(wake_panels_2D);
     local_velocities.init(panels_3D);
     wake_transform.init({4,4});
-    transforms.init({4,4,(i64)assembly_wings.size()});
+    transforms.init(transforms_2D);
     solver->init(lhs.view());
 
     for (const auto& wake : verts_wake.views()) wake.slice(All, All, 3).fill(1.f);
@@ -160,13 +162,10 @@ AeroCoefficients VLM::run(const FlowData& flow) {
         -100.0f * flow.u_inf*std::sin(flow.alpha)
     });
     init_pos.store(wake_transform.view().ptr(), wake_transform.view().stride(1));
-    for (i32 i = 0; i < transforms.view().shape(2); i++) {
-        auto transform = transforms.view().slice(All, All, i);
-        wake_transform.view().to(transform);
-    }
+    for (const auto& transform_d : transforms.views()) wake_transform.view().to(transform_d);
 
     backend->wake_shed(verts_wing.views(), verts_wake.views(), 0);
-    backend->displace_wing(transforms.view(), verts_wing.views(), verts_wing_init.views());
+    backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
     backend->wake_shed(verts_wing.views(), verts_wake.views(), 1);
     
     backend->mesh_metrics(flow.alpha, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
@@ -217,6 +216,7 @@ void NLVLM::alloc_buffers() {
     MultiDim<2> wake_panels_2D;
     MultiDim<3> verts_wake_3D;
     MultiDim<1> spanwise_1D;
+    MultiDim<2> transforms_2D;
 
     for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
@@ -224,6 +224,7 @@ void NLVLM::alloc_buffers() {
         wake_panels_2D.push_back({ns, 1});
         verts_wake_3D.push_back({ns+1, 2, 4}); // single row of wake panels
         spanwise_1D.push_back({ns});
+        transforms_2D.push_back({4, 4});
     }
 
     // Allocate
@@ -240,7 +241,7 @@ void NLVLM::alloc_buffers() {
     local_velocities.init(panels_3D);
     strip_alphas.init(spanwise_1D);
     wake_transform.init({4,4});
-    transforms.init({4,4,(i64)assembly_wings.size()});
+    transforms.init(transforms_2D);
     
     solver->init(lhs.view());
     
@@ -267,17 +268,15 @@ AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
         0.0f,
         -100.0f * flow.u_inf*std::sin(flow.alpha)
     });
-    init_pos.store(wake_transform.view().ptr(), wake_transform.view().stride(1));
-    for (i32 i = 0; i < transforms.view().shape(2); i++) {
-        auto transform = transforms.view().slice(All, All, i);
-        wake_transform.view().to(transform);
-    }
+
     lhs.view().fill(0.f);
+    init_pos.store(wake_transform.view().ptr(), wake_transform.view().stride(1));
+    for (const auto& transform_d : transforms.views()) wake_transform.view().to(transform_d);
     for (const auto& strip : strip_alphas.views()) strip.fill(flow.alpha);
     for (const auto& [wing_init, wing] : zip(verts_wing_init.views(), verts_wing.views())) wing_init.to(wing);
     
     backend->wake_shed(verts_wing.views(), verts_wake.views(), 0);
-    backend->displace_wing(transforms.view(), verts_wing.views(), verts_wing_init.views());
+    backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
     backend->wake_shed(verts_wing.views(), verts_wake.views(), 1);
     backend->mesh_metrics(flow.alpha, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
     backend->lhs_assemble(lhs.view(), colloc_d.views(), normals_d.views(), verts_wing.views(), verts_wake.views(), condition0,1);
@@ -353,10 +352,12 @@ void UVLM::alloc_buffers() {
     MultiDim<3> panels_3D;
     MultiDim<2> panels_2D;
     MultiDim<3> verts_wing_3D;
+    MultiDim<2> transforms_2D;
     for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
         panels_2D.push_back({ns, nc});
         verts_wing_3D.push_back({ns+1, nc+1, 4});
+        transforms_2D.push_back({4, 4});
     }
     normals_d.init(panels_3D);
     colloc_d.init(panels_3D);
@@ -372,23 +373,25 @@ void UVLM::alloc_buffers() {
     gamma_wing_delta.init(panels_2D);
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
-    transforms_h.init({4,4,(i64)assembly_wings.size()});
-    transforms.init({4,4,(i64)assembly_wings.size()});
+    transforms_h.init(transforms_2D);
+    transforms.init(transforms_2D);
     solver->init(lhs.view());
 
     condition0.resize(assembly_wings.size()*assembly_wings.size());
 }
 
-void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::float4x4>& initial_pose, f32 t_final) {
+void UVLM::run(const Assembly& assembly, f32 t_final) {
     const tiny::ScopedTimer timer("UVLM");
+    // Copy raw meshes to device
     for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
         init_h.to(init_d);
     }
-    for (i64 m = 0; m < kinematics.size(); m++) {
-        initial_pose[m].store(transforms_h.view().ptr() + transforms_h.view().offset({0, 0, m}), transforms_h.view().stride(1));
+    for (const auto& [kinematics, transform_h, transform_d] : zip(assembly.surface_kinematics(), transforms_h.views(), transforms.views())) {
+        auto transform = kinematics->transform(0.0f);
+        transform.store(transform_h.ptr(), transform_h.stride(1));
+        transform_h.to(transform_d);
     }
-    transforms_h.view().to(transforms.view());
-    backend->displace_wing(transforms.view(), verts_wing_pos.views(), verts_wing_init.views());
+    backend->displace_wing(transforms.views(), verts_wing_pos.views(), verts_wing_init.views());
     for (const auto& [wing, wing_pos] : zip(verts_wing.views(), verts_wing_pos.views())) wing_pos.to(wing);
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
     for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
@@ -400,9 +403,7 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
     const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
     const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
     const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
-    const auto freestream_transform = kinematics[0].displacement(0.0f);
-    // Since freestream transform is linear it is constant for any point in space
-    const f32 dt = last_panel_chord / linalg::length(kinematics[0].velocity(freestream_transform, {0.f, 0.f, 0.f, 1.0f}));
+    const f32 dt = last_panel_chord / linalg::length(assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f}));
     const i64 t_steps = static_cast<i64>(t_final / dt);
     
     // 2. Allocate the wake geometry
@@ -431,20 +432,21 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
         const f32 t = (f32)i * dt;
         t_h.view()(i) = t;
         
-        const linalg::float3 freestream = -kinematics[0].velocity(kinematics[0].displacement(t,1), {0.f, 0.f, 0.f, 1.0f});
+        const linalg::float3 freestream = -assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
 
         backend->wake_shed(verts_wing.views(), verts_wake.views(), i);
 
         // parallel for
         for (i64 m = 0; m < assembly_wings.size(); m++) {
-            const auto local_transform = kinematics[m].displacement(t);
+            const auto transform_node = assembly.surface_kinematics()[m];
             const auto& colloc_h_m = colloc_h.views()[m];
             const auto& velocities_h_m = velocities_h.views()[m];
             const auto& velocities_m = velocities.views()[m];
+            const auto mat_transform_dual = transform_node->transform_dual(t);
 
             for (i64 j = 0; j < colloc_h_m.shape(1); j++) {
                 for (i64 i = 0; i < colloc_h_m.shape(0); i++) {
-                    auto local_velocity = -kinematics[m].velocity(local_transform, {colloc_h_m(i, j, 0), colloc_h_m(i, j, 1), colloc_h_m(i, j, 2), 1.0f});
+                    auto local_velocity = -transform_node->linear_velocity(mat_transform_dual, {colloc_h_m(i, j, 0), colloc_h_m(i, j, 1), colloc_h_m(i, j, 2)});
                     velocities_h_m(i, j, 0) = local_velocity.x;
                     velocities_h_m(i, j, 1) = local_velocity.y;
                     velocities_h_m(i, j, 2) = local_velocity.z;
@@ -492,14 +494,14 @@ void UVLM::run(const std::vector<Kinematics>& kinematics, const std::vector<lina
                 i64 end = begin + gamma_wing_i.size();
                 gamma_wing_i.to(gamma_wing_prev_i); // shed gamma
 
-                const auto local_transform = dual_to_float(kinematics[m].displacement(t+dt));
-                local_transform.store(transforms_h.view().ptr() + transforms_h.view().offset({0, 0, m}), transforms_h.view().stride(1));
+                auto transform = assembly.surface_kinematics()[m]->transform(t+dt);
+                transform.store(transforms_h.views()[m].ptr(), transforms_h.views()[m].stride(1));
+                transforms_h.views()[m].to(transforms.views()[m]);
                 begin = end;
             }
         }
 
-        transforms_h.view().to(transforms.view());
-        backend->displace_wing(transforms.view(), verts_wing.views(), verts_wing_pos.views());
+        backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_pos.views());
         backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
     }
 }

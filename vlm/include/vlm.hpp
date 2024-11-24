@@ -10,6 +10,28 @@
 
 namespace vlm {
 
+class Assembly {
+private:
+    std::vector<std::string> m_filenames;
+    std::vector<KinematicNode*> m_nodes;
+    std::vector<bool> m_lifting;
+    KinematicNode* m_assembly_node;
+
+public:
+    Assembly(KinematicNode* assembly_node) : m_assembly_node(assembly_node) {}
+    
+    void add(const std::string& filename, KinematicNode* node, bool lifting = true) {
+        m_filenames.push_back(filename);
+        m_nodes.push_back(node);
+        m_lifting.push_back(lifting);
+    }
+
+    const std::vector<std::string>& mesh_filenames() const { return m_filenames; }
+    const std::vector<KinematicNode*>& surface_kinematics() const { return m_nodes; }
+    const std::vector<bool>& lifting() const { return m_lifting; }
+    const KinematicNode* kinematics() const { return m_assembly_node; }
+};
+
 class Simulation {
     public:
         std::unique_ptr<Backend> backend;
@@ -49,7 +71,7 @@ class VLM final: public Simulation {
 
         MultiTensor3D<Location::Device> local_velocities{backend->memory.get()}; // ns*nc*3
         Tensor2D<Location::Host> wake_transform{backend->memory.get()};
-        Tensor3D<Location::Device> transforms{backend->memory.get()};
+        MultiTensor2D<Location::Device> transforms{backend->memory.get()};
 
         std::unique_ptr<LU> solver;
     private:
@@ -84,7 +106,7 @@ class NLVLM final: public Simulation {
         MultiTensor3D<Location::Device> local_velocities{backend->memory.get()}; // ns*nc*3
         MultiTensor1D<Location::Host> strip_alphas{backend->memory.get()}; // ns
         Tensor2D<Location::Host> wake_transform{backend->memory.get()};
-        Tensor3D<Location::Device> transforms{backend->memory.get()};
+        MultiTensor2D<Location::Device> transforms{backend->memory.get()};
 
         std::unique_ptr<LU> solver;
     private:
@@ -95,7 +117,7 @@ class UVLM final: public Simulation {
     public:
         UVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~UVLM() = default;
-        void run(const std::vector<Kinematics>& kinematics, const std::vector<linalg::float4x4>& initial_pose, f32 t_final);
+        void run(const Assembly& assembly, f32 t_final);
 
         MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
         MultiTensor3D<Location::Host> colloc_h{backend->memory.get()};
@@ -115,8 +137,8 @@ class UVLM final: public Simulation {
         MultiTensor3D<Location::Device> velocities{backend->memory.get()}; // ns*nc*3
         MultiTensor3D<Location::Host> velocities_h{backend->memory.get()}; // ns*nc*3
 
-        Tensor3D<Location::Host> transforms_h{backend->memory.get()};
-        Tensor3D<Location::Device> transforms{backend->memory.get()};
+        MultiTensor2D<Location::Host> transforms_h{backend->memory.get()};
+        MultiTensor2D<Location::Device> transforms{backend->memory.get()};
         
         Tensor1D<Location::Host> t_h{backend->memory.get()};
         std::unique_ptr<LU> solver;

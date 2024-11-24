@@ -9,7 +9,8 @@ class LU;
 class BLAS;
 class Mesh;
 class Backend;
-class Kinematics;
+class KinematicNode;
+class KinematicsTree;
 template<typename Interpolator> class Database2D;
 template<typename Interpolator> class WingProfile;
 

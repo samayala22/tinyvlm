@@ -42,15 +42,7 @@ int main() {
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
 
-    Kinematics kinematics{};
-
-    const f32 initial_angle = 0.0f;
-
-    const auto initial_pose = rotation_matrix(
-        linalg::float3{0.0f, 0.0f, 0.0f}, // take into account quarter chord panel offset
-        linalg::float3{0.0f, 1.0f, 0.0f},
-        to_radians(initial_angle)
-    );
+    KinematicsTree kinematics_tree;
 
     // Periodic heaving
     // kinematics.add([=](const fwd::Float& t) {
@@ -71,7 +63,7 @@ int main() {
     
     // Sudden acceleration
     const f32 alpha = to_radians(5.0f);
-    kinematics.add([=](const fwd::Float& t) {
+    auto freestream = kinematics_tree.add([=](const fwd::Float& t) {
         return translation_matrix<fwd::Float>({
             -u_inf*std::cos(alpha)*t,
             0.0f,
@@ -80,8 +72,10 @@ int main() {
     });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
+        Assembly assembly(freestream);
+        assembly.add(mesh_name, freestream);
         UVLM simulation{backend_name, {mesh_name}};
-        simulation.run({kinematics}, {initial_pose}, t_final);
+        simulation.run(assembly, t_final);
     }
     return 0;
 }
