@@ -19,8 +19,8 @@ namespace linalg
         explicit                    vec(T s)                        : x(s), y(s) {}
         explicit                    vec(const T * p)                : vec(p[0], p[1]) {}
         template<class U> explicit  vec(const vec<U,2> & v)         : vec(static_cast<T>(v.x), static_cast<T>(v.y)) {}
-        const T &                   operator[] (int i) const        { return (&x)[i]; }
-        T &                         operator[] (int i)              { return (&x)[i]; }
+        const T &                   operator[] (int i) const        { return i==0?x:y; }
+        T &                         operator[] (int i)              { return i==0?x:y; }
     };
     template<class T> struct vec<T,3>
     {
@@ -31,8 +31,8 @@ namespace linalg
         explicit                    vec(const T * p)                : vec(p[0], p[1], p[2]) {}
         template<class U> explicit  vec(const vec<U,3> & v)         : vec(static_cast<T>(v.x), static_cast<T>(v.y), static_cast<T>(v.z)) {}
                                     vec(const vec<T,2> & xy, T z)   : vec(xy.x, xy.y, z) {}
-        const T &                   operator[] (int i) const        { return (&x)[i]; }
-        T &                         operator[] (int i)              { return (&x)[i]; }
+        const T &                   operator[] (int i) const        { return i==0?x:i==1?y:z; }
+        T &                         operator[] (int i)              { return i==0?x:i==1?y:z; }
         vec<T,2>                    xy() const                      { return {x,y}; }
     };
     template<class T> struct vec<T,4>
@@ -44,8 +44,8 @@ namespace linalg
         explicit                    vec(const T * p)                : vec(p[0], p[1], p[2], p[3]) {}
         template<class U> explicit  vec(const vec<U,4> & v)         : vec(static_cast<T>(v.x), static_cast<T>(v.y), static_cast<T>(v.z), static_cast<T>(v.w)) {}
                                     vec(const vec<T,3> & xyz, T w)  : vec(xyz.x, xyz.y, xyz.z, w) {}
-        const T &                   operator[] (int i) const        { return (&x)[i]; }
-        T &                         operator[] (int i)              { return (&x)[i]; }
+        const T &                   operator[] (int i) const        { return i==0?x:i==1?y:i==2?z:w; }
+        T &                         operator[] (int i)              { return i==0?x:i==1?y:i==2?z:w; }
         vec<T,3>                    xyz() const                     { return {x,y,z}; }
     };
 
@@ -61,8 +61,8 @@ namespace linalg
         explicit                    mat(const T * p)                : x(p+M*0), y(p+M*1) {}
         template<class U> explicit  mat(const mat<U,M,2> & m)       : mat(V(m.x), V(m.y)) {}
         vec<T,2>                    row(int i) const                { return {x[i], y[i]}; }
-        const V &                   operator[] (int j) const        { return (&x)[j]; }
-        V &                         operator[] (int j)              { return (&x)[j]; }
+        const V &                   operator[] (int j) const        { return j==0?x:y; }
+        V &                         operator[] (int j)              { return j==0?x:y; }
     };
     template<class T, int M> struct mat<T,M,3>
     {
@@ -74,8 +74,8 @@ namespace linalg
         explicit                    mat(const T * p)                : x(p+M*0), y(p+M*1), z(p+M*2) {}
         template<class U> explicit  mat(const mat<U,M,3> & m)       : mat(V(m.x), V(m.y), V(m.z)) {}
         vec<T,3>                    row(int i) const                { return {x[i], y[i], z[i]}; }
-        const V &                   operator[] (int j) const        { return (&x)[j]; }
-        V &                         operator[] (int j)              { return (&x)[j]; }
+        const V &                   operator[] (int j) const        { return j==0?x:j==1?y:z; }
+        V &                         operator[] (int j)              { return j==0?x:j==1?y:z; }
     };
     template<class T, int M> struct mat<T,M,4>
     {
@@ -87,8 +87,8 @@ namespace linalg
         explicit                    mat(const T * p)                : x(p+M*0), y(p+M*1), z(p+M*2), w(p+M*3) {}
         template<class U> explicit  mat(const mat<U,M,4> & m)       : mat(V(m.x), V(m.y), V(m.z), V(m.w)) {}
         vec<T,4>                    row(int i) const                { return {x[i], y[i], z[i], w[i]}; }
-        const V &                   operator[] (int j) const        { return (&x)[j]; }
-        V &                         operator[] (int j)              { return (&x)[j]; }
+        const V &                   operator[] (int j) const        { return j==0?x:j==1?y:j==2?z:w; }
+        V &                         operator[] (int j)              { return j==0?x:j==1?y:j==2?z:w; }
         void                        store(T* ptr, std::size_t ld) const {
             static_assert(M == 4);
             ptr[0*ld+0] = x.x;
