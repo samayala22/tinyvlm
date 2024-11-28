@@ -181,29 +181,27 @@ inline Number<T> operator-(const T lhs, const Number<T> &rhs)
 }
 
 template<typename T>
-inline T &operator*=(T &lhs, const Number<T> &rhs)
-{
-    lhs *= rhs.val();
-    return lhs;
-}
-
-template<typename T>
 inline Number<T> operator*(const T lhs, const Number<T> &rhs)
 {
     return Number<T>(lhs) * rhs;
 }
 
 template<typename T>
-inline T &operator/=(T &lhs, const Number<T> &rhs)
+inline Number<T> operator*(const Number<T> &lhs, const T rhs)
 {
-    lhs /= rhs.val();
-    return lhs;
+    return lhs * Number<T>(rhs);
 }
 
 template<typename T>
 inline Number<T> operator/(const T lhs, const Number<T> &rhs)
 {
     return Number<T>(lhs) / rhs;
+}
+
+template<typename T>
+inline Number<T> operator/(const Number<T> &lhs, const T rhs)
+{
+    return lhs / Number<T>(rhs);
 }
 
 template<typename T>

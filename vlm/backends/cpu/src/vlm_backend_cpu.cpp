@@ -550,7 +550,7 @@ linalg::float3 BackendCPU::coeff_cm(
             cm += linalg::cross(lever, force);
         }
     }
-    return cm / (0.5f * rho * linalg::length2(freestream) * area * mac);
+    return cm / (0.5f * rho * linalg::length2(freestream) * area * 1.0f);
 }
 
 f32 BackendCPU::coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
@@ -624,6 +624,7 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Locat
     }
 }
 
+// TODO: fix this function
 /// @brief Computes the mean chord of a set of panels
 /// @details
 /// Mean Aerodynamic Chord = \frac{2}{S} \int_{0}^{b/2} c(y)^{2} dy

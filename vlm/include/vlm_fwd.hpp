@@ -7,7 +7,6 @@ class Memory;
 class Kernels;
 class LU;
 class BLAS;
-class Mesh;
 class Backend;
 class KinematicNode;
 class KinematicsTree;

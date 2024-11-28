@@ -330,7 +330,7 @@ if __name__ == "__main__":
     flutter_ratio = 0.2
     # vec_U = np.linspace(1.0, 7, 50)
     vec_U = [flutter_ratio * flutter_speed] # reduced velocity
-    newton_err_thresh = 1e-12
+    newton_err_thresh = 1e-7
     torsional_spring = 2
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
@@ -366,9 +366,9 @@ if __name__ == "__main__":
         )
 
         # Dimensionless parameters
-        dt_nd = 0.1
+        dt_nd = 1.0
         # t_final_nd = U_vel * 200.0
-        t_final_nd = 30.0
+        t_final_nd = 60.0
         vec_t_nd = np.arange(0, t_final_nd, dt_nd)
         n = len(vec_t_nd)
 
@@ -447,14 +447,12 @@ if __name__ == "__main__":
         max_iter = 50
         for i in range(n-1):
             t = vec_t_nd[i]
-            F[:,i+1] = F[:,i]
             delta_F = np.zeros(2)
             du = np.zeros(2)
             du_k = np.zeros(2) + 1
             iteration = 0
             while (np.linalg.norm(du_k - du) / len(du) > newton_err_thresh):
                 du_k = du[:]
-                # du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i+1] - F[:,i], dt_nd)
                 du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
 
                 u[:,i+1] = u[:,i] + du
@@ -512,6 +510,21 @@ if __name__ == "__main__":
             axs["ad"].plot(monolithic_sol.t, monolithic_sol.y[3, :], label="Monolithic")
             # axs["ad/a"].plot(u[1, :], v[1, :], "o")
 
+            uvlm_t = []
+            uvlm_h = []
+            uvlm_a = []
+            with open("build/windows/x64/debug/2dof.txt", "r") as f:
+                f.readline() # skip first line
+                for line in f:
+                    t, h, a = map(float, line.split())
+                    uvlm_t.append(t)
+                    uvlm_h.append(h)
+                    uvlm_a.append(a)
+            
+            axs["h"].scatter(uvlm_t, uvlm_h, label="UVLM")
+            axs["a"].scatter(uvlm_t, np.degrees(uvlm_a), label="UVLM")
+
+            # Formatting
             axs["h"].legend()
             axs["h"].set_xlabel(r"$\bar{t}$")
             axs["h"].set_ylabel(r"$\bar{h}$")
@@ -522,10 +535,6 @@ if __name__ == "__main__":
             axs["hd"].set_ylabel(r"$\bar{h'}$")
             axs["hd"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
 
-            # axs["hd/h"].set_xlabel(r"$\bar{h}$")
-            # axs["hd/h"].set_ylabel(r"$\bar{h'}$")
-            # axs["hd/h"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-
             axs["a"].legend()
             axs["a"].set_xlabel(r"$\bar{t}$")
             axs["a"].set_ylabel(r"$\alpha$")
@@ -535,10 +544,7 @@ if __name__ == "__main__":
             axs["ad"].set_xlabel(r"$\bar{t}$")
             axs["ad"].set_ylabel(r"$\bar{a'}$")
             axs["ad"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-            
-            # axs["ad/a"].set_xlabel(r"$\alpha$")
-            # axs["ad/a"].set_ylabel(r"$\alpha'$")
-            # axs["ad/a"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+
 
             fig.suptitle(r"2 DOF Aeroelastic response at $\bar{U} = %s$ (%s Pitch Spring)" % (round(U_vel, 3), torsional_spring_names[torsional_spring]))
 
