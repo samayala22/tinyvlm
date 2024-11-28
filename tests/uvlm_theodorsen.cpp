@@ -24,8 +24,8 @@ int main() {
     const i64 ni = 20;
     const i64 nj = 5;
     // vlm::Executor::instance(1);
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
-    // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x2.x"};
+    // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_" + std::to_string(ni) + "x" + std::to_string(nj) + ".x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x2.x"};
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);

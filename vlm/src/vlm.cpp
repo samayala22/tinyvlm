@@ -47,7 +47,7 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     }
 };
 
-i64 total_panels(const MultiDim<2>& assembly_wing) {
+inline i64 total_panels(const MultiDim<2>& assembly_wing) {
     i64 total = 0;
     for (const auto& wing : assembly_wing) {
         total += wing[0] * wing[1];
@@ -477,7 +477,7 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
         if (i > 0) {
             const f32 cl_unsteady = backend->coeff_unsteady_cl_multi(verts_wing.views(), gamma_wing_delta.views(), gamma_wing.views(), gamma_wing_prev.views(), velocities.views(), areas_d.views(), normals_d.views(), freestream, dt);
             // if (i == vec_t.size()-2) std::printf("t: %f, CL: %f\n", t, cl_unsteady);
-            // std::printf("t: %f, CL: %f\n", t, cl_unsteady);
+            std::printf("t: %f, CL: %f\n", t, cl_unsteady);
             for (const auto& [wing, wing_h] : zip(verts_wing.views(), verts_wing_h.views())) {
                 wing.to(wing_h);
             }

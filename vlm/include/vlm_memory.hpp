@@ -7,6 +7,7 @@
 #include <array>
 #include <memory>
 #include <functional>
+#include <ostream>
 
 #include "vlm_types.hpp"
 
@@ -237,6 +238,34 @@ class TensorView {
         DimArray m_stride;
         T* m_ptr = nullptr;
 };
+
+namespace detail {
+    template<typename T, i64 Dim, Location L>
+    void print_tensor_recursive(std::ostream& os, const TensorView<T, Dim, L>& view, 
+                              std::array<i64, Dim>& indices, i64 current_dim = Dim - 1) {
+        if (current_dim < 0) {
+            os << "(";
+            for (i64 i = 0; i < Dim; ++i) {
+                os << indices[i];
+                if (i < Dim - 1) os << ", ";
+            }
+            os << ") = " << view(indices) << "\n";
+            return;
+        }
+
+        for (i64 i = 0; i < view.shape(current_dim); ++i) {
+            indices[current_dim] = i;
+            print_tensor_recursive(os, view, indices, current_dim - 1);
+        }
+    }
+}
+
+template<typename T, i64 Dim, Location L>
+std::ostream& operator<<(std::ostream& os, const TensorView<T, Dim, L>& view) {
+    std::array<i64, Dim> indices{};
+    detail::print_tensor_recursive(os, view, indices);
+    return os;
+}
  
 template<typename T, int Dim, Location L>
 class Tensor {

@@ -42,8 +42,34 @@ class Backend {
         f32 coeff_steady_cd_multi(const MultiTensorView3D<Location::Device>&  verts_wake, const MultiTensorView2D<Location::Device>& gamma_wake, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas);
         virtual f32 coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& local_velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt, f32 area) = 0;
         f32 coeff_unsteady_cl_multi(const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt);
-        virtual void coeff_unsteady_cl_single_forces(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, TensorView3D<Location::Device>& forces, const linalg::float3& freestream, f32 dt) = 0;
-        void coeff_unsteady_cl_multi_forces(const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, MultiTensorView3D<Location::Device>& forces, const linalg::float3& freestream, f32 dt);
+        
+        virtual void forces_unsteady(
+            const TensorView3D<Location::Device>& verts_wing,
+            const TensorView2D<Location::Device>& gamma_delta,
+            const TensorView2D<Location::Device>& gamma,
+            const TensorView2D<Location::Device>& gamma_prev,
+            const TensorView3D<Location::Device>& velocities,
+            const TensorView2D<Location::Device>& areas,
+            const TensorView3D<Location::Device>& normals,
+            const TensorView3D<Location::Device>& forces,
+            f32 dt
+        ) = 0;
+        virtual f32 coeff_cl(
+            const TensorView3D<Location::Device>& forces,
+            const linalg::float3& lift_axis,
+            const linalg::float3& freestream,
+            const f32 rho,
+            const f32 area
+        ) = 0;
+        virtual linalg::float3 coeff_cm(
+            const TensorView3D<Location::Device>& forces,
+            const TensorView3D<Location::Device>& verts_wing,
+            const linalg::float3& ref_pt,
+            const linalg::float3& freestream,
+            const f32 rho,
+            const f32 area,
+            const f32 mac
+        ) = 0;
 
         virtual void mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>&  verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) = 0;
         virtual f32 mesh_mac(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& areas) = 0;
@@ -67,7 +93,7 @@ class BLAS {
         virtual void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
         virtual void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) = 0;
         virtual void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) = 0; // Y = alpha * X + Y
-        // virtual void xypz(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const const TensorView<f32, 1, Location::Device>& y, const f32 beta, TensorView<f32, 1, Location::Device>& z) = 0;
+        virtual f32 norm(const TensorView<f32, 1, Location::Device>& x) = 0;
 };
 
 class LU {
@@ -78,7 +104,9 @@ class LU {
         virtual void init(const TensorView<f32, 2, Location::Device>& A) = 0;
         virtual void factorize(const TensorView<f32, 2, Location::Device>& A) = 0;
         virtual void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) = 0;
-
+        void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x) {
+            return solve(A, x.reshape(x.shape(0), 1));
+        }
     protected:
         std::unique_ptr<Memory> m_memory;
 };

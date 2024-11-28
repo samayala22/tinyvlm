@@ -117,7 +117,12 @@ class CPU_BLAS final : public BLAS {
         void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
         void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) override;
         void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) override;
+        f32 norm(const TensorView<f32, 1, Location::Device>& x) override;
 };
+
+f32 CPU_BLAS::norm(const TensorView<f32, 1, Location::Device>& x) {
+    return cblas_snrm2(x.shape(0), x.ptr(), x.stride(0));
+}
 
 CBLAS_TRANSPOSE trans_to_cblas(BLAS::Trans trans) {
     switch (trans) {
@@ -469,7 +474,7 @@ f32 BackendCPU::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& v
     return cl;
 }
 
-void BackendCPU::coeff_unsteady_cl_single_forces(
+void BackendCPU::forces_unsteady(
     const TensorView3D<Location::Device>& verts_wing,
     const TensorView2D<Location::Device>& gamma_delta,
     const TensorView2D<Location::Device>& gamma,
@@ -477,8 +482,7 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
     const TensorView3D<Location::Device>& velocities,
     const TensorView2D<Location::Device>& areas,
     const TensorView3D<Location::Device>& normals,
-    TensorView3D<Location::Device>& forces,
-    const linalg::float3& freestream,
+    const TensorView3D<Location::Device>& forces,
     f32 dt
     ) {
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
@@ -505,42 +509,49 @@ void BackendCPU::coeff_unsteady_cl_single_forces(
     }
 }
 
-// linalg::float3 BackendCPU::coeff_steady_cm(
-//     const FlowData& flow,
-//     const f32 area,
-//     const f32 mac,
-//     const i64 j,
-//     const i64 n)
-// {
-//     assert(n > 0);
-//     assert(j >= 0 && j+n <= dd_mesh->ns);
+f32 BackendCPU::coeff_cl(
+    const TensorView3D<Location::Device>& forces,
+    const linalg::float3& lift_axis,
+    const linalg::float3& freestream,
+    const f32 rho,
+    const f32 area
+) {
+    f32 cl = 0.0f;
+    for (i64 j = 0; j < forces.shape(1); j++) {
+        for (i64 i = 0; i < forces.shape(0); i++) {
+            const linalg::float3 force = {forces(i, j, 0), forces(i, j, 1), forces(i, j, 2)};
+            cl += linalg::dot(force, lift_axis);
+        }
+    }
+    return cl / (0.5f * rho * linalg::length2(freestream) * area);
+}
 
-//     const i64 nc = dd_mesh->nc;
-//     const i64 ns = dd_mesh->ns;
-//     const i64 nw = dd_mesh->nw;
-//     const i64 nwa = dd_mesh->nwa;
-//     const i64 nb_panels_wing = nc * ns;
+linalg::float3 BackendCPU::coeff_cm(
+    const TensorView3D<Location::Device>& forces,
+    const TensorView3D<Location::Device>& verts_wing,
+    const linalg::float3& ref_pt,
+    const linalg::float3& freestream,
+    const f32 rho,
+    const f32 area,
+    const f32 mac
+) {
+    linalg::float3 cm = {0.0f, 0.0f, 0.0f};
+    for (i64 j = 0; j < forces.shape(1); j++) {
+        for (i64 i = 0; i < forces.shape(0); i++) {
+            const linalg::float3 v0 = {verts_wing(i+0, j, 0), verts_wing(i+0, j, 1), verts_wing(i+0, j, 2)}; // left leading vortex line
+            const linalg::float3 v1 = {verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // right leading vortex line
+            const linalg::float3 force = {forces(i, j, 0), forces(i, j, 1), forces(i, j, 2)};
 
-//     linalg::float3 cm(0.f, 0.f, 0.f);
-//     const linalg::float3 ref_pt{dd_mesh->frame + 12}; // frame origin as moment pt
+            // const linalg::float3 dst_to_ref = ref_pt - 0.5f * (v0 + v1);
+            // cm += linalg::cross(force, dst_to_ref);
 
-//     for (i64 u = 0; u < nc; u++) {
-//         for (i64 v = j; v < j + n; v++) {
-//             const i64 li = u * ns + v; // linear index
-//             const linalg::float3 v0{*PTR_MESH_V(dd_mesh, u, v, 0), *PTR_MESH_V(dd_mesh, u, v, 1), *PTR_MESH_V(dd_mesh, u, v, 2)}; // upper left
-//             const linalg::float3 v1{*PTR_MESH_V(dd_mesh, u, v+1, 0), *PTR_MESH_V(dd_mesh, u, v+1, 1), *PTR_MESH_V(dd_mesh, u, v+1, 2)}; // upper right
-//             // Leading edge vector pointing outward from wing root
-//             const linalg::float3 dl = v1 - v0;
-//             // Distance from the center of leading edge to the reference point
-//             const linalg::float3 dst_to_ref = ref_pt - 0.5f * (v0 + v1);
-//             // Distance from the center of leading edge to the reference point
-//             const linalg::float3 force = linalg::cross(flow.freestream, dl) * flow.rho * dd_data->delta_gamma[li];
-//             cm += linalg::cross(force, dst_to_ref);
-//         }
-//     }
-//     cm /= 0.5f * flow.rho * linalg::length2(flow.freestream) * area * mac;
-//     return cm;
-// }
+            const linalg::float3 f_applied = 0.5f * (v0 + v1);
+            const linalg::float3 lever = f_applied - ref_pt;
+            cm += linalg::cross(lever, force);
+        }
+    }
+    return cm / (0.5f * rho * linalg::length2(freestream) * area * mac);
+}
 
 f32 BackendCPU::coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
     // tiny::ScopedTimer timer("Compute CD");

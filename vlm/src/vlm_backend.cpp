@@ -93,24 +93,6 @@ f32 Backend::coeff_unsteady_cl_multi(const MultiTensorView3D<Location::Device>& 
     return cl;
 }
 
-void Backend::coeff_unsteady_cl_multi_forces(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, MultiTensorView3D<Location::Device>& forces, const linalg::float3& freestream, f32 dt) {
-    // todo: parallel
-    for (i64 i = 0; i < verts_wing.size(); i++) {
-        coeff_unsteady_cl_single_forces(
-            verts_wing[i], 
-            gamma_wing_delta[i],
-            gamma_wing[i],
-            gamma_wing_prev[i],
-            velocities[i],
-            areas[i],
-            normals[i],
-            forces[i],
-            freestream,
-            dt
-        );
-    }
-}
-
 f32 Backend::coeff_steady_cd_multi(const MultiTensorView3D<Location::Device>& verts_wake, const MultiTensorView2D<Location::Device>& gamma_wake, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cd = 0.0f;

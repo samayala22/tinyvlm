@@ -2,9 +2,11 @@
 
 using namespace vlm;
 
-void NewmarkBeta::init(TensorView<f32, 2, Location::Device>& M,
+void NewmarkBeta::init(
+    const TensorView<f32, 2, Location::Device>& M,
     const TensorView<f32, 2, Location::Device>& C,
-    TensorView<f32, 2, Location::Device>& K, f32 dt) 
+    const TensorView<f32, 2, Location::Device>& K,
+    const f32 dt) 
 {
     m_K_eff.init({M.shape(0), M.shape(1)});
     m_factor.init({M.shape(0)});
@@ -22,14 +24,14 @@ void NewmarkBeta::init(TensorView<f32, 2, Location::Device>& M,
 }
 
 void NewmarkBeta::step(
-    TensorView<f32, 2, Location::Device>& M,
+    const TensorView<f32, 2, Location::Device>& M,
     const TensorView<f32, 2, Location::Device>& C,
-    TensorView<f32, 1, Location::Device>& v_i,
-    TensorView<f32, 1, Location::Device>& a_i,
-    TensorView<f32, 1, Location::Device>& du,
-    TensorView<f32, 1, Location::Device>& dv,
-    TensorView<f32, 1, Location::Device>& da,
-    TensorView<f32, 1, Location::Device>& delta_F,
+    const TensorView<f32, 1, Location::Device>& v_i,
+    const TensorView<f32, 1, Location::Device>& a_i,
+    const TensorView<f32, 1, Location::Device>& du,
+    const TensorView<f32, 1, Location::Device>& dv,
+    const TensorView<f32, 1, Location::Device>& da,
+    const TensorView<f32, 1, Location::Device>& delta_F,
     const f32 dt) 
 {
 

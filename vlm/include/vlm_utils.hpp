@@ -63,4 +63,18 @@ linalg::float3 compute_stream_axis(const linalg::float3& freestream_);
 
 f32 to_degrees(f32 radians);
 f32 to_radians(f32 degrees);
+
+template<typename T>
+constexpr T pow(T base, int exponent) {
+    T result = 1;
+    while (exponent > 0) {
+        if (exponent & 1) {
+            result *= base;
+        }
+        base *= base;
+        exponent >>= 1;
+    }
+    return result;
 }
+
+} // namespace vlm

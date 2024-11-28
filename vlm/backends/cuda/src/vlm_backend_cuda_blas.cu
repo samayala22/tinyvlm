@@ -45,7 +45,7 @@ class CUDA_BLAS final : public BLAS {
         void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
         void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) override;
         void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) override;
-
+        f32 norm(const TensorView<f32, 1, Location::Device>& x) override;
 };
 
 std::unique_ptr<BLAS> BackendCUDA::create_blas() { return std::make_unique<CUDA_BLAS>(); }
@@ -130,4 +130,16 @@ void CUDA_BLAS::axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>
         y.ptr(),
         y.stride(1)
     ));
+}
+
+f32 CUDA_BLAS::norm(const TensorView<f32, 1, Location::Device>& x) {
+    f32 result;
+    CHECK_CUBLAS(cublasSnrm2(
+        CUBlasCtx::get().handle(),
+        x.shape(0),
+        x.ptr(),
+        x.stride(0),
+        &result
+    ));
+    return result;
 }

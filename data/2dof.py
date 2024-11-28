@@ -82,84 +82,84 @@ class NDVars:
         self.r_a = r_a # dimensionless radius of gyration
         self.U = U # reduced velocity
 
-# def monolithic_aeroelastic_system(ndv: NDVars):
-#     psi1 = 0.165
-#     psi2 = 0.335
-#     eps1 = 0.0455
-#     eps2 = 0.3
+def lee_monolithic_aeroelastic_system(ndv: NDVars):
+    psi1 = 0.165
+    psi2 = 0.335
+    eps1 = 0.0455
+    eps2 = 0.3
 
-#     c0 = 1 + 1 / ndv.mu
-#     c1 = ndv.x_a - ndv.a_h / ndv.mu
-#     c2 = (2 / ndv.mu) * (1 - psi1 - psi2)
-#     c3 = (1 / ndv.mu) * (1 + (1 - 2 * ndv.a_h) * (1 - psi1 - psi2))
-#     c4 = (2 / ndv.mu) * (eps1 * psi1 + eps2 * psi2)
-#     c5 = (2 / ndv.mu) * (1 - psi1 - psi2 + (0.5 - ndv.a_h) * (eps1 * psi1 + eps2 * psi2))
-#     c6 = (2 / ndv.mu) * eps1 * psi1 * (1 - eps1 * (0.5 - ndv.a_h))
-#     c7 = (2 / ndv.mu) * eps2 * psi2 * (1 - eps2 * (0.5 - ndv.a_h))
-#     c8 = -(2 / ndv.mu) * eps1**2 * psi1
-#     c9 = -(2 / ndv.mu) * eps2**2 * psi2
+    c0 = 1 + 1 / ndv.mu
+    c1 = ndv.x_a - ndv.a_h / ndv.mu
+    c2 = (2 / ndv.mu) * (1 - psi1 - psi2)
+    c3 = (1 / ndv.mu) * (1 + (1 - 2 * ndv.a_h) * (1 - psi1 - psi2))
+    c4 = (2 / ndv.mu) * (eps1 * psi1 + eps2 * psi2)
+    c5 = (2 / ndv.mu) * (1 - psi1 - psi2 + (0.5 - ndv.a_h) * (eps1 * psi1 + eps2 * psi2))
+    c6 = (2 / ndv.mu) * eps1 * psi1 * (1 - eps1 * (0.5 - ndv.a_h))
+    c7 = (2 / ndv.mu) * eps2 * psi2 * (1 - eps2 * (0.5 - ndv.a_h))
+    c8 = -(2 / ndv.mu) * eps1**2 * psi1
+    c9 = -(2 / ndv.mu) * eps2**2 * psi2
 
-#     r_alpha_sq = ndv.r_a ** 2
-#     d0 = (ndv.x_a / r_alpha_sq) - (ndv.a_h / (ndv.mu * r_alpha_sq))
-#     d1 = 1 + (1 + 8 * ndv.a_h**2) / (8 * ndv.mu * r_alpha_sq)
-#     d2 = -((1 + 2 * ndv.a_h) / (ndv.mu * r_alpha_sq)) * (1 - psi1 - psi2)
-#     d3 = ((1 - 2 * ndv.a_h) / (2 * ndv.mu * r_alpha_sq)) - \
-#          ((1 + 2 * ndv.a_h) * (1 - 2 * ndv.a_h) * (1 - psi1 - psi2)) / (2 * ndv.mu * r_alpha_sq)
-#     d4 = -((1 + 2 * ndv.a_h) / (ndv.mu * r_alpha_sq)) * (eps1 * psi1 + eps2 * psi2)
-#     d5 = -((1 + 2 * ndv.a_h) / (ndv.mu * r_alpha_sq)) * (1 - psi1 - psi2) - \
-#          ((1 + 2 * ndv.a_h) * (1 - 2 * ndv.a_h) * (psi1 * eps1 - psi2 * eps2)) / (2 * ndv.mu * r_alpha_sq)
-#     d6 = -((1 + 2 * ndv.a_h) * psi1 * eps1) / (ndv.mu * r_alpha_sq) * (1 - eps1 * (0.5 - ndv.a_h))
-#     d7 = -((1 + 2 * ndv.a_h) * psi2 * eps2) / (ndv.mu * r_alpha_sq) * (1 - eps2 * (0.5 - ndv.a_h))
-#     d8 = ((1 + 2 * ndv.a_h) * psi1 * eps1**2) / (ndv.mu * r_alpha_sq)
-#     d9 = ((1 + 2 * ndv.a_h) * psi2 * eps2**2) / (ndv.mu * r_alpha_sq)
+    r_alpha_sq = ndv.r_a ** 2
+    d0 = (ndv.x_a / r_alpha_sq) - (ndv.a_h / (ndv.mu * r_alpha_sq))
+    d1 = 1 + (1 + 8 * ndv.a_h**2) / (8 * ndv.mu * r_alpha_sq)
+    d2 = -((1 + 2 * ndv.a_h) / (ndv.mu * r_alpha_sq)) * (1 - psi1 - psi2)
+    d3 = ((1 - 2 * ndv.a_h) / (2 * ndv.mu * r_alpha_sq)) - \
+         ((1 + 2 * ndv.a_h) * (1 - 2 * ndv.a_h) * (1 - psi1 - psi2)) / (2 * ndv.mu * r_alpha_sq)
+    d4 = -((1 + 2 * ndv.a_h) / (ndv.mu * r_alpha_sq)) * (eps1 * psi1 + eps2 * psi2)
+    d5 = -((1 + 2 * ndv.a_h) / (ndv.mu * r_alpha_sq)) * (1 - psi1 - psi2) - \
+         ((1 + 2 * ndv.a_h) * (1 - 2 * ndv.a_h) * (psi1 * eps1 - psi2 * eps2)) / (2 * ndv.mu * r_alpha_sq)
+    d6 = -((1 + 2 * ndv.a_h) * psi1 * eps1) / (ndv.mu * r_alpha_sq) * (1 - eps1 * (0.5 - ndv.a_h))
+    d7 = -((1 + 2 * ndv.a_h) * psi2 * eps2) / (ndv.mu * r_alpha_sq) * (1 - eps2 * (0.5 - ndv.a_h))
+    d8 = ((1 + 2 * ndv.a_h) * psi1 * eps1**2) / (ndv.mu * r_alpha_sq)
+    d9 = ((1 + 2 * ndv.a_h) * psi2 * eps2**2) / (ndv.mu * r_alpha_sq)
 
-#     j = 1 / (c0 * d1 - c1 * d0)
-#     a21 = j * (-d5 * c0 + c5 * d0)
-#     a22 = j * (-d3 * c0 + c3 * d0)
-#     a23 = j * (-d4 * c0 + c4 * d0)
-#     a24 = j * (-d2 * c0 + c2 * d0)
-#     a25 = j * (-d6 * c0 + c6 * d0)
-#     a26 = j * (-d7 * c0 + c7 * d0)
-#     a27 = j * (-d8 * c0 + c8 * d0)
-#     a28 = j * (-d9 * c0 + c9 * d0)
-#     a41 = j * (d5 * c1 - c5 * d1)
-#     a42 = j * (d3 * c1 - c3 * d1)
-#     a43 = j * (d4 * c1 - c4 * d1)
-#     a44 = j * (d2 * c1 - c2 * d1)
-#     a45 = j * (d6 * c1 - c6 * d1)
-#     a46 = j * (d7 * c1 - c7 * d1)
-#     a47 = j * (d8 * c1 - c8 * d1)
-#     a48 = j * (d9 * c1 - c9 * d1)
+    j = 1 / (c0 * d1 - c1 * d0)
+    a21 = j * (-d5 * c0 + c5 * d0)
+    a22 = j * (-d3 * c0 + c3 * d0)
+    a23 = j * (-d4 * c0 + c4 * d0)
+    a24 = j * (-d2 * c0 + c2 * d0)
+    a25 = j * (-d6 * c0 + c6 * d0)
+    a26 = j * (-d7 * c0 + c7 * d0)
+    a27 = j * (-d8 * c0 + c8 * d0)
+    a28 = j * (-d9 * c0 + c9 * d0)
+    a41 = j * (d5 * c1 - c5 * d1)
+    a42 = j * (d3 * c1 - c3 * d1)
+    a43 = j * (d4 * c1 - c4 * d1)
+    a44 = j * (d2 * c1 - c2 * d1)
+    a45 = j * (d6 * c1 - c6 * d1)
+    a46 = j * (d7 * c1 - c7 * d1)
+    a47 = j * (d8 * c1 - c8 * d1)
+    a48 = j * (d9 * c1 - c9 * d1)
 
-#     A = np.zeros((8, 8))
-#     A[0, 1] = 1
-#     A[1, 0] = a21 - j*c0*(1/ndv.U)**2
-#     A[1, 1] = a22 + 2*j*c0*ndv.zeta_a*(1/ndv.U)
-#     A[1, 2] = a23 + j*d0*(ndv.omega/ndv.U)**2
-#     A[1, 3] = a24 + 2*j*d0*ndv.zeta_h*(ndv.omega/ndv.U)
-#     A[1, 4] = a25
-#     A[1, 5] = a26
-#     A[1, 6] = a27
-#     A[1, 7] = a28
-#     A[2, 3] = 1
-#     A[3, 0] = a41 + j*c1*(1/ndv.U)**2
-#     A[3, 1] = a42 + 2*j*c1*ndv.zeta_a*(1/ndv.U)
-#     A[3, 2] = a43 - j*d1*(ndv.omega/ndv.U)**2
-#     A[3, 3] = a44 - 2*j*d1*ndv.zeta_h*(ndv.omega/ndv.U)
-#     A[3, 4] = a45
-#     A[3, 5] = a46
-#     A[3, 6] = a47
-#     A[3, 7] = a48
-#     A[4, 0] = 1
-#     A[4, 4] = -eps1
-#     A[5, 0] = 1
-#     A[5, 5] = -eps2
-#     A[6, 2] = 1
-#     A[6, 6] = -eps1
-#     A[7, 3] = 1
-#     A[7, 7] = -eps2
+    A = np.zeros((8, 8))
+    A[0, 1] = 1
+    A[1, 0] = a21 - j*c0*(1/ndv.U)**2
+    A[1, 1] = a22 + 2*j*c0*ndv.zeta_a*(1/ndv.U)
+    A[1, 2] = a23 + j*d0*(ndv.omega/ndv.U)**2
+    A[1, 3] = a24 + 2*j*d0*ndv.zeta_h*(ndv.omega/ndv.U)
+    A[1, 4] = a25
+    A[1, 5] = a26
+    A[1, 6] = a27
+    A[1, 7] = a28
+    A[2, 3] = 1
+    A[3, 0] = a41 + j*c1*(1/ndv.U)**2
+    A[3, 1] = a42 + 2*j*c1*ndv.zeta_a*(1/ndv.U)
+    A[3, 2] = a43 - j*d1*(ndv.omega/ndv.U)**2
+    A[3, 3] = a44 - 2*j*d1*ndv.zeta_h*(ndv.omega/ndv.U)
+    A[3, 4] = a45
+    A[3, 5] = a46
+    A[3, 6] = a47
+    A[3, 7] = a48
+    A[4, 0] = 1
+    A[4, 4] = -eps1
+    A[5, 0] = 1
+    A[5, 5] = -eps2
+    A[6, 2] = 1
+    A[6, 6] = -eps1
+    A[7, 3] = 1
+    A[7, 7] = -eps2
 
-#     return A
+    return A
 
 def compute_logarithmic_decrement(signal):
     peaks_idx, _ = find_peaks(signal)
@@ -309,10 +309,6 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
 
         V[2] = f1*f2*f5
         V[3] = f3*f4*f5
-
-        # Linear springs
-        # V[2] += - (ndv.omega/ndv.U)**2 * y[0]
-        # V[3] += - 1/(ndv.U**2) * y[1]
             
         V[2] += - (ndv.omega/ndv.U)**2 * y[0]
         V[3] += - 1/(ndv.U**2) * M(y[1])
@@ -331,9 +327,9 @@ if __name__ == "__main__":
 
     # Dimensionless params
     flutter_speed = 6.285
-    vec_U = np.linspace(1.0, 7, 50)
-    flutter_ratio = 0.4
-    # vec_U = [flutter_ratio * flutter_speed]
+    flutter_ratio = 0.2
+    # vec_U = np.linspace(1.0, 7, 50)
+    vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     newton_err_thresh = 1e-12
     torsional_spring = 2
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
@@ -372,7 +368,7 @@ if __name__ == "__main__":
         # Dimensionless parameters
         dt_nd = 0.1
         # t_final_nd = U_vel * 200.0
-        t_final_nd = 1000.0
+        t_final_nd = 30.0
         vec_t_nd = np.arange(0, t_final_nd, dt_nd)
         n = len(vec_t_nd)
 
@@ -417,6 +413,10 @@ if __name__ == "__main__":
         ])
         a[:, 0] = np.linalg.solve(M, F[:, 0] + init_R - C @ v[:,0] - zeros @ u[:,0])
 
+        print(u[:, 0])
+        print(v[:, 0])
+        print(a[:, 0])
+
         def w(s: float):
             idx = int(s / dt_nd)
             return v[1, idx] + a[0, idx] + (0.5 - ndv.a_h) * a[1, idx]
@@ -436,42 +436,42 @@ if __name__ == "__main__":
             wagner_init = (u[1, 0] + u[0, 0] + (0.5 - ndv.a_h)*v[1,0])*(1 - psi1*np.exp(-eps1*t) - psi2*np.exp(-eps2*t))
             cl = np.pi*(a[0, i] - ndv.a_h * a[1, i] + v[1, i]) + 2*np.pi*(wagner_init + duhamel)
             cm = np.pi*(0.5 + ndv.a_h)*(wagner_init + duhamel) + 0.5*np.pi*ndv.a_h*(a[0, i] - ndv.a_h*a[1, i]) - 0.5*np.pi*(0.5 - ndv.a_h)*v[1, i] - (np.pi/16) * a[1, i]
-            
+            print(f"i: {i} | cl: {cl} | cm: {cm}")
+
             return np.array([
                 - cl / (np.pi*ndv.mu),
                 (2*cm) / (np.pi*ndv.mu*ndv.r_a**2)
             ])
 
         # Newmark V2
-        # max_iter = 50
-        # for i in range(n-1):
-        #     t = vec_t_nd[i]
-        #     F[:,i+1] = F[:,i]
-        #     delta_F = np.zeros(2)
-        #     du = np.zeros(2)
-        #     du_k = np.zeros(2) + 1
-        #     iteration = 0
-        #     while (np.linalg.norm(du_k - du) / len(du) > newton_err_thresh):
-        #         du_k = du[:]
-        #         # du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i+1] - F[:,i], dt_nd)
-        #         du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
+        max_iter = 50
+        for i in range(n-1):
+            t = vec_t_nd[i]
+            F[:,i+1] = F[:,i]
+            delta_F = np.zeros(2)
+            du = np.zeros(2)
+            du_k = np.zeros(2) + 1
+            iteration = 0
+            while (np.linalg.norm(du_k - du) / len(du) > newton_err_thresh):
+                du_k = du[:]
+                # du, dv, da = newmark_beta_step(M, C, K, u[:,i], v[:,i], a[:,i], F[:,i+1] - F[:,i], dt_nd)
+                du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
 
-        #         u[:,i+1] = u[:,i] + du
-        #         v[:,i+1] = v[:,i] + dv
-        #         a[:,i+1] = a[:,i] + da
-        #         F[:,i+1] = aero(i+1)
-        #         delta_F = F[:,i+1] - F[:,i]
-        #         delta_F[0] += - (ndv.omega / ndv.U)**2 * du[0]
-        #         # delta_F[1] += - 1/(ndv.U**2) * (u[1,i+1] - u[1,i])
-        #         delta_F[1] += - 1/(ndv.U**2) * (torsional_func(u[1,i+1]) - torsional_func(u[1,i]))
+                u[:,i+1] = u[:,i] + du
+                v[:,i+1] = v[:,i] + dv
+                a[:,i+1] = a[:,i] + da
+                F[:,i+1] = aero(i+1)
+                delta_F = F[:,i+1] - F[:,i]
+                delta_F[0] += - (ndv.omega / ndv.U)**2 * du[0]
+                delta_F[1] += - 1/(ndv.U**2) * (torsional_func(u[1,i+1]) - torsional_func(u[1,i]))
 
-        #         iteration += 1
-        #         if (iteration > max_iter):
-        #             print("Newton process did not converge")
-        #             break
+                iteration += 1
+                if (iteration > max_iter):
+                    print("Newton process did not converge")
+                    break
             # print("iters: ", iteration)
         
-        # A = monolithic_aeroelastic_system(ndv)
+        # A = lee_monolithic_aeroelastic_system(ndv)
         # y0 = np.array([np.radians(3), 0, 0, 0, 0, 0, 0, 0])
         # monolithic_sol = solve_ivp(lambda t, y: A @ y, (0, t_final_nd), y0, t_eval=vec_t_nd)
 
@@ -479,15 +479,14 @@ if __name__ == "__main__":
         system = create_monolithic_system(y0, ndv, torsional_func)
         monolithic_sol = solve_ivp(system, (0, t_final_nd), y0, t_eval=vec_t_nd, method='RK45')
 
-        offset = 100
-        smoothed_h = sp.signal.savgol_filter(u[0, :], window_length=500, polyorder=3)
-        smoothed_h = sp.signal.savgol_filter(smoothed_h, window_length=800, polyorder=3)
+        # smoothed_h = sp.signal.savgol_filter(u[0, :], window_length=500, polyorder=3)
+        # smoothed_h = sp.signal.savgol_filter(smoothed_h, window_length=800, polyorder=3)
 
         # sample_rate = 1 / (vec_t_nd[1] - vec_t_nd[0])  # Calculate sample rate from time array
         # smoothed_h = reconstruct_signal_minimizing_error(u[0, :], 10, sample_rate)
 
-        peaks_h_t_i, peaks_h_d_i = get_peaks(vec_t_nd[offset:], smoothed_h[offset:])
-        peaks_a_t_i, peaks_a_d_i = get_peaks(vec_t_nd[offset:], u[1, offset:])
+        peaks_h_t_i, peaks_h_d_i = get_peaks(vec_t_nd, u[0, :])
+        peaks_a_t_i, peaks_a_d_i = get_peaks(vec_t_nd, u[1, :])
 
         if (len(vec_U) == 1):
             fig, axs = plt.subplot_mosaic(
@@ -553,9 +552,9 @@ if __name__ == "__main__":
         freqs[:, idx] = 2*np.pi * dominant_freqs / omega_a
 
         
-        damping_ratios[0, idx] = get_damping_ratio(smoothed_h[offset:])
-        damping_ratios[1, idx] = get_damping_ratio(u[1, offset:])
-        damping_ratios_m[1, idx] = get_damping_ratio(monolithic_sol.y[1, offset:])
+        damping_ratios[0, idx] = get_damping_ratio(u[0, :])
+        damping_ratios[1, idx] = get_damping_ratio(u[1, :])
+        damping_ratios_m[1, idx] = get_damping_ratio(monolithic_sol.y[1, :])
 
         def freq_ratio(time_range, nb_periods):
             m = ndv.mu * (np.pi * rho * b**2)
