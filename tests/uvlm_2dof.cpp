@@ -2,12 +2,14 @@
 #include "vlm_utils.hpp"
 #include "vlm_kinematics.hpp"
 #include "vlm_integrator.hpp"
+#include "vlm_io.hpp"
 
 #include "tinycombination.hpp"
 #include "tinypbar.hpp"
 
 #include <tuple>
 #include <fstream>
+#include <memory>
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
@@ -50,8 +52,15 @@ class UVLM_2DOF final: public Simulation {
         MultiTensor3D<Location::Host> colloc_h{backend->memory.get()};
         MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
         MultiTensor2D<Location::Device> areas_d{backend->memory.get()};
-
         MultiTensor3D<Location::Device> verts_wing_pos{backend->memory.get()}; // (nc+1)*(ns+1)*3
+ 
+        MultiTensor<i8, 2, Location::Host> wing_cell_type{backend->memory.get()}; // ns*nc
+        MultiTensor<i64, 2, Location::Host> wing_cell_offset{backend->memory.get()}; // ns*nc
+        MultiTensor<i64, 3, Location::Host> wing_cell_connectivity{backend->memory.get()}; // 4x(ns*nc)
+
+        MultiTensor<i8, 2, Location::Host> wake_cell_type{backend->memory.get()}; // ns x c
+        MultiTensor<i64, 2, Location::Host> wake_cell_offset{backend->memory.get()}; // ns x nc
+        MultiTensor<i64, 3, Location::Host> wake_cell_connectivity{backend->memory.get()}; // 4x(ns*nc)
 
         // Data
         Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
@@ -104,6 +113,7 @@ class UVLM_2DOF final: public Simulation {
         void update_wake_and_gamma(i64 iteration);
         void compute_local_velocities(const Assembly& assembly, f32 t);
         void update_transforms(const Assembly& assembly, f32 t);
+        void initialize_structure_data(const UVLM_2DOF_Vars& vars, const i64 t_steps, const f32 dt_nd);
 };
 
 UVLM_2DOF::UVLM_2DOF(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes) {
@@ -121,6 +131,39 @@ inline i64 total_panels(const MultiDim<2>& assembly_wing) {
     return total;
 }
 
+void body_connectivity(
+    const TensorView<f32, 3, Location::Host>& verts_wing_m,
+    const TensorView<i8, 2, Location::Host>& cell_type_m,
+    const TensorView<i64, 2, Location::Host>& cell_offset_m,
+    const TensorView<i64, 3, Location::Host>& cell_connectivity_m
+) {
+    for (i64 j = 0; j < cell_type_m.shape(1); j++) {
+        for (i64 i = 0; i < cell_type_m.shape(0); i++) {
+            cell_type_m(i, j) = 9;
+            cell_offset_m(i, j) = cell_offset_m.to_linear_index({i, j}) * 4 + 4;
+            cell_connectivity_m(0, i, j) = verts_wing_m.to_linear_index({i+0, j+0, 0});
+            cell_connectivity_m(1, i, j) = verts_wing_m.to_linear_index({i+1, j+0, 0});
+            cell_connectivity_m(2, i, j) = verts_wing_m.to_linear_index({i+1, j+1, 0});
+            cell_connectivity_m(3, i, j) = verts_wing_m.to_linear_index({i+0, j+1, 0});
+        }
+    }
+}
+
+void multibody_connectivity(
+    const MultiTensorView<f32, 3, Location::Host>& verts_wing,
+    const MultiTensorView<i8, 2, Location::Host>& cell_type,
+    const MultiTensorView<i64, 2, Location::Host>& cell_offset,
+    const MultiTensorView<i64, 3, Location::Host>& cell_connectivity
+) {
+    for (i64 m = 0; m < verts_wing.size(); m++) {
+        const auto& verts_wing_m = verts_wing[m];
+        const auto& cell_type_m = cell_type[m];
+        const auto& cell_offset_m = cell_offset[m];
+        const auto& cell_connectivity_m = cell_connectivity[m];
+        body_connectivity(verts_wing_m, cell_type_m, cell_offset_m, cell_connectivity_m);
+    }
+}
+
 void UVLM_2DOF::alloc_buffers() {
     const i64 n = total_panels(assembly_wings);
     // Mesh
@@ -128,17 +171,25 @@ void UVLM_2DOF::alloc_buffers() {
     MultiDim<2> panels_2D;
     MultiDim<3> verts_wing_3D;
     MultiDim<2> transforms_2D;
+    MultiDim<3> connectivity_3D;
     for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
         panels_2D.push_back({ns, nc});
         verts_wing_3D.push_back({ns+1, nc+1, 4});
         transforms_2D.push_back({4, 4});
+        connectivity_3D.push_back({4, ns, nc});
     }
     normals_d.init(panels_3D);
     colloc_d.init(panels_3D);
     colloc_h.init(panels_3D);
     areas_d.init(panels_2D);
     verts_wing_pos.init(verts_wing_3D);
+
+    wing_cell_type.init(panels_2D);
+    wing_cell_offset.init(panels_2D);
+    wing_cell_connectivity.init(connectivity_3D);
+
+    multibody_connectivity(verts_wing_h.views(), wing_cell_type.views(), wing_cell_offset.views(), wing_cell_connectivity.views());
 
     // Data
     lhs.init({n, n});
@@ -266,45 +317,8 @@ void UVLM_2DOF::update_transforms(const Assembly& assembly, f32 t) {
     }
 }
 
-void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
-    const f32 m = vars.mu * (PI_f * vars.rho * vars.b*vars.b);
-    const f32 omega_a = std::sqrt(vars.k_a / (m * (vars.r_a * vars.b)*(vars.r_a * vars.b)));
-    const f32 U = vars.U_a * (vars.b * omega_a);
-    const f32 t_final = t_final_nd * vars.b / U;
-
-    std::printf("m: %f\n", m);
-    std::printf("omega_a: %f\n", omega_a);
-    std::printf("U: %f\n", U);
-
-    // Copy raw meshes to device
-    for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
-        init_h.to(init_d);
-    }
-    for (const auto& [kinematics, transform_h, transform_d] : zip(assembly.surface_kinematics(), transforms_h.views(), transforms.views())) {
-        auto transform = kinematics->transform(0.0f);
-        transform.store(transform_h.ptr(), transform_h.stride(1));
-        transform_h.to(transform_d);
-    }
-    backend->displace_wing(transforms.views(), verts_wing_pos.views(), verts_wing_init.views());
-    for (const auto& [wing, wing_pos] : zip(verts_wing.views(), verts_wing_pos.views())) wing_pos.to(wing);
-    backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
-    for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
-
-    // 1.  Compute the fixed time step
-    const auto& verts_first_wing = verts_wing_init_h.views()[0];
-    const f32 dx = verts_first_wing(0, -1, 0) - verts_first_wing(0, -2, 0);
-    const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
-    const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
-    const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
-    const f32 dt = last_panel_chord / linalg::length(assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f}));
-    const f32 dt_nd = dt * U / vars.b;
-    const i64 t_steps = static_cast<i64>(t_final / dt);
-
-    std::cout << "dt: " << dt << "\n";
-    std::cout << "dt_nd: " << dt_nd << "\n";
-    std::cout << "t_steps: " << t_steps << "\n";
-
-    // Initialize structural data
+void UVLM_2DOF::initialize_structure_data(const UVLM_2DOF_Vars& vars, const i64 t_steps, const f32 dt_nd) {
+        // Initialize structural data
     const auto& M_hv = M_h.view();
     const auto& C_hv = C_h.view();
     const auto& K_hv = K_h.view();
@@ -380,19 +394,74 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
     // std::cout << u_hv.slice(All, 0) << "\n";
     // std::cout << v_hv.slice(All, 0) << "\n";
     // std::cout << a_hv.slice(All, 0) << "\n";
-    
+}
+
+void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
+    const f32 m = vars.mu * (PI_f * vars.rho * vars.b*vars.b);
+    const f32 omega_a = std::sqrt(vars.k_a / (m * (vars.r_a * vars.b)*(vars.r_a * vars.b)));
+    const f32 U = vars.U_a * (vars.b * omega_a);
+    const f32 t_final = t_final_nd * vars.b / U;
+
+    std::printf("m: %f\n", m);
+    std::printf("omega_a: %f\n", omega_a);
+    std::printf("U: %f\n", U);
+
+    // Copy raw meshes to device
+    for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
+        init_h.to(init_d);
+    }
+    for (const auto& [kinematics, transform_h, transform_d] : zip(assembly.surface_kinematics(), transforms_h.views(), transforms.views())) {
+        auto transform = kinematics->transform(0.0f);
+        transform.store(transform_h.ptr(), transform_h.stride(1));
+        transform_h.to(transform_d);
+    }
+    backend->displace_wing(transforms.views(), verts_wing_pos.views(), verts_wing_init.views());
+    for (const auto& [wing_d, wing_h, wing_pos] : zip(verts_wing.views(), verts_wing_h.views(),verts_wing_pos.views())) {
+        wing_pos.to(wing_d);
+        wing_pos.to(wing_h);
+    }
+
+    backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
+    for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
+
+    // 1.  Compute the fixed time step
+    const auto& verts_first_wing = verts_wing_init_h.views()[0];
+    const f32 dx = verts_first_wing(0, -1, 0) - verts_first_wing(0, -2, 0);
+    const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
+    const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
+    const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
+    const f32 dt = last_panel_chord / linalg::length(assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f}));
+    const f32 dt_nd = dt * U / vars.b;
+    const i64 t_steps = static_cast<i64>(t_final / dt);
+
+    std::cout << "dt: " << dt << "\n";
+    std::cout << "dt_nd: " << dt_nd << "\n";
+    std::cout << "t_steps: " << t_steps << "\n";
+
     // 2. Allocate the wake geometry
     {
         MultiDim<2> wake_panels_2D;
         MultiDim<3> verts_wake_3D;
+        MultiDim<3> wake_connectivity_3D;
         for (const auto& [ns, nc] : assembly_wings) {
             wake_panels_2D.push_back({ns, t_steps-1});
             verts_wake_3D.push_back({ns+1, t_steps, 4});
+            wake_connectivity_3D.push_back({4, ns, t_steps-1});
         }
         gamma_wake.init(wake_panels_2D);
         verts_wake.init(verts_wake_3D);
-        t_h.init({t_steps});
+        verts_wake_h.init(verts_wake_3D);
+        wake_cell_type.init(wake_panels_2D);
+        wake_cell_offset.init(wake_panels_2D);
+        wake_cell_connectivity.init(wake_connectivity_3D);
+
+        multibody_connectivity(verts_wake_h.views(), wake_cell_type.views(), wake_cell_offset.views(), wake_cell_connectivity.views());
+        t_h.init({t_steps-2});
     }
+
+    initialize_structure_data(vars, t_steps, dt_nd);
+
+    verts_wake_h.views()[0].fill(0.0f);
 
     // Precomputation (only valid in single body case)
     lhs.view().fill(0.f);
@@ -408,7 +477,34 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
 
     std::ofstream data_2dof("2dof.txt");
     data_2dof << std::to_string(vars.U_a) << "\n"; // TODO: this should be according to inputs
-    data_2dof << std::to_string(0.0f) << " " << u_hv(0,0) << " " << u_hv(1,0) << "\n";
+
+    std::vector<tiny::VtuMesh<f32, i64, i8>> vtu_meshes;
+    for (i64 m = 0; m < assembly_wings.size(); m++) {
+        const auto& verts_wing_m = verts_wing_h.views()[m];
+        const auto& wing_cell_type_m = wing_cell_type.views()[m];
+        const auto& wing_cell_offset_m = wing_cell_offset.views()[m];
+        const auto& wing_cell_connectivity_m = wing_cell_connectivity.views()[m];
+        const auto& verts_wake_m = verts_wake_h.views()[m];
+        const auto& wake_cell_type_m = wake_cell_type.views()[m];
+        const auto& wake_cell_offset_m = wake_cell_offset.views()[m];
+        const auto& wake_cell_connectivity_m = wake_cell_connectivity.views()[m];
+
+        vtu_meshes.push_back(tiny::VtuMesh<f32, i64, i8>{
+            std::make_unique<TensorViewAccessor<f32>>(verts_wing_m.slice(All, All, Range{0, 3}).reshape(verts_wing_m.shape(0)*verts_wing_m.shape(1), verts_wing_m.shape(2)-1)),
+            std::make_unique<TensorViewAccessor<i64>>(wing_cell_connectivity_m.reshape(wing_cell_connectivity_m.size(), 1)),
+            std::make_unique<TensorViewAccessor<i64>>(wing_cell_offset_m.reshape(wing_cell_offset_m.size(), 1)),
+            std::make_unique<TensorViewAccessor<i8>>(wing_cell_type_m.reshape(wing_cell_type_m.size(), 1))
+        });
+
+        vtu_meshes.push_back(tiny::VtuMesh<f32, i64, i8>{
+            std::make_unique<TensorViewAccessor<f32>>(verts_wake_m.slice(All, All, Range{0, 3}).reshape(verts_wake_m.shape(0)*verts_wake_m.shape(1), verts_wake_m.shape(2)-1)),
+            std::make_unique<TensorViewAccessor<i64>>(wake_cell_connectivity_m.reshape(wake_cell_connectivity_m.size(), 1)),
+            std::make_unique<TensorViewAccessor<i64>>(wake_cell_offset_m.reshape(wake_cell_offset_m.size(), 1)),
+            std::make_unique<TensorViewAccessor<i8>>(wake_cell_type_m.reshape(wake_cell_type_m.size(), 1))
+        });
+    }
+
+    std::unique_ptr<tiny::VtuDataAccessor<f32>> vtu_timesteps = std::make_unique<TensorViewAccessor<f32>>(t_h.view().reshape(t_h.view().size(), 1));
 
     // Transient simulation loop
     for (i32 i = 0; i < t_steps-2; i++) {
@@ -416,6 +512,42 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         const f32 t_nd = (f32)i * dt_nd;
         t_h.view()(i) = t;
 
+        data_2dof << t_nd << " " << u_h.view()(0,i) << " " << u_h.view()(1,i) << "\n";
+
+        // Output:
+        for (const auto& [wake_d, wake_h] : zip(verts_wake.views(), verts_wake_h.views())) {
+            wake_d.slice(All, -1-i, All).to(wake_h.slice(All, -1-i, All));
+            wake_d.slice(All, -1-i, All).to(wake_h.slice(All, -2-i, All));
+        }
+        verts_wing.views()[0].to(verts_wing_h.views()[0]); // for output
+
+        for (i64 m = 0; m < assembly_wings.size(); m++) {
+            const auto& verts_wake_m = verts_wake_h.views()[m];
+            const auto& wake_cell_type_m = wake_cell_type.views()[m];
+            const auto& wake_cell_offset_m = wake_cell_offset.views()[m];
+            const auto& wake_cell_connectivity_m = wake_cell_connectivity.views()[m];
+
+            const auto verts_slice = verts_wake_m.slice(All, Range{-2-i, verts_wake_m.shape(1)}, Range{0, 3});
+            const auto cell_connectivity_slice = wake_cell_connectivity_m.slice(All, All, Range{-1-i, wake_cell_connectivity_m.shape(2)});
+            const auto cell_offset_slice = wake_cell_offset_m.slice(All, Range{-1-i, wake_cell_offset_m.shape(1)});
+            const auto cell_type_slice = wake_cell_type_m.slice(All, Range{-1-i, wake_cell_type_m.shape(1)});
+
+            body_connectivity(verts_slice, cell_type_slice, cell_offset_slice, cell_connectivity_slice);
+
+            vtu_meshes[2*m+1] = tiny::VtuMesh<f32, i64, i8>{
+                std::make_unique<TensorViewAccessor<f32>>(verts_slice.reshape(verts_slice.shape(0)*verts_slice.shape(1), verts_slice.shape(2))),
+                std::make_unique<TensorViewAccessor<i64>>(cell_connectivity_slice.reshape(cell_connectivity_slice.size(), 1)),
+                std::make_unique<TensorViewAccessor<i64>>(cell_offset_slice.reshape(cell_offset_slice.size(), 1)),
+                std::make_unique<TensorViewAccessor<i8>>(cell_type_slice.reshape(cell_type_slice.size(), 1))
+            };
+        }
+
+        std::string base_it_name = "2dof_" + std::to_string(i);
+        tiny::write_pvtu<f32>("./2dof/", base_it_name, {}, {}, vtu_meshes.size());
+        for (i64 m = 0; m < vtu_meshes.size(); m++) {
+            tiny::write_vtu<f32, i64, i8, f32>("./2dof/" + base_it_name + "/" + base_it_name + "_" + std::to_string(m) + ".vtu", vtu_meshes[m], {}, {});
+        }
+        
         dF.view().fill(0.f);
         du.view().fill(0.f);
         du_k.view().fill(1.f);
@@ -425,10 +557,10 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         while (backend->blas->norm(du_k.view()) > 1e-7f) {
             du.view().to(du_k.view());
             integrator.step(
-                M_dv,
-                C_dv,
-                v_dv.slice(All, i),
-                a_dv.slice(All, i),
+                M_d.view(),
+                C_d.view(),
+                v_d.view().slice(All, i),
+                a_d.view().slice(All, i),
                 du.view(),
                 dv.view(),
                 da.view(),
@@ -436,15 +568,15 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 dt_nd // dimensionless dt
             );
             du.view().to(du_h.view());
-            u_dv.slice(All, i).to(u_dv.slice(All, i+1));
-            v_dv.slice(All, i).to(v_dv.slice(All, i+1));
-            a_dv.slice(All, i).to(a_dv.slice(All, i+1));
-            backend->blas->axpy(1.0f, du.view(), u_dv.slice(All, i+1));
-            backend->blas->axpy(1.0f, dv.view(), v_dv.slice(All, i+1));
-            backend->blas->axpy(1.0f, da.view(), a_dv.slice(All, i+1));
-            u_dv.slice(All, i+1).to(u_hv.slice(All, i+1));
-            v_dv.slice(All, i+1).to(v_hv.slice(All, i+1));
-            a_dv.slice(All, i+1).to(a_hv.slice(All, i+1));
+            u_d.view().slice(All, i).to(u_d.view().slice(All, i+1));
+            v_d.view().slice(All, i).to(v_d.view().slice(All, i+1));
+            a_d.view().slice(All, i).to(a_d.view().slice(All, i+1));
+            backend->blas->axpy(1.0f, du.view(), u_d.view().slice(All, i+1));
+            backend->blas->axpy(1.0f, dv.view(), v_d.view().slice(All, i+1));
+            backend->blas->axpy(1.0f, da.view(), a_d.view().slice(All, i+1));
+            u_d.view().slice(All, i+1).to(u_h.view().slice(All, i+1));
+            v_d.view().slice(All, i+1).to(v_h.view().slice(All, i+1));
+            a_d.view().slice(All, i+1).to(a_h.view().slice(All, i+1));
 
             // std::cout << "h: " << u_hv(0, i+1) << " dh: " << v_hv(0, i+1) << " ddh: " << a_hv(0, i+1) << "\n";
             // std::cout << "a: " << u_hv(1, i+1) << " da: " << v_hv(1, i+1) << " dda: " << a_hv(1, i+1) << "\n";
@@ -454,7 +586,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 return translation_matrix<fwd::Float>({
                     0.0f,
                     0.0f,
-                    u_hv(0, i+1) * vars.b + (v_hv(0, i+1) * U) * t
+                    u_h.view()(0, i+1) * vars.b + (v_h.view()(0, i+1) * U) * t
                 });
             });
             const KinematicNode pitch([&](const fwd::Float& t) {
@@ -469,7 +601,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                         1.0f,
                         0.0f
                     }, 
-                    (u_hv(1, i+1) + (v_hv(1, i+1) * U / vars.b) * t)
+                    (u_h.view()(1, i+1) + (v_h.view()(1, i+1) * U / vars.b) * t)
                 );
             });
             
@@ -484,7 +616,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_pos.views());
             backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
             backend->wake_shed(verts_wing.views(), verts_wake.views(), i+1);
-            
+
             wing_velocities(transform_dual, colloc_h.views()[0], velocities_h.views()[0], velocities.views()[0]);
             
             rhs.view().fill(0.f);
@@ -528,11 +660,11 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
 
             std::printf("iter: %d | cl: %f | cm: %f\n", iteration, cl, cm.y);
 
-            F_hv(0, i+1) = - cl / (PI_f * vars.mu);
-            F_hv(1, i+1) = (2*cm.y) / (PI_f * vars.mu * pow(vars.r_a, 2));
+            F_h.view()(0, i+1) = - cl / (PI_f * vars.mu);
+            F_h.view()(1, i+1) = (2*cm.y) / (PI_f * vars.mu * pow(vars.r_a, 2));
  
-            dF_h.view()(0) = F_hv(0, i+1) - F_hv(0, i) - pow(vars.omega / vars.U_a, 2) * du_h.view()(0);
-            dF_h.view()(1) = F_hv(1, i+1) - F_hv(1, i) - 1/pow(vars.U_a, 2) * (torsional_func(u_hv(1,i+1)) - torsional_func(u_hv(1,i)));
+            dF_h.view()(0) = F_h.view()(0, i+1) - F_h.view()(0, i) - pow(vars.omega / vars.U_a, 2) * du_h.view()(0);
+            dF_h.view()(1) = F_h.view()(1, i+1) - F_h.view()(1, i) - 1/pow(vars.U_a, 2) * (torsional_func(u_h.view()(1,i+1)) - torsional_func(u_h.view()(1,i)));
             dF_h.view().to(dF.view());
 
             backend->blas->axpy(-1.0f, du.view(), du_k.view());
@@ -541,9 +673,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 std::printf("Newton process did not converge\n");
                 break;
             }
-        }
-
-        data_2dof << t_nd+dt_nd << " " << u_hv(0,i+1) << " " << u_hv(1,i+1) << "\n";
+        } // while loop
         
         std::printf("%d| iters: %d\n", i, iteration);
 
@@ -579,13 +709,15 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         //     vars.rho,
         //     backend->sum(areas_d.views()[0])
         // );
-    }
+    } // simulation loop
+
+    tiny::write_pvd<f32>(".", "2dof", ".pvtu", vtu_timesteps);
 }
 
 int main() {
     // vlm::Executor::instance(1);
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x2.x"};
-    // const std::vector<std::string> meshes = {"../../../../mesh/rectangular_4x4.x"};
+    // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x2.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/rectangular_2x2.x"};
     const std::vector<std::string> backends = {"cpu"};
 
     auto simulations = tiny::make_combination(meshes, backends);

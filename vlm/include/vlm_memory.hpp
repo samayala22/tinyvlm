@@ -91,7 +91,7 @@ class TensorView {
             i64 argIndex = 0;
             ([&](auto& arg) {
                 if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, Range>) {
-                    i64 first = arg[0];
+                    i64 first = (arg[0] < 0) ? m_shape[argIndex] + arg[0]: arg[0];
                     i64 last = (arg[1] < 0) ? m_shape[argIndex] + arg[1] + 1 : arg[1];
                     assert((first >= 0) && (first < m_shape[argIndex]));
                     assert((last >= 0) && (last <= m_shape[argIndex]));
@@ -215,12 +215,23 @@ class TensorView {
             };
             fill_lambda(Dim-1);
         }
-
+        
+        // linear pointer offset to data
         constexpr i64 offset(const DimArray& indices) const {
             i64 index = 0;
             for (i64 i = 0; i < Dim; i++) {
                 i64 idx = (indices[i] < 0) ? indices[i] + m_shape[i] : indices[i];
                 index += idx * m_stride[i];
+            }
+            return index;
+        }
+    
+        // linear "virtual" index to data (doesnt take into account strides)
+        constexpr i64 to_linear_index(const DimArray& indices) const {
+            i64 index = (indices[0] < 0) ? indices[0] + m_shape[0] : indices[0];
+            for (i64 i = 1; i < Dim; i++) {
+                i64 idx = (indices[i] < 0) ? indices[i] + m_shape[i] : indices[i];
+                index += idx * m_shape[i-1];
             }
             return index;
         }
@@ -358,8 +369,9 @@ template<Location L> using TensorView3D = TensorView<f32, 3, L>;
 template<Location L> using MultiTensor1D = MultiTensor<f32, 1, L>;
 template<Location L> using MultiTensor2D = MultiTensor<f32, 2, L>;
 template<Location L> using MultiTensor3D = MultiTensor<f32, 3, L>;
-template<Location L> using MultiTensorView1D = std::vector<TensorView1D<L>>;
-template<Location L> using MultiTensorView2D = std::vector<TensorView2D<L>>;
-template<Location L> using MultiTensorView3D = std::vector<TensorView3D<L>>;
+template<typename T, int Dim, Location L> using MultiTensorView = std::vector<TensorView<T, Dim, L>>;
+template<Location L> using MultiTensorView1D = MultiTensorView<f32, 1, L>;
+template<Location L> using MultiTensorView2D = MultiTensorView<f32, 2, L>;
+template<Location L> using MultiTensorView3D = MultiTensorView<f32, 3, L>;
 
 } // namespace vlm

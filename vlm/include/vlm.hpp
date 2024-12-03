@@ -43,6 +43,7 @@ class Simulation {
         MultiTensor3D<Location::Device> verts_wing{backend->memory.get()}; // (nc+1)*(ns+1)*3
         MultiTensor3D<Location::Host> verts_wing_h{backend->memory.get()}; // (nc+1)*(ns+1)*3
         MultiTensor3D<Location::Device> verts_wake{backend->memory.get()}; // (nw+1)*(ns+1)*3
+        MultiTensor3D<Location::Host> verts_wake_h{backend->memory.get()}; // (nw+1)*(ns+1)*3
 
         MultiDim<2> assembly_wings;
 
