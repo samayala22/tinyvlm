@@ -155,13 +155,12 @@ inline i64 total_panels(const MultiDim<2>& assembly_wing) {
 
 f32 UVLM_2DOF::wing_alpha() {
     const auto& wing_h = verts_wing_h.views()[0];
-    const linalg::float3 x_axis = {1.0f, 0.0f, 0.0f};
     const linalg::float3 chord_axis = linalg::normalize(linalg::float3{
         wing_h(0, 1, 0) - wing_h(0, 0, 0),
         wing_h(0, 1, 1) - wing_h(0, 0, 1),
         wing_h(0, 1, 2) - wing_h(0, 0, 2)
     });
-    return std::acos(linalg::dot(chord_axis, x_axis));
+    return std::atan2(-chord_axis.z, chord_axis.x);
 }
 
 // elastic dst: distance from the leading edge
@@ -565,11 +564,10 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             wake_d.slice(All, -1-i, All).to(wake_h.slice(All, -1-i, All));
             wake_d.slice(All, -1-i, All).to(wake_h.slice(All, -2-i, All));
         }
-        verts_wing.views()[0].to(verts_wing_h.views()[0]); // for output
 
+        verts_wing.views()[0].to(verts_wing_h.views()[0]); // for output
         const f32 w_alpha = wing_alpha();
         const f32 w_h_nd = wing_h(vars.b + vars.a_h * vars.b) / vars.b;
-
         ASSERT_NEAR(w_h_nd, u_h.view()(0, i), 5e-6f);
         ASSERT_NEAR(w_alpha, u_h.view()(1, i), 5e-6f);
 
@@ -658,7 +656,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             });
             
             // Manually compute the transform (update_transforms(assembly, t+dt))
-            auto fs = assembly.surface_kinematics()[0]->transform_dual(t+dt);
+            auto fs = assembly.kinematics()->transform_dual(t+dt);
             auto transform_dual = linalg::mul(linalg::mul(fs, heave.transform_dual(0.0f)), pitch.transform_dual(0.0f));
             auto transform = dual_to_float(transform_dual);
             transform.store(transforms_h.views()[0].ptr(), transforms_h.views()[0].stride(1));
@@ -768,15 +766,15 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
 
 int main() {
     // vlm::Executor::instance(1);
-    // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_2x2.x"};
-    const std::vector<std::string> meshes = {"../../../../mesh/rectangular_2x2.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x10.x"};
+    // const std::vector<std::string> meshes = {"../../../../mesh/rectangular_2x2.x"};
     const std::vector<std::string> backends = {"cpu"};
 
     auto simulations = tiny::make_combination(meshes, backends);
 
     const f32 flutter_speed = 6.285f;
     const f32 flutter_ratio = 0.2f;
-    const f32 t_final_nd = 60.f;
+    const f32 t_final_nd = 90.f;
 
     UVLM_2DOF_Vars vars;
     vars.b = 0.5f;

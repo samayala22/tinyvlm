@@ -134,7 +134,8 @@ class UVLM final: public Simulation {
         MultiTensor2D<Location::Device> gamma_wake{backend->memory.get()}; // nw*ns
         MultiTensor2D<Location::Device> gamma_wing_prev{backend->memory.get()}; // nc*ns
         MultiTensor2D<Location::Device> gamma_wing_delta{backend->memory.get()}; // nc*ns
-
+        MultiTensor3D<Location::Device> aero_forces{backend->memory.get()}; // ns*nc*3
+        
         MultiTensor3D<Location::Device> velocities{backend->memory.get()}; // ns*nc*3
         MultiTensor3D<Location::Host> velocities_h{backend->memory.get()}; // ns*nc*3
 
@@ -147,6 +148,7 @@ class UVLM final: public Simulation {
         std::vector<i32> condition0;
     private:
         void alloc_buffers();
+        void multibody_forces_unsteady(f32 dt);
 };
 
 } // namespace vlm

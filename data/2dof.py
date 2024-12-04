@@ -366,15 +366,16 @@ if __name__ == "__main__":
         )
 
         # Dimensionless parameters
-        dt_nd = 1.0
+        dt_nd = 0.4
         # t_final_nd = U_vel * 200.0
-        t_final_nd = 60.0
+        t_final_nd = 90.0
         vec_t_nd = np.arange(0, t_final_nd, dt_nd)
         n = len(vec_t_nd)
 
         m = ndv.mu * (np.pi * rho * b**2)
         omega_a = np.sqrt(k_a / (m * (ndv.r_a * b)**2))
         U = U_vel * (b * omega_a)
+        print(U)
         omega_h = ndv.omega * omega_a
         k_h = omega_h**2 * m
 
@@ -503,7 +504,7 @@ if __name__ == "__main__":
             # axs["hd/h"].plot(u[0, :], v[0, :])
 
             axs["a"].plot(vec_t_nd, np.degrees(u[1, :]), label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            axs["a"].plot(peaks_a_t_i, np.degrees(peaks_a_d_i), "o")
+            # axs["a"].plot(peaks_a_t_i, np.degrees(peaks_a_d_i), "o")
             axs["a"].plot(monolithic_sol.t, np.degrees(monolithic_sol.y[1, :]), label="Monolithic")
 
             axs["ad"].plot(vec_t_nd, v[1, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
@@ -521,8 +522,8 @@ if __name__ == "__main__":
                     uvlm_h.append(h)
                     uvlm_a.append(a)
             
-            axs["h"].scatter(uvlm_t, uvlm_h, label="UVLM")
-            axs["a"].scatter(uvlm_t, np.degrees(uvlm_a), label="UVLM")
+            axs["h"].plot(uvlm_t, uvlm_h, label="UVLM")
+            axs["a"].plot(uvlm_t, np.degrees(uvlm_a), label="UVLM")
 
             # Formatting
             axs["h"].legend()

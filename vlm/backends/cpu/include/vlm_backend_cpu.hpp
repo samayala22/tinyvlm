@@ -17,7 +17,6 @@ class BackendCPU final : public Backend {
         // TODO: deprecate
         f32 coeff_steady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) override;
         f32 coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) override;
-        f32 coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt, f32 area) override;
         
         void forces_unsteady(
             const TensorView3D<Location::Device>& verts_wing,

@@ -1,5 +1,4 @@
 #include "vlm_backend.hpp"
-#include "vlm_mesh.hpp"
 #include "vlm_utils.hpp"
 
 #include <string>
@@ -44,9 +43,6 @@ Backend::Backend(std::unique_ptr<Memory> memory_, std::unique_ptr<BLAS> blas_) :
 
 Backend::~Backend() {
     // TODO: move this
-    memory->free(Location::Device, d_solver_info); // deprecate
-    memory->free(Location::Device, d_solver_ipiv); // deprecate
-    memory->free(Location::Device, d_solver_buffer); // deprecate
     memory->free(Location::Device, d_val);
 }
 
@@ -59,31 +55,6 @@ f32 Backend::coeff_steady_cl_multi(const MultiTensorView3D<Location::Device>& ve
             verts_wing[i],
             gamma_delta[i],
             flow,
-            area_local
-        );
-        cl += wing_cl * area_local;
-        total_area += area_local;
-    }
-    cl /= total_area;
-    return cl;
-}
-
-f32 Backend::coeff_unsteady_cl_multi(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt) {
-    f32 cl = 0.0f;
-    f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wing.size(); i++) {
-
-        const f32 area_local = sum(areas[i]);
-        const f32 wing_cl = coeff_unsteady_cl_single(
-            verts_wing[i],
-            gamma_wing_delta[i],
-            gamma_wing[i],
-            gamma_wing_prev[i],
-            velocities[i],
-            areas[i],
-            normals[i],
-            freestream,
-            dt,
             area_local
         );
         cl += wing_cl * area_local;
@@ -135,6 +106,53 @@ void Backend::displace_wing(const MultiTensorView2D<Location::Device>& transform
             verts_wing_i.reshape(verts_wing_i.shape(0)*verts_wing_i.shape(1), 4),
             BLAS::Trans::No,
             BLAS::Trans::Yes
+        );
+    }
+}
+
+f32 Backend::coeff_cl_multibody(const MultiTensorView3D<Location::Device>& aero_forces, const MultiTensorView2D<Location::Device>& areas, const linalg::float3& freestream, f32 rho) {
+    // parallel reduce
+    f32 cl = 0.0f;
+    f32 total_area = 0.0f;
+    for (i64 m = 0; m < aero_forces.size(); m++) {
+        const f32 area_local = sum(areas[m]);
+        const f32 wing_cl = coeff_cl(
+            aero_forces[m],
+            linalg::normalize(linalg::cross(freestream, {0.f, 1.f, 0.f})), // TODO: compute this from the wing frame
+            freestream,
+            rho,
+            area_local
+        );
+        cl += wing_cl * area_local;
+        total_area += area_local;
+    }
+    cl /= total_area;
+    return cl;
+}
+
+void Backend::forces_unsteady_multibody(
+    const MultiTensorView3D<Location::Device>& verts_wing,
+    const MultiTensorView2D<Location::Device>& gamma_delta,
+    const MultiTensorView2D<Location::Device>& gamma,
+    const MultiTensorView2D<Location::Device>& gamma_prev,
+    const MultiTensorView3D<Location::Device>& velocities,
+    const MultiTensorView2D<Location::Device>& areas,
+    const MultiTensorView3D<Location::Device>& normals,
+    const MultiTensorView3D<Location::Device>& forces,
+    f32 dt
+) {
+    // parallel tasks
+    for (i64 m = 0; m < verts_wing.size(); m++) {
+        forces_unsteady(
+            verts_wing[m],
+            gamma_delta[m],
+            gamma[m],
+            gamma_prev[m],
+            velocities[m],
+            areas[m],
+            normals[m],
+            forces[m],
+            dt
         );
     }
 }

@@ -69,7 +69,6 @@ fig, axs = plt.subplot_mosaic(
 
 files = [
     "cl_data",
-    "cl_data_correct"
     # "cl_data_025",
     # "cl_data_050",
     # "cl_data_075",
@@ -86,16 +85,16 @@ for file in files:
     uvlm_cycle_idx = int((1 - 1 / cycles) * n - 1)
 
     # sudden acceleration
-    def pitch(t): return np.radians(5)
-    def heave(t): return 0
+    # def pitch(t): return np.radians(5)
+    # def heave(t): return 0
 
     # pure heaving
     # def pitch(t): return 0
     # def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    # def pitch(t): return np.radians(np.sin(omega * t))
-    # def heave(t): return 0
+    def pitch(t): return np.radians(3.0 * np.sin(omega * t))
+    def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -122,24 +121,24 @@ for file in files:
     axs["heave"].plot(angle[cycle_idx:], cl_theo[cycle_idx:], label=f"Theodorsen (k={k})")
 
     axs["time"].scatter(uvlm_t, uvlm_cl, label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
-    axs["heave"].scatter(uvlm_alpha[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
+    axs["heave"].scatter(np.degrees(uvlm_alpha[uvlm_cycle_idx:]), uvlm_cl[uvlm_cycle_idx:], label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
 
     analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cycle_idx:]])
     difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
     error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx)) 
     print(f"Freq: {k}, Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
-axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
+# axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
 
-jl_t = []
-jl_cl = []
-with open("build/windows/x64/release/jl_cl.txt", "r") as f:
-    for line in f:
-        t, cl = line.split()
-        jl_t.append(float(t))
-        jl_cl.append(float(cl))
+# jl_t = []
+# jl_cl = []
+# with open("build/windows/x64/release/jl_cl.txt", "r") as f:
+#     for line in f:
+#         t, cl = line.split()
+#         jl_t.append(float(t))
+#         jl_cl.append(float(cl))
 
-axs["time"].plot(jl_t, jl_cl, label="VortexLattice.jl")
+# axs["time"].plot(jl_t, jl_cl, label="VortexLattice.jl")
 
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')

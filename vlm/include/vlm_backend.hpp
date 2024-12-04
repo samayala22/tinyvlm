@@ -18,9 +18,6 @@ class Backend {
         std::unique_ptr<BLAS> blas;
 
         // TODO: remove these
-        i32* d_solver_info = nullptr;
-        i32* d_solver_ipiv = nullptr;
-        f32* d_solver_buffer = nullptr;
         f32* d_val = nullptr; // intermediate value used for reduction
 
         f32 sigma_vatistas = 0.0f;
@@ -35,13 +32,11 @@ class Backend {
         void displace_wing(const MultiTensorView2D<Location::Device>& transforms, MultiTensorView3D<Location::Device>&  verts_wing, MultiTensorView3D<Location::Device>& verts_wing_init);
         void wake_shed(const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wake, i32 iteration);
 
-        // Per mesh kernels
+        // TODO: deprecate
         virtual f32 coeff_steady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) = 0;
         f32 coeff_steady_cl_multi(const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView2D<Location::Device>& gamma_delta, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas);
         virtual f32 coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) = 0;
         f32 coeff_steady_cd_multi(const MultiTensorView3D<Location::Device>&  verts_wake, const MultiTensorView2D<Location::Device>& gamma_wake, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas);
-        virtual f32 coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& local_velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt, f32 area) = 0;
-        f32 coeff_unsteady_cl_multi(const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing_delta, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wing_prev, const MultiTensorView3D<Location::Device>& velocities, const MultiTensorView2D<Location::Device>& areas, const MultiTensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt);
         
         virtual void forces_unsteady(
             const TensorView3D<Location::Device>& verts_wing,
@@ -70,6 +65,33 @@ class Backend {
             const f32 area,
             const f32 mac
         ) = 0;
+
+        void forces_unsteady_multibody(
+            const MultiTensorView3D<Location::Device>& verts_wing,
+            const MultiTensorView2D<Location::Device>& gamma_delta,
+            const MultiTensorView2D<Location::Device>& gamma,
+            const MultiTensorView2D<Location::Device>& gamma_prev,
+            const MultiTensorView3D<Location::Device>& velocities,
+            const MultiTensorView2D<Location::Device>& areas,
+            const MultiTensorView3D<Location::Device>& normals,
+            const MultiTensorView3D<Location::Device>& forces,
+            f32 dt
+        );
+        f32 coeff_cl_multibody(
+            const MultiTensorView3D<Location::Device>& aero_forces,
+            const MultiTensorView2D<Location::Device>& areas,
+            const linalg::float3& freestream,
+            f32 rho
+        );
+        linalg::float3 coeff_cm_multibody(
+            const MultiTensorView3D<Location::Device>& aero_forces,
+            const MultiTensorView3D<Location::Device>& verts_wing,
+            const linalg::float3& ref_pt,
+            const linalg::float3& freestream, 
+            f32 rho,
+            f32 area,
+            f32 mac
+        );
 
         virtual void mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>&  verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) = 0;
         virtual f32 mesh_mac(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& areas) = 0;

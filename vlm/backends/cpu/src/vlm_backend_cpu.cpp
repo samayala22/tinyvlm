@@ -3,14 +3,11 @@
 
 #include "tinytimer.hpp"
 #include "tinycpuid2.hpp"
-#include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
 #include "vlm_types.hpp"
-#include "vlm_utils.hpp"
 #include "vlm_executor.hpp" // includes taskflow/taskflow.hpp
 
 #include <algorithm> // std::fill
-#include <iostream> // std::cout
 #include <cstdio> // std::printf
 #include <thread> // std::hardware_concurrency()
 
@@ -433,47 +430,6 @@ f32 BackendCPU::coeff_steady_cl_single(const TensorView3D<Location::Device>& ver
     return cl;
 }
 
-f32 BackendCPU::coeff_unsteady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const TensorView2D<Location::Device>& gamma, const TensorView2D<Location::Device>& gamma_prev, const TensorView3D<Location::Device>& velocities, const TensorView2D<Location::Device>& areas, const TensorView3D<Location::Device>& normals, const linalg::float3& freestream, f32 dt, f32 area) {    
-    f32 cl = 0.0f;
-    const f32 rho = 1.0f; // TODO: remove hardcoded rho
-    const linalg::float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
-    const linalg::float3 lift_axis = linalg::normalize(linalg::cross(freestream, span_axis));
-
-    for (i64 j = 0; j < gamma_delta.shape(1); j++) {
-        for (i64 i = 0; i < gamma_delta.shape(0); i++) {
-
-            const linalg::float3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
-
-            const linalg::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
-            const linalg::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
-            const linalg::float3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
-
-            linalg::float3 force = {0.0f, 0.0f, 0.0f};
-            const f32 gamma_dt = (gamma(i, j) - gamma_prev(i, j)) / dt; // backward difference
-
-            // Joukowski method
-            force += rho * gamma_delta(i, j) * linalg::cross(V, vertex1 - vertex0); // steady contribution
-            force += rho * gamma_dt * areas(i, j) * normal; // unsteady contribution
-
-            // Katz Plotkin method
-            // linalg::float3 delta_p = {0.0f, 0.0f, 0.0f};
-            // const f32 delta_gamma_i = (u == 0) ? gamma[li] : gamma[li] - gamma[(u-1) * mesh.ns + v];
-            // const f32 delta_gamma_j = (v == 0) ? gamma[li] : gamma[li] - gamma[u * mesh.ns + v - 1];
-            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v1 - v0)) * delta_gamma_j / mesh.panel_width_y(u, v);
-            // delta_p += rho * linalg::dot(freestream, linalg::normalize(v3 - v0)) * delta_gamma_i / mesh.panel_length(u, v);
-            // delta_p += gamma_dt;
-            // force = (delta_p * mesh.area[li]) * normal;
-
-            // force /= linalg::length2(freestream);
-            
-            cl += linalg::dot(force, lift_axis);
-        }
-    }
-    cl /= 0.5f * rho * linalg::length2(freestream) * area;
-
-    return cl;
-}
-
 void BackendCPU::forces_unsteady(
     const TensorView3D<Location::Device>& verts_wing,
     const TensorView2D<Location::Device>& gamma_delta,
@@ -624,7 +580,6 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Locat
     }
 }
 
-// TODO: fix this function
 /// @brief Computes the mean chord of a set of panels
 /// @details
 /// Mean Aerodynamic Chord = \frac{2}{S} \int_{0}^{b/2} c(y)^{2} dy

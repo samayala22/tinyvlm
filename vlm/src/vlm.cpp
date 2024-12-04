@@ -373,6 +373,7 @@ void UVLM::alloc_buffers() {
     gamma_wing_delta.init(panels_2D);
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
+    aero_forces.init(panels_3D);
     transforms_h.init(transforms_2D);
     transforms.init(transforms_2D);
     solver->init(lhs.view());
@@ -380,8 +381,10 @@ void UVLM::alloc_buffers() {
     condition0.resize(assembly_wings.size()*assembly_wings.size());
 }
 
+
 void UVLM::run(const Assembly& assembly, f32 t_final) {
     const tiny::ScopedTimer timer("UVLM");
+    const f32 rho = 1.0f; // TODO: take this as input
     // Copy raw meshes to device
     for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
         init_h.to(init_d);
@@ -475,13 +478,20 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
         
         // skip cl computation for the first iteration
         if (i > 0) {
-            const f32 cl_unsteady = backend->coeff_unsteady_cl_multi(verts_wing.views(), gamma_wing_delta.views(), gamma_wing.views(), gamma_wing_prev.views(), velocities.views(), areas_d.views(), normals_d.views(), freestream, dt);
-            // if (i == vec_t.size()-2) std::printf("t: %f, CL: %f\n", t, cl_unsteady);
-            std::printf("t: %f, CL: %f\n", t, cl_unsteady);
+            backend->forces_unsteady_multibody(verts_wing.views(), gamma_wing_delta.views(), gamma_wing.views(), gamma_wing_prev.views(), velocities.views(), areas_d.views(), normals_d.views(), aero_forces.views(), dt);
+            const f32 cl = backend->coeff_cl_multibody(aero_forces.views(), areas_d.views(), freestream, rho);
+
             for (const auto& [wing, wing_h] : zip(verts_wing.views(), verts_wing_h.views())) {
                 wing.to(wing_h);
             }
-            cl_data << t << " " << verts_wing_h.views()[0](0, 0, 2) << " " << cl_unsteady << " " << 0.f << "\n";
+            const auto& wing_h = verts_wing_h.views()[0];
+            const linalg::float3 chord_axis = linalg::normalize(linalg::float3{
+                wing_h(0, 1, 0) - wing_h(0, 0, 0),
+                wing_h(0, 1, 1) - wing_h(0, 0, 1),
+                wing_h(0, 1, 2) - wing_h(0, 0, 2)
+            });
+
+            cl_data << t << " " << verts_wing_h.views()[0](0, 0, 2) << " " << cl << " " << std::atan2(-chord_axis.z, chord_axis.x) << "\n";
         }
 
         {
