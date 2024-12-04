@@ -550,7 +550,7 @@ linalg::float3 BackendCPU::coeff_cm(
             cm += linalg::cross(lever, force);
         }
     }
-    return cm / (0.5f * rho * linalg::length2(freestream) * area * 1.0f);
+    return cm / (0.5f * rho * linalg::length2(freestream) * area * mac);
 }
 
 f32 BackendCPU::coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
@@ -640,11 +640,11 @@ f32 BackendCPU::mesh_mac(const TensorView3D<Location::Device>& verts_wing, const
     for (i64 i = 0; i < areas.shape(0); i++) {
         // left and right chord lengths
         const f32 dx0 = verts_wing(i+0, 0, 0) - verts_wing(i+0, -1, 0);
-        const f32 dy0 = verts_wing(i+0, 0, 1) - verts_wing(i+0, -1, 0);
-        const f32 dz0 = verts_wing(i+0, 0, 2) - verts_wing(i+0, -1, 0);
+        const f32 dy0 = verts_wing(i+0, 0, 1) - verts_wing(i+0, -1, 1);
+        const f32 dz0 = verts_wing(i+0, 0, 2) - verts_wing(i+0, -1, 2);
         const f32 dx1 = verts_wing(i+1, 0, 0) - verts_wing(i+1, -1, 0);
-        const f32 dy1 = verts_wing(i+1, 0, 1) - verts_wing(i+1, -1, 0);
-        const f32 dz1 = verts_wing(i+1, 0, 2) - verts_wing(i+1, -1, 0);
+        const f32 dy1 = verts_wing(i+1, 0, 1) - verts_wing(i+1, -1, 1);
+        const f32 dz1 = verts_wing(i+1, 0, 2) - verts_wing(i+1, -1, 2);
         const f32 c0 = std::sqrt(dx0 * dx0 + dy0 * dy0 + dz0 * dz0);
         const f32 c1 = std::sqrt(dx1 * dx1 + dy1 * dy1 + dz1 * dz1);
         // Panel width

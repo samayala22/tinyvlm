@@ -11,6 +11,27 @@
 #include <fstream>
 #include <memory>
 
+#define ASSERT_EQ(x, y) \
+    do { \
+        auto val1 = (x); \
+        auto val2 = (y); \
+        if (!(val1 == val2)) { \
+            std::cerr << "Assertion failed: " << #x << " == " << #y << " (Left: " << val1 << ", Right: " << val2 << ")\n"; \
+            std::abort(); \
+        } \
+    } while (0)
+
+#define ASSERT_NEAR(x, y, tol) \
+    do { \
+        auto val1 = (x); \
+        auto val2 = (y); \
+        if (!(std::abs(val1 - val2) <= tol)) { \
+            std::cerr << "Assertion failed: |" << #x << " - " << #y << "| <= " << tol << " (Left: " << val1 << ", Right: " << val2 << ", Diff: " << std::abs(val1 - val2) << ")\n"; \
+            std::abort(); \
+        } \
+    } while (0)
+
+
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
@@ -52,7 +73,6 @@ class UVLM_2DOF final: public Simulation {
         MultiTensor3D<Location::Host> colloc_h{backend->memory.get()};
         MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
         MultiTensor2D<Location::Device> areas_d{backend->memory.get()};
-        MultiTensor3D<Location::Device> verts_wing_pos{backend->memory.get()}; // (nc+1)*(ns+1)*3
  
         MultiTensor<i8, 2, Location::Host> wing_cell_type{backend->memory.get()}; // ns*nc
         MultiTensor<i64, 2, Location::Host> wing_cell_offset{backend->memory.get()}; // ns*nc
@@ -114,6 +134,8 @@ class UVLM_2DOF final: public Simulation {
         void compute_local_velocities(const Assembly& assembly, f32 t);
         void update_transforms(const Assembly& assembly, f32 t);
         void initialize_structure_data(const UVLM_2DOF_Vars& vars, const i64 t_steps, const f32 dt_nd);
+        f32 wing_alpha(); // get pitch angle from verts_wing_h
+        f32 wing_h(f32 elastic_dst); // get wing elastic height at given dist
 };
 
 UVLM_2DOF::UVLM_2DOF(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes) {
@@ -129,6 +151,27 @@ inline i64 total_panels(const MultiDim<2>& assembly_wing) {
         total += wing[0] * wing[1];
     }
     return total;
+}
+
+f32 UVLM_2DOF::wing_alpha() {
+    const auto& wing_h = verts_wing_h.views()[0];
+    const linalg::float3 x_axis = {1.0f, 0.0f, 0.0f};
+    const linalg::float3 chord_axis = linalg::normalize(linalg::float3{
+        wing_h(0, 1, 0) - wing_h(0, 0, 0),
+        wing_h(0, 1, 1) - wing_h(0, 0, 1),
+        wing_h(0, 1, 2) - wing_h(0, 0, 2)
+    });
+    return std::acos(linalg::dot(chord_axis, x_axis));
+}
+
+// elastic dst: distance from the leading edge
+f32 UVLM_2DOF::wing_h(f32 elastic_dst) {
+    const auto& wing_h = verts_wing_h.views()[0];
+    const linalg::float3 pt0 = linalg::float3{wing_h(0, 0, 0), wing_h(0, 0, 1), wing_h(0, 0, 2)};
+    const linalg::float3 pt1 = linalg::float3{wing_h(0, 1, 0), wing_h(0, 1, 1), wing_h(0, 1, 2)};
+    const linalg::float3 chord_axis = linalg::normalize(pt1 - pt0);
+    const linalg::float3 elastic_pt = pt0 + elastic_dst * chord_axis - 0.25f * (pt1 - pt0);
+    return elastic_pt.z;
 }
 
 void body_connectivity(
@@ -183,7 +226,6 @@ void UVLM_2DOF::alloc_buffers() {
     colloc_d.init(panels_3D);
     colloc_h.init(panels_3D);
     areas_d.init(panels_2D);
-    verts_wing_pos.init(verts_wing_3D);
 
     wing_cell_type.init(panels_2D);
     wing_cell_offset.init(panels_2D);
@@ -406,21 +448,25 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
     std::printf("omega_a: %f\n", omega_a);
     std::printf("U: %f\n", U);
 
-    // Copy raw meshes to device
-    for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
-        init_h.to(init_d);
-    }
-    for (const auto& [kinematics, transform_h, transform_d] : zip(assembly.surface_kinematics(), transforms_h.views(), transforms.views())) {
-        auto transform = kinematics->transform(0.0f);
-        transform.store(transform_h.ptr(), transform_h.stride(1));
+    auto init_pos = rotation_matrix<f32>(
+        {
+            vars.b + vars.a_h * vars.b,
+            0.0f,
+            0.0f
+        },
+        {
+            0.0f,
+            1.0f,
+            0.0f
+        }, 
+        to_radians(3.0f)
+    );
+
+    for (const auto& [transform_h, transform_d] : zip(transforms_h.views(), transforms.views())) {
+        init_pos.store(transform_h.ptr(), transform_h.stride(1));
         transform_h.to(transform_d);
     }
-    backend->displace_wing(transforms.views(), verts_wing_pos.views(), verts_wing_init.views());
-    for (const auto& [wing_d, wing_h, wing_pos] : zip(verts_wing.views(), verts_wing_h.views(),verts_wing_pos.views())) {
-        wing_pos.to(wing_d);
-        wing_pos.to(wing_h);
-    }
-
+    backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
     for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
 
@@ -521,6 +567,12 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         }
         verts_wing.views()[0].to(verts_wing_h.views()[0]); // for output
 
+        const f32 w_alpha = wing_alpha();
+        const f32 w_h_nd = wing_h(vars.b + vars.a_h * vars.b) / vars.b;
+
+        ASSERT_NEAR(w_h_nd, u_h.view()(0, i), 5e-6f);
+        ASSERT_NEAR(w_alpha, u_h.view()(1, i), 5e-6f);
+
         for (i64 m = 0; m < assembly_wings.size(); m++) {
             const auto& verts_wake_m = verts_wake_h.views()[m];
             const auto& wake_cell_type_m = wake_cell_type.views()[m];
@@ -613,7 +665,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             transforms_h.views()[0].to(transforms.views()[0]);
 
             // Aero
-            backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_pos.views());
+            backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
             backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
             backend->wake_shed(verts_wing.views(), verts_wake.views(), i+1);
 
@@ -647,7 +699,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             );
 
             auto ref_pt_4 = linalg::mul(transform, {vars.b + vars.a_h * vars.b, 0.0f, 0.0f, 1.0f});
-
+            
             const linalg::float3 cm = backend->coeff_cm(
                 aero_forces.views()[0],
                 verts_wing.views()[0],
