@@ -319,6 +319,86 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
     
     return monolithic_system
 
+def fit_segment_weighted(freq_segment, psd_segment):
+    # Define quadratic function
+    def quad(x, a, b, c):
+        return a*x**2 + b*x + c
+    
+    # quadratic polynomial distribution with close to 0 at each extremities
+    def sigma_distribution(x): 
+        a=-4/(freq_segment[0]-freq_segment[-1])**2
+        b=-(2*a*freq_segment[0]-np.sqrt(-4*a))
+        c=1+b**2/(4*a)
+        return a*x**2+b*x+c+1e-2
+    
+    # sigma = np.ones_like(freq_segment)
+    # sigma[0] = 1e-2 
+    # sigma[-1] = 1e-2 
+    sigma = sigma_distribution(freq_segment)
+
+    p0 = np.polyfit(freq_segment, psd_segment, 2)
+    
+    # Fit with weighted points
+    popt, _ = sp.optimize.curve_fit(
+        quad,
+        freq_segment,
+        psd_segment,
+        p0=p0, 
+        sigma=sigma,
+        absolute_sigma=True,
+        maxfev=5000
+    )
+    
+    return lambda x: quad(x, *popt)
+
+def segment_and_fit_psd(frequencies, psd_db):
+    # Find major peaks
+    peaks, _ = sp.signal.find_peaks(psd_db, prominence=20)  # adjust prominence
+    
+    peaks_padded = np.zeros(len(peaks) + 2, dtype=peaks.dtype)
+    peaks_padded[1:-1] = peaks
+    peaks_padded[0] = 0
+    peaks_padded[-1] = len(psd_db) - 1
+
+    fitted_psd = np.zeros_like(psd_db)
+    
+    # Fit each segment between peaks
+    for i in range(len(peaks_padded)-1):
+        start = peaks_padded[i]
+        end = peaks_padded[i+1]
+        
+        # Get segment data
+        freq_segment = frequencies[start:end]
+        psd_segment = psd_db[start:end]
+
+        fit_func = fit_segment_weighted(freq_segment, psd_segment)
+        fitted_psd[start:end] = fit_func(freq_segment)
+
+    return fitted_psd
+
+def plot_data_and_psd(axs_d, axs_psd, t, data, label):
+    sampling_rate = 1 / np.mean(np.diff(t))
+    n_points = len(t)
+
+    frequencies, psd = sp.signal.welch(data, 
+                              fs=sampling_rate,
+                              nperseg=n_points//2,
+                              )
+    psd_db_raw = 10 * np.log10(psd)
+    # psd_db = segment_and_fit_psd(frequencies, psd_db_raw)
+
+    mask = frequencies < 1.0
+
+    axs_d.plot(t, data, label=label)
+    # axs_psd.plot(frequencies[mask], psd_db[mask], label=label)
+    axs_psd.plot(frequencies[mask], psd_db_raw[mask], label=label)
+
+def format_axs(axs, xlabel, ylabel):
+    axs.set_xlabel(xlabel)
+    axs.set_ylabel(ylabel)
+    axs.grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+    axs.legend()
+
 if __name__ == "__main__":
     psi1 = 0.165
     psi2 = 0.335
@@ -366,7 +446,7 @@ if __name__ == "__main__":
         )
 
         # Dimensionless parameters
-        dt_nd = 0.4
+        dt_nd = 0.3
         # t_final_nd = U_vel * 200.0
         t_final_nd = 90.0
         vec_t_nd = np.arange(0, t_final_nd, dt_nd)
@@ -375,7 +455,6 @@ if __name__ == "__main__":
         m = ndv.mu * (np.pi * rho * b**2)
         omega_a = np.sqrt(k_a / (m * (ndv.r_a * b)**2))
         U = U_vel * (b * omega_a)
-        print(U)
         omega_h = ndv.omega * omega_a
         k_h = omega_h**2 * m
 
@@ -413,10 +492,6 @@ if __name__ == "__main__":
             - 1/(ndv.U**2) * torsional_func(u[1,0])
         ])
         a[:, 0] = np.linalg.solve(M, F[:, 0] + init_R - C @ v[:,0] - zeros @ u[:,0])
-
-        print(u[:, 0])
-        print(v[:, 0])
-        print(a[:, 0])
 
         def w(s: float):
             idx = int(s / dt_nd)
@@ -489,27 +564,19 @@ if __name__ == "__main__":
 
         if (len(vec_U) == 1):
             fig, axs = plt.subplot_mosaic(
-                [["h", "hd"], ["a", "ad"]],  # Disposition des graphiques
+                [["h", "hd"], ["h_psd", "hd_psd"], ["a", "ad"], ["a_psd", "ad_psd"]],  # Disposition des graphiques
                 constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
                 figsize=(16, 9),  # Ajuster la taille de la figure (x,y)
             )
-            
-            axs["h"].plot(vec_t_nd, u[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            axs["h"].plot(monolithic_sol.t, monolithic_sol.y[0, :], label="Monolithic")
-            # axs["h"].plot(peaks_h_t_i, peaks_h_d_i, "o")
-            # axs["h"].plot(vec_t_nd, smoothed_h, "--", label="Smoothed")
 
-            axs["hd"].plot(vec_t_nd, v[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            axs["hd"].plot(monolithic_sol.t, monolithic_sol.y[2, :], label="Monolithic")
-            # axs["hd/h"].plot(u[0, :], v[0, :])
-
-            axs["a"].plot(vec_t_nd, np.degrees(u[1, :]), label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            # axs["a"].plot(peaks_a_t_i, np.degrees(peaks_a_d_i), "o")
-            axs["a"].plot(monolithic_sol.t, np.degrees(monolithic_sol.y[1, :]), label="Monolithic")
-
-            axs["ad"].plot(vec_t_nd, v[1, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            axs["ad"].plot(monolithic_sol.t, monolithic_sol.y[3, :], label="Monolithic")
-            # axs["ad/a"].plot(u[1, :], v[1, :], "o")
+            plot_data_and_psd(axs["h"], axs["h_psd"], vec_t_nd, u[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
+            plot_data_and_psd(axs["h"], axs["h_psd"], monolithic_sol.t, monolithic_sol.y[0, :], label="Monolithic")
+            plot_data_and_psd(axs["hd"], axs["hd_psd"], vec_t_nd, v[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
+            plot_data_and_psd(axs["hd"], axs["hd_psd"], monolithic_sol.t, monolithic_sol.y[2, :], label="Monolithic")
+            plot_data_and_psd(axs["a"], axs["a_psd"], vec_t_nd, np.degrees(u[1, :]), label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
+            plot_data_and_psd(axs["a"], axs["a_psd"], monolithic_sol.t, np.degrees(monolithic_sol.y[1, :]), label="Monolithic")
+            plot_data_and_psd(axs["ad"], axs["ad_psd"], vec_t_nd, v[1, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
+            plot_data_and_psd(axs["ad"], axs["ad_psd"], monolithic_sol.t, monolithic_sol.y[3, :], label="Monolithic")
 
             uvlm_t = []
             uvlm_h = []
@@ -521,32 +588,20 @@ if __name__ == "__main__":
                     uvlm_t.append(t)
                     uvlm_h.append(h)
                     uvlm_a.append(a)
-            
-            axs["h"].plot(uvlm_t, uvlm_h, label="UVLM")
-            axs["a"].plot(uvlm_t, np.degrees(uvlm_a), label="UVLM")
+
+            plot_data_and_psd(axs["h"], axs["h_psd"], uvlm_t, uvlm_h, label="UVLM")
+            plot_data_and_psd(axs["a"], axs["a_psd"], uvlm_t, np.degrees(uvlm_a), label="UVLM")
 
             # Formatting
-            axs["h"].legend()
-            axs["h"].set_xlabel(r"$\bar{t}$")
-            axs["h"].set_ylabel(r"$\bar{h}$")
-            axs["h"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-
-            axs["hd"].legend()
-            axs["hd"].set_xlabel(r"$\bar{t}$")
-            axs["hd"].set_ylabel(r"$\bar{h'}$")
-            axs["hd"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-
-            axs["a"].legend()
-            axs["a"].set_xlabel(r"$\bar{t}$")
-            axs["a"].set_ylabel(r"$\alpha$")
-            axs["a"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-
-            axs["ad"].legend()
-            axs["ad"].set_xlabel(r"$\bar{t}$")
-            axs["ad"].set_ylabel(r"$\bar{a'}$")
-            axs["ad"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-
-
+            format_axs(axs["h"], r"$\bar{t}$", r"$\bar{h}$")
+            format_axs(axs["hd"], r"$\bar{t}$", r"$\bar{h'}$")
+            format_axs(axs["h_psd"], r"$f$", "Amplitude (dB)")
+            format_axs(axs["hd_psd"], r"$f$", "Amplitude (dB)")
+            format_axs(axs["a"], r"$\bar{t}$", r"$\alpha$")
+            format_axs(axs["ad"], r"$\bar{t}$", r"$\alpha'$")
+            format_axs(axs["a_psd"], r"$f$", "Amplitude (dB)")
+            format_axs(axs["ad_psd"], r"$f$", "Amplitude (dB)")
+            
             fig.suptitle(r"2 DOF Aeroelastic response at $\bar{U} = %s$ (%s Pitch Spring)" % (round(U_vel, 3), torsional_spring_names[torsional_spring]))
 
             plt.show()
@@ -558,7 +613,6 @@ if __name__ == "__main__":
         dominant_freqs = np.abs(freq[max_freq_idx])
         freqs[:, idx] = 2*np.pi * dominant_freqs / omega_a
 
-        
         damping_ratios[0, idx] = get_damping_ratio(u[0, :])
         damping_ratios[1, idx] = get_damping_ratio(u[1, :])
         damping_ratios_m[1, idx] = get_damping_ratio(monolithic_sol.y[1, :])

@@ -14,7 +14,7 @@ def derivative2(f, x):
 def solve_ivp(x0: float, s0: float, sf: float, f: callable):
     return spi.solve_ivp(f, [s0, sf], [x0]).y[-1] # return only the result at t=sf
 
-def cl_theodorsen1(t: np.ndarray, alpha:callable, h:callable, a_h: float, b: float):
+def cl_theodorsen1(t: np.ndarray, alpha:callable, h:callable, a_h: float, b: float, u_inf: float):
     """
     t: time
     alpha: angle of attack
@@ -28,6 +28,9 @@ def cl_theodorsen1(t: np.ndarray, alpha:callable, h:callable, a_h: float, b: flo
     b2 = -0.335
     beta_1 = 0.0455
     beta_2 = 0.3
+
+    rho = 1.0
+    c = 2*b
 
     def w(s: float): return u_inf * alpha(s) + derivative(h, s) + b * (0.5 - a_h) * derivative(alpha, s)
     def dx1ds(s: float, x1: float): return (u_inf / b) * (b1 * beta_1 * w(s) - beta_1 * x1)
@@ -104,7 +107,7 @@ def cl_theodorsen3(t: np.ndarray, alpha:callable, h:callable, a_h: float):
 if __name__ == "__main__":
     # UVLM parameters
     rho = 1 # fluid density
-    u_inf = 1 # freestream
+    u_inf = 2.0 # freestream
     ar = 10000 # aspect ratio
     b = 0.5 # half chord
     c = 2*b # chord
@@ -113,21 +116,21 @@ if __name__ == "__main__":
 
     nb_pts = 1000
     k = 0.5 # reduced frequency
-    t_final = 60 # dimensional time
+    t_final_nd = 90 # nd time
     omega = k * 2.0 * u_inf / c # frequency
-    vec_t = np.linspace(0, t_final, nb_pts)
+    vec_t_nd = np.linspace(0, t_final_nd, nb_pts)
 
     # sudden acceleration
-    # def pitch(t): return np.radians(5)
-    # def heave(t): return 0
+    def pitch(t): return np.radians(5)
+    def heave(t): return 0
 
     # pure heaving
     # def pitch(t): return 0
     # def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    def pitch(t): return np.radians(np.sin(omega * t))
-    def heave(t): return 0
+    # def pitch(t): return np.radians(np.sin(omega * t))
+    # def heave(t): return 0
 
     fig, axs = plt.subplot_mosaic(
         [["time"]],  # Disposition des graphiques
@@ -135,16 +138,24 @@ if __name__ == "__main__":
         figsize=(11, 6),  # Ajuster la taille de la figure (x,y)
     )
 
-    axs["time"].plot(vec_t, cl_theodorsen1(vec_t, pitch, heave, a_h, b), label=f"Theodorsen (k={k})")
+    # axs["time"].plot(vec_t, cl_theodorsen1(vec_t, pitch, heave, a_h, b), label=f"Theodorsen (k={k})")
+    # vec_t_nd = u_inf * vec_t / b # non-dimensional time
+    # axs["time"].plot(vec_t, cl_theodorsen3(vec_t_nd, lambda t: pitch(t*b / u_inf), lambda t: heave(t*b / u_inf) / b, a_h), label=f"Theodorsen 2 (k={k})")
 
-    vec_t_nd = u_inf * vec_t / b # non-dimensional time
-    axs["time"].plot(vec_t, cl_theodorsen3(vec_t_nd, lambda t: pitch(t*b / u_inf), lambda t: heave(t*b / u_inf) / b, a_h), label=f"Theodorsen 2 (k={k})")
+    uvlm_t_nd = []
+    uvlm_cl = []
+    with open("build/windows/x64/debug/2dof_aero.txt", "r") as f:
+        f.readline() # skip first line
+        for line in f:
+            t, cl = map(float, line.split())
+            uvlm_t_nd.append(t)
+            uvlm_cl.append(cl)
 
+    axs["time"].plot(uvlm_t_nd, uvlm_cl, label="UVLM")
+    axs["time"].plot(vec_t_nd, cl_theodorsen3(vec_t_nd, pitch, heave, a_h), label="Theodorsen 3")
+    axs["time"].plot(vec_t_nd, cl_theodorsen1(vec_t_nd * b / u_inf, pitch, heave, a_h, b, u_inf), "--", label="Theodorsen 1")
     axs["time"].set_xlabel('t')
     axs["time"].set_ylabel('CL')
     axs["time"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
     axs["time"].legend()
-
-    plt.suptitle("Theodorsen solution")
-
     plt.show()

@@ -15,7 +15,7 @@ using namespace vlm;
 using namespace linalg::ostream_overloads;
 
 int main() {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_40x10.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x10.x"};
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
