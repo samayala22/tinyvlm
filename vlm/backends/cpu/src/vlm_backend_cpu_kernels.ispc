@@ -93,14 +93,14 @@ inline void kernel_symmetry(float3& inf, C colloc, const V& vertex0, const V& ve
 
 // v_rld : influencer vertices row leading dimension = nb of points span wise
 // Influence of a wing vortex ring (vertex quad) on all the collocation points of all wings
-export void kernel_influence(uniform u64 m, uniform f32* uniform lhs, uniform f32* uniform collocs, uniform u64 collocs_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_rld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32 sigma) {
+export void kernel_influence(uniform i64 m, uniform f32* uniform lhs, uniform f32* uniform collocs, uniform i64 collocs_ld, uniform f32* uniform v, uniform i64 v_ld, uniform i64 v_rld, uniform f32* uniform normals, uniform i64 normals_ld, uniform f32 sigma) {
     
     uniform float3 vertex0 = {v[0 * v_ld]           , v[1 * v_ld]           , v[2 * v_ld]           };
     uniform float3 vertex1 = {v[0 * v_ld + 1]       , v[1 * v_ld + 1]       , v[2 * v_ld + 1]       };
     uniform float3 vertex2 = {v[0 * v_ld + v_rld +1], v[1 * v_ld + v_rld +1], v[2 * v_ld + v_rld +1]};
     uniform float3 vertex3 = {v[0 * v_ld + v_rld]   , v[1 * v_ld + v_rld]   , v[2 * v_ld + v_rld]   };
 
-    // print("Influencer %: \n", lidx);
+    // print("Influencer: \n");
     // print("Vertex 0: % % %\n", vertex0.x, vertex0.y, vertex0.z);
     // print("Vertex 1: % % %\n", vertex1.x, vertex1.y, vertex1.z);
     // print("Vertex 2: % % %\n", vertex2.x, vertex2.y, vertex2.z);
@@ -110,7 +110,7 @@ export void kernel_influence(uniform u64 m, uniform f32* uniform lhs, uniform f3
         const float3 colloc = {collocs[0 * collocs_ld + i], collocs[1 * collocs_ld + i], collocs[2 * collocs_ld + i]};
         const float3 normal = {normals[0 * normals_ld + i], normals[1 * normals_ld + i], normals[2 * normals_ld + i]};
         
-        // print("Influenced: %\n", ia2);
+        // print("Influenced:\n");
         // print("Colloc: \n % \n % \n %\n", colloc.x, colloc.y, colloc.z);
         // print("Normal: \n % \n % \n %\n", normal.x, normal.y, normal.z);
 
@@ -137,7 +137,7 @@ export void kernel_influence(uniform u64 m, uniform f32* uniform lhs, uniform f3
 /// @param rhs ptr to rhs  value of influenced panel
 /// @param sigma vortex core model factor
 /// @param iteration current iteration number
-export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 colloc_ld, uniform f32* uniform normals, uniform u64 normals_ld, uniform f32* uniform v, uniform u64 v_ld, uniform u64 v_m, uniform u64 v_n, uniform f32* uniform gamma, uniform f32* uniform rhs, uniform f32 sigma, uniform u32 iteration) {
+export void kernel_wake_influence(uniform f32* uniform colloc, uniform i64 colloc_ld, uniform f32* uniform normals, uniform i64 normals_ld, uniform f32* uniform v, uniform i64 v_ld, uniform i64 v_m, uniform i64 v_n, uniform f32* uniform gamma, uniform f32* uniform rhs, uniform f32 sigma, uniform i32 iteration) {
     const uniform float3 colloc_influenced = {colloc[0*colloc_ld], colloc[1*colloc_ld], colloc[2*colloc_ld]};
 
     // print("Colloc: % % %\n", colloc_influenced.x, colloc_influenced.y, colloc_influenced.z);
@@ -145,12 +145,12 @@ export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 collo
     float3 induced_vel = {0.0f, 0.0f, 0.0f};
 
     // Wake influence on wing
-    for (u64 i = v_m - iteration - 1; i < v_m-1; i++) {
+    for (i64 i = v_m - iteration - 1; i < v_m-1; i++) {
         foreach(j = 0 ... v_n - 1) {
-            const u64 v0 = (i+0) * v_n + j;
-            const u64 v1 = (i+0) * v_n + j + 1;
-            const u64 v2 = (i+1) * v_n + j + 1;
-            const u64 v3 = (i+1) * v_n + j;
+            const i64 v0 = (i+0) * v_n + j;
+            const i64 v1 = (i+0) * v_n + j + 1;
+            const i64 v2 = (i+1) * v_n + j + 1;
+            const i64 v3 = (i+1) * v_n + j;
 
             // Loads
             const float3 vertex0 = {v[0*v_ld + v0], v[1*v_ld + v0], v[2*v_ld + v0]};
@@ -195,7 +195,7 @@ export void kernel_wake_influence(uniform f32* uniform colloc, uniform u64 collo
 /// @param sigma vortex core model factor
 /// @param dt time step
 /// @param iteration current iteration number
-export void kernel_rollup(uniform f32* uniform v_wake, uniform u64 v_wake_ld, uniform u64 v_wake_m, uniform u64 v_wake_n, uniform u64 v_wake_idx, uniform f32* uniform v_wing, uniform u64 v_wing_ld, uniform u64 v_wing_m, uniform u64 v_wing_n, uniform f32* uniform rollup, uniform u64 rollup_ld, uniform f32* uniform gamma_wing, uniform f32* uniform gamma_wake, uniform f32 sigma, uniform f32 dt, uniform u32 iteration) {
+export void kernel_rollup(uniform f32* uniform v_wake, uniform i64 v_wake_ld, uniform i64 v_wake_m, uniform i64 v_wake_n, uniform i64 v_wake_idx, uniform f32* uniform v_wing, uniform i64 v_wing_ld, uniform i64 v_wing_m, uniform i64 v_wing_n, uniform f32* uniform rollup, uniform i64 rollup_ld, uniform f32* uniform gamma_wing, uniform f32* uniform gamma_wake, uniform f32 sigma, uniform f32 dt, uniform i32 iteration) {
     const uniform float3 vertex_influenced = {v_wake[0*v_wake_ld + v_wake_idx], v_wake[1*v_wake_ld + v_wake_idx], v_wake[2*v_wake_ld + v_wake_idx]};
 
     float3 induced_vel = {0.0f, 0.0f, 0.0f}; 
@@ -203,10 +203,10 @@ export void kernel_rollup(uniform f32* uniform v_wake, uniform u64 v_wake_ld, un
     // Wing influence
     for (uint64 i = 0; i < v_wing_m - 1; i++) {
         foreach(j = 0 ... v_wing_n - 1) {
-            u64 v0 = (i+0) * (v_wing_n) + j;
-            u64 v1 = (i+0) * (v_wing_n) + j + 1;
-            u64 v2 = (i+1) * (v_wing_n) + j + 1;
-            u64 v3 = (i+1) * (v_wing_n) + j;
+            i64 v0 = (i+0) * (v_wing_n) + j;
+            i64 v1 = (i+0) * (v_wing_n) + j + 1;
+            i64 v2 = (i+1) * (v_wing_n) + j + 1;
+            i64 v3 = (i+1) * (v_wing_n) + j;
 
             // Loads
             const float3 vertex0 = {v_wing[0*v_wing_ld + v0], v_wing[1*v_wing_ld + v0], v_wing[2*v_wing_ld + v0]};
@@ -225,12 +225,12 @@ export void kernel_rollup(uniform f32* uniform v_wake, uniform u64 v_wake_ld, un
     }
 
     // Wake influence
-    for (u64 i = v_wake_m - iteration - 1; i < v_wake_m-1; i++) {
+    for (i64 i = v_wake_m - iteration - 1; i < v_wake_m-1; i++) {
         foreach(j = 0 ... v_wake_n - 1) {
-            u64 v0 = (i+0) * (v_wake_n) + j;
-            u64 v1 = (i+0) * (v_wake_n) + j + 1;
-            u64 v2 = (i+1) * (v_wake_n) + j + 1;
-            u64 v3 = (i+1) * (v_wake_n) + j;
+            i64 v0 = (i+0) * (v_wake_n) + j;
+            i64 v1 = (i+0) * (v_wake_n) + j + 1;
+            i64 v2 = (i+1) * (v_wake_n) + j + 1;
+            i64 v3 = (i+1) * (v_wake_n) + j;
 
             // Loads
             const float3 vertex0 = {v_wake[0*v_wake_ld + v0], v_wake[1*v_wake_ld + v0], v_wake[2*v_wake_ld + v0]};
@@ -253,17 +253,17 @@ export void kernel_rollup(uniform f32* uniform v_wake, uniform u64 v_wake_ld, un
     rollup[2*rollup_ld + v_wake_idx] = vertex_influenced.z + reduce_add(induced_vel.z) * dt;
 }
 
-export uniform float kernel_trefftz_cd(uniform f32* uniform v_wake, uniform u64 v_wake_ld, uniform u64 v_wake_m, uniform u64 v_wake_n, uniform float* uniform gamma_wake, uniform f32 sigma) {
+export uniform float kernel_trefftz_cd(uniform f32* uniform v_wake, uniform i64 v_wake_ld, uniform i64 v_wake_m, uniform i64 v_wake_n, uniform float* uniform gamma_wake, uniform f32 sigma) {
     varying float cd = 0.0f;
 
     // Loop over first wake panel spanwise section
-    const uniform u64 i = v_wake_m - 2; // 2nd to last wake chordwise index
+    const uniform i64 i = v_wake_m - 2; // 2nd to last wake chordwise index
     // parallel for
-    for (uniform u64 j = 0; j < v_wake_n - 1; j++) {
-        uniform u64 v0 = (i+0) * (v_wake_n) + j;
-        uniform u64 v1 = (i+0) * (v_wake_n) + j + 1;
-        uniform u64 v2 = (i+1) * (v_wake_n) + j + 1;
-        uniform u64 v3 = (i+1) * (v_wake_n) + j;
+    for (uniform i64 j = 0; j < v_wake_n - 1; j++) {
+        uniform i64 v0 = (i+0) * (v_wake_n) + j;
+        uniform i64 v1 = (i+0) * (v_wake_n) + j + 1;
+        uniform i64 v2 = (i+1) * (v_wake_n) + j + 1;
+        uniform i64 v3 = (i+1) * (v_wake_n) + j;
  
         // Loads
         const uniform float3 vertex0 = {v_wake[0*v_wake_ld + v0], v_wake[1*v_wake_ld + v0], v_wake[2*v_wake_ld + v0]};
@@ -277,10 +277,10 @@ export uniform float kernel_trefftz_cd(uniform f32* uniform v_wake, uniform u64 
         varying float3 inf = {0.0f, 0.0f, 0.0f};
 
         foreach(jj = 0 ... v_wake_n - 1) {
-            varying u64 vv0 = (i+0) * (v_wake_n) + jj;
-            varying u64 vv1 = (i+0) * (v_wake_n) + jj + 1;
-            varying u64 vv2 = (i+1) * (v_wake_n) + jj + 1;
-            varying u64 vv3 = (i+1) * (v_wake_n) + jj;
+            varying i64 vv0 = (i+0) * (v_wake_n) + jj;
+            varying i64 vv1 = (i+0) * (v_wake_n) + jj + 1;
+            varying i64 vv2 = (i+1) * (v_wake_n) + jj + 1;
+            varying i64 vv3 = (i+1) * (v_wake_n) + jj;
 
             // Loads
             const varying float3 vvertex0 = {v_wake[0*v_wake_ld + vv0], v_wake[1*v_wake_ld + vv0], v_wake[2*v_wake_ld + vv0]};

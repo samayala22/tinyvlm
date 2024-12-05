@@ -4,7 +4,7 @@
 #include <cmath>        // For various unary math functions, such as std::sqrt
 #include <cstdint>      // For implementing namespace linalg::aliases
 #include <array>        // For std::array, used in the relational operator overloads
-#include <type_traits>  // For std::result_of
+#include <type_traits>  // For std::invoke_result
 #include <iosfwd>       // For std::ostream, used in the operator<< overloads
 
 namespace linalg
@@ -19,20 +19,20 @@ namespace linalg
         explicit                    vec(T s)                        : x(s), y(s) {}
         explicit                    vec(const T * p)                : vec(p[0], p[1]) {}
         template<class U> explicit  vec(const vec<U,2> & v)         : vec(static_cast<T>(v.x), static_cast<T>(v.y)) {}
-        const T &                   operator[] (int i) const        { return (&x)[i]; }
-        T &                         operator[] (int i)              { return (&x)[i]; }
+        const T &                   operator[] (int i) const        { return i==0?x:y; }
+        T &                         operator[] (int i)              { return i==0?x:y; }
     };
     template<class T> struct vec<T,3>
     {
         T                           x,y,z;
-        constexpr                            vec()                           : x(), y(), z() {}
-        constexpr                            vec(T x, T y, T z)              : x(x), y(y), z(z) {}
+                                    vec()                           : x(), y(), z() {}
+                                    vec(T x, T y, T z)              : x(x), y(y), z(z) {}
         explicit                    vec(T s)                        : x(s), y(s), z(s) {}
         explicit                    vec(const T * p)                : vec(p[0], p[1], p[2]) {}
         template<class U> explicit  vec(const vec<U,3> & v)         : vec(static_cast<T>(v.x), static_cast<T>(v.y), static_cast<T>(v.z)) {}
                                     vec(const vec<T,2> & xy, T z)   : vec(xy.x, xy.y, z) {}
-        constexpr T &                   operator[] (int i) const        { return (&x)[i]; }
-        T &                         operator[] (int i)              { return (&x)[i]; }
+        const T &                   operator[] (int i) const        { return i==0?x:i==1?y:z; }
+        T &                         operator[] (int i)              { return i==0?x:i==1?y:z; }
         vec<T,2>                    xy() const                      { return {x,y}; }
     };
     template<class T> struct vec<T,4>
@@ -44,8 +44,8 @@ namespace linalg
         explicit                    vec(const T * p)                : vec(p[0], p[1], p[2], p[3]) {}
         template<class U> explicit  vec(const vec<U,4> & v)         : vec(static_cast<T>(v.x), static_cast<T>(v.y), static_cast<T>(v.z), static_cast<T>(v.w)) {}
                                     vec(const vec<T,3> & xyz, T w)  : vec(xyz.x, xyz.y, xyz.z, w) {}
-        const T &                   operator[] (int i) const        { return (&x)[i]; }
-        T &                         operator[] (int i)              { return (&x)[i]; }
+        const T &                   operator[] (int i) const        { return i==0?x:i==1?y:i==2?z:w; }
+        T &                         operator[] (int i)              { return i==0?x:i==1?y:i==2?z:w; }
         vec<T,3>                    xyz() const                     { return {x,y,z}; }
     };
 
@@ -61,8 +61,8 @@ namespace linalg
         explicit                    mat(const T * p)                : x(p+M*0), y(p+M*1) {}
         template<class U> explicit  mat(const mat<U,M,2> & m)       : mat(V(m.x), V(m.y)) {}
         vec<T,2>                    row(int i) const                { return {x[i], y[i]}; }
-        const V &                   operator[] (int j) const        { return (&x)[j]; }
-        V &                         operator[] (int j)              { return (&x)[j]; }
+        const V &                   operator[] (int j) const        { return j==0?x:y; }
+        V &                         operator[] (int j)              { return j==0?x:y; }
     };
     template<class T, int M> struct mat<T,M,3>
     {
@@ -74,8 +74,8 @@ namespace linalg
         explicit                    mat(const T * p)                : x(p+M*0), y(p+M*1), z(p+M*2) {}
         template<class U> explicit  mat(const mat<U,M,3> & m)       : mat(V(m.x), V(m.y), V(m.z)) {}
         vec<T,3>                    row(int i) const                { return {x[i], y[i], z[i]}; }
-        const V &                   operator[] (int j) const        { return (&x)[j]; }
-        V &                         operator[] (int j)              { return (&x)[j]; }
+        const V &                   operator[] (int j) const        { return j==0?x:j==1?y:z; }
+        V &                         operator[] (int j)              { return j==0?x:j==1?y:z; }
     };
     template<class T, int M> struct mat<T,M,4>
     {
@@ -87,8 +87,8 @@ namespace linalg
         explicit                    mat(const T * p)                : x(p+M*0), y(p+M*1), z(p+M*2), w(p+M*3) {}
         template<class U> explicit  mat(const mat<U,M,4> & m)       : mat(V(m.x), V(m.y), V(m.z), V(m.w)) {}
         vec<T,4>                    row(int i) const                { return {x[i], y[i], z[i], w[i]}; }
-        const V &                   operator[] (int j) const        { return (&x)[j]; }
-        V &                         operator[] (int j)              { return (&x)[j]; }
+        const V &                   operator[] (int j) const        { return j==0?x:j==1?y:j==2?z:w; }
+        V &                         operator[] (int j)              { return j==0?x:j==1?y:j==2?z:w; }
         void                        store(T* ptr, std::size_t ld) const {
             static_assert(M == 4);
             ptr[0*ld+0] = x.x;
@@ -128,20 +128,20 @@ namespace linalg
     template<class T, class F> T fold(const vec<T,4> & a, F f) { return f(f(f(a.x,a.y),a.z),a.w); }
 
     // Produce a vector/matrix by applying f(T,T) to corresponding pairs of elements from vectors/matrix a and b
-    template<class T,               class F> vec<typename std::result_of<F(T,T)>::type,2  > zip(const vec<T,2  > & a, const vec<T,2  > & b, F f) { return {f(a.x,b.x), f(a.y,b.y)}; }
-    template<class T,               class F> vec<typename std::result_of<F(T,T)>::type,3  > zip(const vec<T,3  > & a, const vec<T,3  > & b, F f) { return {f(a.x,b.x), f(a.y,b.y), f(a.z,b.z)}; }
-    template<class T,               class F> vec<typename std::result_of<F(T,T)>::type,4  > zip(const vec<T,4  > & a, const vec<T,4  > & b, F f) { return {f(a.x,b.x), f(a.y,b.y), f(a.z,b.z), f(a.w,b.w)}; }
-    template<class T, int M,        class F> vec<typename std::result_of<F(T,T)>::type,M  > zip(const vec<T,M  > & a,                  T b, F f) { return zip(a, vec<T,M>(b), f); }
-    template<class T, int M,        class F> vec<typename std::result_of<F(T,T)>::type,M  > zip(                 T a, const vec<T,M  > & b, F f) { return zip(vec<T,M>(a), b, f); }
-    template<class T, int M,        class F> mat<typename std::result_of<F(T,T)>::type,M,2> zip(const mat<T,M,2> & a, const mat<T,M,2> & b, F f) { return {zip(a.x,b.x,f), zip(a.y,b.y,f)}; }
-    template<class T, int M,        class F> mat<typename std::result_of<F(T,T)>::type,M,3> zip(const mat<T,M,3> & a, const mat<T,M,3> & b, F f) { return {zip(a.x,b.x,f), zip(a.y,b.y,f), zip(a.z,b.z,f)}; }
-    template<class T, int M,        class F> mat<typename std::result_of<F(T,T)>::type,M,4> zip(const mat<T,M,4> & a, const mat<T,M,4> & b, F f) { return {zip(a.x,b.x,f), zip(a.y,b.y,f), zip(a.z,b.z,f), zip(a.w,b.w,f)}; }
-    template<class T, int M, int N, class F> mat<typename std::result_of<F(T,T)>::type,M,N> zip(const mat<T,M,N> & a,                  T b, F f) { return zip(a, mat<T,M,N>(b), f); }
-    template<class T, int M, int N, class F> mat<typename std::result_of<F(T,T)>::type,M,N> zip(                 T a, const mat<T,M,N> & b, F f) { return zip(mat<T,M,N>(a), b, f); }
+    template<class T,               class F> vec<typename std::invoke_result_t<F, T, T>,2  > zip(const vec<T,2  > & a, const vec<T,2  > & b, F f) { return {f(a.x,b.x), f(a.y,b.y)}; }
+    template<class T,               class F> vec<typename std::invoke_result_t<F, T, T>,3  > zip(const vec<T,3  > & a, const vec<T,3  > & b, F f) { return {f(a.x,b.x), f(a.y,b.y), f(a.z,b.z)}; }
+    template<class T,               class F> vec<typename std::invoke_result_t<F, T, T>,4  > zip(const vec<T,4  > & a, const vec<T,4  > & b, F f) { return {f(a.x,b.x), f(a.y,b.y), f(a.z,b.z), f(a.w,b.w)}; }
+    template<class T, int M,        class F> vec<typename std::invoke_result_t<F, T, T>,M  > zip(const vec<T,M  > & a,                  T b, F f) { return zip(a, vec<T,M>(b), f); }
+    template<class T, int M,        class F> vec<typename std::invoke_result_t<F, T, T>,M  > zip(                 T a, const vec<T,M  > & b, F f) { return zip(vec<T,M>(a), b, f); }
+    template<class T, int M,        class F> mat<typename std::invoke_result_t<F, T, T>,M,2> zip(const mat<T,M,2> & a, const mat<T,M,2> & b, F f) { return {zip(a.x,b.x,f), zip(a.y,b.y,f)}; }
+    template<class T, int M,        class F> mat<typename std::invoke_result_t<F, T, T>,M,3> zip(const mat<T,M,3> & a, const mat<T,M,3> & b, F f) { return {zip(a.x,b.x,f), zip(a.y,b.y,f), zip(a.z,b.z,f)}; }
+    template<class T, int M,        class F> mat<typename std::invoke_result_t<F, T, T>,M,4> zip(const mat<T,M,4> & a, const mat<T,M,4> & b, F f) { return {zip(a.x,b.x,f), zip(a.y,b.y,f), zip(a.z,b.z,f), zip(a.w,b.w,f)}; }
+    template<class T, int M, int N, class F> mat<typename std::invoke_result_t<F, T, T>,M,N> zip(const mat<T,M,N> & a,                  T b, F f) { return zip(a, mat<T,M,N>(b), f); }
+    template<class T, int M, int N, class F> mat<typename std::invoke_result_t<F, T, T>,M,N> zip(                 T a, const mat<T,M,N> & b, F f) { return zip(mat<T,M,N>(a), b, f); }
 
     // Produce a vector/matrix by applying f(T) to elements from vector/matrix a
-    template<class T, int M,        class F> vec<typename std::result_of<F(T)>::type,M  > map(const vec<T,M  > & a, F f) { return zip(a, a, [f](T l, T) { return f(l); }); }
-    template<class T, int M, int N, class F> mat<typename std::result_of<F(T)>::type,M,N> map(const mat<T,M,N> & a, F f) { return zip(a, a, [f](T l, T) { return f(l); }); }
+    template<class T, int M,        class F> vec<typename std::invoke_result_t<F, T>,M  > map(const vec<T,M  > & a, F f) { return zip(a, a, [f](T l, T) { return f(l); }); }
+    template<class T, int M, int N, class F> mat<typename std::invoke_result_t<F, T>,M,N> map(const mat<T,M,N> & a, F f) { return zip(a, a, [f](T l, T) { return f(l); }); }
 
     // Relational operators are defined to compare the elements of two vectors or matrices lexicographically, in column-major order
     template<class T, int M> bool operator == (const vec<T,M> & a, const vec<T,M> & b) { return reinterpret_cast<const std::array<T,M> &>(a) == reinterpret_cast<const std::array<T,M> &>(b); } 
@@ -324,25 +324,21 @@ namespace linalg
     };
     static constexpr const identity_t identity{};
 
-    // Provide typedefs for common element types and vector/matrix sizes
-    namespace alias
-    {
-        typedef vec<bool,2> bool2; typedef vec<uint8_t,2> byte2; typedef vec<int16_t,2> short2; typedef vec<uint16_t,2> ushort2; 
-        typedef vec<bool,3> bool3; typedef vec<uint8_t,3> byte3; typedef vec<int16_t,3> short3; typedef vec<uint16_t,3> ushort3; 
-        typedef vec<bool,4> bool4; typedef vec<uint8_t,4> byte4; typedef vec<int16_t,4> short4; typedef vec<uint16_t,4> ushort4;
-        typedef vec<int,2> int2; typedef vec<unsigned,2> uint2; typedef vec<float,2> float2; typedef vec<double,2> double2;
-        typedef vec<int,3> int3; typedef vec<unsigned,3> uint3; typedef vec<float,3> float3; typedef vec<double,3> double3;
-        typedef vec<int,4> int4; typedef vec<unsigned,4> uint4; typedef vec<float,4> float4; typedef vec<double,4> double4;
-        typedef mat<bool,2,2> bool2x2; typedef mat<int,2,2> int2x2; typedef mat<float,2,2> float2x2; typedef mat<double,2,2> double2x2;
-        typedef mat<bool,2,3> bool2x3; typedef mat<int,2,3> int2x3; typedef mat<float,2,3> float2x3; typedef mat<double,2,3> double2x3;
-        typedef mat<bool,2,4> bool2x4; typedef mat<int,2,4> int2x4; typedef mat<float,2,4> float2x4; typedef mat<double,2,4> double2x4;
-        typedef mat<bool,3,2> bool3x2; typedef mat<int,3,2> int3x2; typedef mat<float,3,2> float3x2; typedef mat<double,3,2> double3x2;
-        typedef mat<bool,3,3> bool3x3; typedef mat<int,3,3> int3x3; typedef mat<float,3,3> float3x3; typedef mat<double,3,3> double3x3;
-        typedef mat<bool,3,4> bool3x4; typedef mat<int,3,4> int3x4; typedef mat<float,3,4> float3x4; typedef mat<double,3,4> double3x4;
-        typedef mat<bool,4,2> bool4x2; typedef mat<int,4,2> int4x2; typedef mat<float,4,2> float4x2; typedef mat<double,4,2> double4x2;
-        typedef mat<bool,4,3> bool4x3; typedef mat<int,4,3> int4x3; typedef mat<float,4,3> float4x3; typedef mat<double,4,3> double4x3;
-        typedef mat<bool,4,4> bool4x4; typedef mat<int,4,4> int4x4; typedef mat<float,4,4> float4x4; typedef mat<double,4,4> double4x4;
-    }
+    typedef vec<bool,2> bool2; typedef vec<uint8_t,2> byte2; typedef vec<int16_t,2> short2; typedef vec<uint16_t,2> ushort2; 
+    typedef vec<bool,3> bool3; typedef vec<uint8_t,3> byte3; typedef vec<int16_t,3> short3; typedef vec<uint16_t,3> ushort3; 
+    typedef vec<bool,4> bool4; typedef vec<uint8_t,4> byte4; typedef vec<int16_t,4> short4; typedef vec<uint16_t,4> ushort4;
+    typedef vec<int,2> int2; typedef vec<unsigned,2> uint2; typedef vec<float,2> float2; typedef vec<double,2> double2;
+    typedef vec<int,3> int3; typedef vec<unsigned,3> uint3; typedef vec<float,3> float3; typedef vec<double,3> double3;
+    typedef vec<int,4> int4; typedef vec<unsigned,4> uint4; typedef vec<float,4> float4; typedef vec<double,4> double4;
+    typedef mat<bool,2,2> bool2x2; typedef mat<int,2,2> int2x2; typedef mat<float,2,2> float2x2; typedef mat<double,2,2> double2x2;
+    typedef mat<bool,2,3> bool2x3; typedef mat<int,2,3> int2x3; typedef mat<float,2,3> float2x3; typedef mat<double,2,3> double2x3;
+    typedef mat<bool,2,4> bool2x4; typedef mat<int,2,4> int2x4; typedef mat<float,2,4> float2x4; typedef mat<double,2,4> double2x4;
+    typedef mat<bool,3,2> bool3x2; typedef mat<int,3,2> int3x2; typedef mat<float,3,2> float3x2; typedef mat<double,3,2> double3x2;
+    typedef mat<bool,3,3> bool3x3; typedef mat<int,3,3> int3x3; typedef mat<float,3,3> float3x3; typedef mat<double,3,3> double3x3;
+    typedef mat<bool,3,4> bool3x4; typedef mat<int,3,4> int3x4; typedef mat<float,3,4> float3x4; typedef mat<double,3,4> double3x4;
+    typedef mat<bool,4,2> bool4x2; typedef mat<int,4,2> int4x2; typedef mat<float,4,2> float4x2; typedef mat<double,4,2> double4x2;
+    typedef mat<bool,4,3> bool4x3; typedef mat<int,4,3> int4x3; typedef mat<float,4,3> float4x3; typedef mat<double,4,3> double4x3;
+    typedef mat<bool,4,4> bool4x4; typedef mat<int,4,4> int4x4; typedef mat<float,4,4> float4x4; typedef mat<double,4,4> double4x4;
 
     namespace ostream_overloads
     {

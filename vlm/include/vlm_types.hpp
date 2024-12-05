@@ -1,15 +1,7 @@
 #pragma once
 
-#include <utility>
 #include <cstdint>
-#include <vector>
-#include <array>
-#include <string>
 #include <cmath>
-#include <memory>
-#include <functional>
-
-#include "linalg.h"
 
 namespace vlm {
 
