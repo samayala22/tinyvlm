@@ -68,7 +68,7 @@ public:
             skip = static_cast<int>(n / elapsed / rate);
         }
 
-        constexpr int bar_length = 50;
+        constexpr int bar_length = 25;
 
         char prog_bar[bar_length+1] = {0};  // Assuming max bar length is 100
         if (total > 0) {

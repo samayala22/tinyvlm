@@ -376,7 +376,7 @@ def segment_and_fit_psd(frequencies, psd_db):
 
     return fitted_psd
 
-def plot_data_and_psd(axs_d, axs_psd, t, data, label):
+def plot_data_and_psd(axs_d, axs_psd, t, data, label, linestyle='-', zorder=1):
     sampling_rate = 1 / np.mean(np.diff(t))
     n_points = len(t)
 
@@ -389,9 +389,9 @@ def plot_data_and_psd(axs_d, axs_psd, t, data, label):
 
     mask = frequencies < 1.0
 
-    axs_d.plot(t, data, label=label)
+    axs_d.plot(t, data, linestyle, label=label, zorder=zorder)
     # axs_psd.plot(frequencies[mask], psd_db[mask], label=label)
-    axs_psd.plot(frequencies[mask], psd_db_raw[mask], label=label)
+    axs_psd.plot(frequencies[mask], psd_db_raw[mask], linestyle, label=label, zorder=zorder)
 
 def format_axs(axs, xlabel, ylabel):
     axs.set_xlabel(xlabel)
@@ -446,7 +446,7 @@ if __name__ == "__main__":
         )
 
         # Dimensionless parameters
-        dt_nd = 0.3
+        dt_nd = 0.2
         # t_final_nd = U_vel * 200.0
         t_final_nd = 90.0
         vec_t_nd = np.arange(0, t_final_nd, dt_nd)
@@ -460,7 +460,8 @@ if __name__ == "__main__":
 
         # Aeroelastic equations of motion mass, damping and stiffness matrices
         M = np.array([
-            [1.0, ndv.x_a],
+            # [1.0, ndv.x_a],
+            [1.0, 0.0],
             [ndv.x_a / (ndv.r_a**2), 1.0]
         ])
         C = np.array([
@@ -492,7 +493,6 @@ if __name__ == "__main__":
             - 1/(ndv.U**2) * torsional_func(u[1,0])
         ])
         a[:, 0] = np.linalg.solve(M, F[:, 0] + init_R - C @ v[:,0] - zeros @ u[:,0])
-
         def w(s: float):
             idx = int(s / dt_nd)
             return v[1, idx] + a[0, idx] + (0.5 - ndv.a_h) * a[1, idx]
@@ -531,11 +531,16 @@ if __name__ == "__main__":
                 du_k = du[:]
                 du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
 
-                u[:,i+1] = u[:,i] + du
-                v[:,i+1] = v[:,i] + dv
-                a[:,i+1] = a[:,i] + da
+                # u[:,i+1] = u[:,i] + du
+                # v[:,i+1] = v[:,i] + dv
+                # a[:,i+1] = a[:,i] + da
+                u[1,i+1] = u[1,i] + du[1]
+                v[1,i+1] = v[1,i] + dv[1]
+                a[1,i+1] = a[1,i] + da[1]
+
                 F[:,i+1] = aero(i+1)
-                delta_F = F[:,i+1] - F[:,i]
+                # delta_F = F[:,i+1] - F[:,i]
+                delta_F = np.zeros(2)
                 delta_F[0] += - (ndv.omega / ndv.U)**2 * du[0]
                 delta_F[1] += - 1/(ndv.U**2) * (torsional_func(u[1,i+1]) - torsional_func(u[1,i]))
 
@@ -564,7 +569,7 @@ if __name__ == "__main__":
 
         if (len(vec_U) == 1):
             fig, axs = plt.subplot_mosaic(
-                [["h", "hd"], ["h_psd", "hd_psd"], ["a", "ad"], ["a_psd", "ad_psd"]],  # Disposition des graphiques
+                [["h", "hd", "fh"], ["h_psd", "hd_psd", "fh_psd"], ["a", "ad", "fa"], ["a_psd", "ad_psd", "fa_psd"]],  # Disposition des graphiques
                 constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
                 figsize=(16, 9),  # Ajuster la taille de la figure (x,y)
             )
@@ -573,34 +578,51 @@ if __name__ == "__main__":
             plot_data_and_psd(axs["h"], axs["h_psd"], monolithic_sol.t, monolithic_sol.y[0, :], label="Monolithic")
             plot_data_and_psd(axs["hd"], axs["hd_psd"], vec_t_nd, v[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
             plot_data_and_psd(axs["hd"], axs["hd_psd"], monolithic_sol.t, monolithic_sol.y[2, :], label="Monolithic")
+            plot_data_and_psd(axs["fh"], axs["fh_psd"], vec_t_nd, F[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
             plot_data_and_psd(axs["a"], axs["a_psd"], vec_t_nd, np.degrees(u[1, :]), label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
             plot_data_and_psd(axs["a"], axs["a_psd"], monolithic_sol.t, np.degrees(monolithic_sol.y[1, :]), label="Monolithic")
             plot_data_and_psd(axs["ad"], axs["ad_psd"], vec_t_nd, v[1, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
             plot_data_and_psd(axs["ad"], axs["ad_psd"], monolithic_sol.t, monolithic_sol.y[3, :], label="Monolithic")
+            plot_data_and_psd(axs["fa"], axs["fa_psd"], vec_t_nd, F[1, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
+        
+            def analytical_pitch(t, a0=np.radians(3)):
+                return a0 * np.cos(t / ndv.U)
+            
+            plot_data_and_psd(axs["a"], axs["a_psd"], vec_t_nd, np.degrees(analytical_pitch(vec_t_nd)), "Analytical Pitch", "--")
 
             uvlm_t = []
             uvlm_h = []
             uvlm_a = []
+            uvlm_f_h = []
+            uvlm_f_a = []
             with open("build/windows/x64/debug/2dof.txt", "r") as f:
                 f.readline() # skip first line
                 for line in f:
-                    t, h, a = map(float, line.split())
+                    t, h, a, f_h, f_a = map(float, line.split())
                     uvlm_t.append(t)
                     uvlm_h.append(h)
                     uvlm_a.append(a)
+                    uvlm_f_h.append(f_h)
+                    uvlm_f_a.append(f_a)
 
-            plot_data_and_psd(axs["h"], axs["h_psd"], uvlm_t, uvlm_h, label="UVLM")
-            plot_data_and_psd(axs["a"], axs["a_psd"], uvlm_t, np.degrees(uvlm_a), label="UVLM")
+            plot_data_and_psd(axs["h"], axs["h_psd"], uvlm_t, uvlm_h, "UVLM", ":", 3)
+            plot_data_and_psd(axs["a"], axs["a_psd"], uvlm_t, np.degrees(uvlm_a), "UVLM", ":", 3)
+            plot_data_and_psd(axs["fh"], axs["fh_psd"], uvlm_t, uvlm_f_h, "UVLM", ":", 3)
+            plot_data_and_psd(axs["fa"], axs["fa_psd"], uvlm_t, uvlm_f_a, "UVLM", ":", 3)
 
             # Formatting
             format_axs(axs["h"], r"$\bar{t}$", r"$\bar{h}$")
             format_axs(axs["hd"], r"$\bar{t}$", r"$\bar{h'}$")
+            format_axs(axs["fh"], r"$\bar{t}$", "Heave Force")
             format_axs(axs["h_psd"], r"$f$", "Amplitude (dB)")
             format_axs(axs["hd_psd"], r"$f$", "Amplitude (dB)")
+            format_axs(axs["fh_psd"], r"$f$", "Amplitude (dB)")
             format_axs(axs["a"], r"$\bar{t}$", r"$\alpha$")
             format_axs(axs["ad"], r"$\bar{t}$", r"$\alpha'$")
+            format_axs(axs["fa"], r"$\bar{t}$", "Pitch Force")
             format_axs(axs["a_psd"], r"$f$", "Amplitude (dB)")
             format_axs(axs["ad_psd"], r"$f$", "Amplitude (dB)")
+            format_axs(axs["fa_psd"], r"$f$", "Amplitude (dB)")
             
             fig.suptitle(r"2 DOF Aeroelastic response at $\bar{U} = %s$ (%s Pitch Spring)" % (round(U_vel, 3), torsional_spring_names[torsional_spring]))
 
