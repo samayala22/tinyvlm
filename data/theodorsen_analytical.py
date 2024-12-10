@@ -101,13 +101,21 @@ def cl_theodorsen3(t: np.ndarray, alpha:callable, h:callable, a_h: float):
     part0 = (alpha(t) + derivative(h, t) + (0.5 - a_h)*derivative(alpha, t))
     part1 = -psi1*w1(t)
     part2 = -psi2*w2(t)
-    cl = np.pi*(derivative2(h, t) - a_h * derivative2(alpha, t) + derivative(alpha, t)) + 2*np.pi*(alpha(0) + derivative(h, 0) + (0.5 - a_h)*derivative(alpha, 0))*(-psi1*np.exp(-eps1*t)-psi2*np.exp(-eps2*t))+2*np.pi*(part0+part1+part2)
-    return cl
+    # duhamel = u[1, i] - u[1, 0] + v[0, i] - v[0, 0] + (0.5 - ndv.a_h)*(v[1, i] - v[1, 0]) - psi1*w1 - psi2*w2
+    # wagner_init = (u[1, 0] + u[0, 0] + (0.5 - ndv.a_h)*v[1,0])*(1 - psi1*np.exp(-eps1*t) - psi2*np.exp(-eps2*t))
+    duhamel = alpha(t) - alpha(0) + derivative(h, t) - derivative(h, 0) + (0.5 - a_h)*(derivative(alpha, t) - derivative(alpha, 0)) - psi1*w1(t) - psi2*w2(t)
+    wagner_init = (alpha(0) + derivative(h, 0) + (0.5 - a_h)*derivative(alpha, 0))*(1 - psi1*np.exp(-eps1*t) - psi2*np.exp(-eps2*t))
+    # cl = np.pi*(derivative2(h, t) - a_h * derivative2(alpha, t) + derivative(alpha, t)) + 2*np.pi*(alpha(0) + derivative(h, 0) + (0.5 - a_h)*derivative(alpha, 0))*(-psi1*np.exp(-eps1*t)-psi2*np.exp(-eps2*t))+2*np.pi*(part0+part1+part2)
+    # cl = np.pi*(a[0, i] - ndv.a_h * a[1, i] + v[1, i]) + 2*np.pi*(wagner_init + duhamel)
+
+    cl = np.pi*(derivative2(h, t) - a_h * derivative2(alpha, t) + derivative(alpha, t)) + 2*np.pi*(wagner_init + duhamel)
+    cm = np.pi*(0.5 + a_h)*(wagner_init + duhamel) + 0.5*np.pi*a_h*(derivative2(h, t) - a_h*derivative2(alpha, t)) - 0.5*np.pi*(0.5 - a_h)*derivative(alpha, t) - (np.pi/16) * derivative2(alpha, t)
+    return cl, cm
 
 if __name__ == "__main__":
     # UVLM parameters
     rho = 1 # fluid density
-    u_inf = 2.0 # freestream
+    u_inf = 1.0 # freestream
     ar = 10000 # aspect ratio
     b = 0.5 # half chord
     c = 2*b # chord
@@ -117,23 +125,23 @@ if __name__ == "__main__":
     nb_pts = 1000
     k = 0.5 # reduced frequency
     t_final_nd = 90 # nd time
-    omega = k * 2.0 * u_inf / c # frequency
+    omega = k * u_inf / b # frequency
     vec_t_nd = np.linspace(0, t_final_nd, nb_pts)
 
     # sudden acceleration
-    def pitch(t): return np.radians(5)
-    def heave(t): return 0
+    # def pitch(t): return np.radians(2.8)
+    # def heave(t): return 0
 
     # pure heaving
     # def pitch(t): return 0
     # def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    # def pitch(t): return np.radians(np.sin(omega * t))
-    # def heave(t): return 0
+    def pitch(t): return np.radians(np.sin(omega * t))
+    def heave(t): return 0
 
     fig, axs = plt.subplot_mosaic(
-        [["time"]],  # Disposition des graphiques
+        [["cl"], ["cm"]],  # Disposition des graphiques
         constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
         figsize=(11, 6),  # Ajuster la taille de la figure (x,y)
     )
@@ -142,20 +150,36 @@ if __name__ == "__main__":
     # vec_t_nd = u_inf * vec_t / b # non-dimensional time
     # axs["time"].plot(vec_t, cl_theodorsen3(vec_t_nd, lambda t: pitch(t*b / u_inf), lambda t: heave(t*b / u_inf) / b, a_h), label=f"Theodorsen 2 (k={k})")
 
-    uvlm_t_nd = []
-    uvlm_cl = []
-    with open("build/windows/x64/debug/2dof_aero.txt", "r") as f:
-        f.readline() # skip first line
-        for line in f:
-            t, cl = map(float, line.split())
-            uvlm_t_nd.append(t)
-            uvlm_cl.append(cl)
+    def plot_uvlm(axs_cl, axs_cm, filename, label):            
+        uvlm_t_nd = []
+        uvlm_cl = []
+        uvlm_cm = []
+        with open(filename, "r") as f:
+            _ = float(f.readline())
+            for line in f:
+                t, cl, cm = map(float, line.split())
+                uvlm_t_nd.append(t)
+                uvlm_cl.append(cl)
+                uvlm_cm.append(cm)
+        
+        axs_cl.plot(uvlm_t_nd, uvlm_cl, label=label)
+        axs_cm.plot(uvlm_t_nd, uvlm_cm, label=label)
 
-    axs["time"].plot(uvlm_t_nd, uvlm_cl, label="UVLM")
-    axs["time"].plot(vec_t_nd, cl_theodorsen3(vec_t_nd, pitch, heave, a_h), label="Theodorsen 3")
-    axs["time"].plot(vec_t_nd, cl_theodorsen1(vec_t_nd * b / u_inf, pitch, heave, a_h, b, u_inf), "--", label="Theodorsen 1")
-    axs["time"].set_xlabel('t')
-    axs["time"].set_ylabel('CL')
-    axs["time"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-    axs["time"].legend()
+    plot_uvlm(axs["cl"], axs["cm"], "build/windows/x64/debug/2dof_aero.txt", "UVLM")
+
+    vec_cl, vec_cm = cl_theodorsen3(vec_t_nd, pitch, heave, a_h)
+
+    axs["cl"].plot(vec_t_nd, vec_cl, label="Theodorsen")    
+    axs["cm"].plot(vec_t_nd, vec_cm, label="Theodorsen")
+    
+    axs["cl"].set_xlabel('t')
+    axs["cl"].set_ylabel('CL')
+    axs["cl"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+    axs["cl"].legend()
+
+    axs["cm"].set_xlabel('t')
+    axs["cm"].set_ylabel('CM')
+    axs["cm"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+    axs["cm"].legend()
+
     plt.show()

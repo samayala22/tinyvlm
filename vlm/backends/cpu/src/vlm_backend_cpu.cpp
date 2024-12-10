@@ -480,6 +480,7 @@ f32 BackendCPU::coeff_cl(
         }
     }
     return cl / (0.5f * rho * linalg::length2(freestream) * area);
+    // return cl / (0.5f * area);
 }
 
 linalg::float3 BackendCPU::coeff_cm(
