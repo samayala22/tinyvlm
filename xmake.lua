@@ -2,20 +2,24 @@ set_project("vlm")
 set_version("0.1.0")
 set_xmakever("2.8.6") -- xmake test support
 
-add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.asan")
+add_rules("mode.debug", "mode.release", "mode.releasedbg")
+add_rules("plugin.compile_commands.autoupdate", {outputdir = "."})
 
 -- set_toolchains("cuda")
-
 -- set_toolset("cxx", "clang")
--- set_policy("build.sanitizer.address", true) -- use xmake f --policies=build.sanitizer.address
+
 set_policy("build.warning", true)
 set_policy("build.cuda.devlink", true) -- magic
 set_policy("run.autobuild", true)
 -- set_policy("build.optimization.lto")
 
+-- if is_mode("debug") then
+--     set_policy("build.sanitizer.address", true) -- use xmake f --policies=build.sanitizer.address
+-- end
+
 set_warnings("all")
 set_languages("c++17", "c99")
-set_runtimes("MT") -- msvc runtime library (MD/MT/MDd/MTd)
+set_runtimes("MD") -- msvc runtime library (MD/MT/MDd/MTd)
 
 -- Define backends and helper functions
 backends = {"cuda", "cpu"}
