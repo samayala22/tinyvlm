@@ -389,9 +389,9 @@ def plot_data_and_psd(axs_d, axs_psd, t, data, label, linestyle='-', zorder=1):
 
     mask = frequencies < 1.0
 
-    axs_d.plot(t, data, linestyle, label=label, zorder=zorder)
+    axs_d.plot(t, data, linestyle, label=label, zorder=zorder, markersize=2)
     # axs_psd.plot(frequencies[mask], psd_db[mask], label=label)
-    axs_psd.plot(frequencies[mask], psd_db_raw[mask], linestyle, label=label, zorder=zorder)
+    axs_psd.plot(frequencies[mask], psd_db_raw[mask], linestyle, label=label, zorder=zorder, markersize=2)
 
 def format_axs(axs, xlabel, ylabel):
     axs.set_xlabel(xlabel)
@@ -460,8 +460,8 @@ if __name__ == "__main__":
 
         # Aeroelastic equations of motion mass, damping and stiffness matrices
         M = np.array([
-            # [1.0, ndv.x_a],
-            [1.0, 0.0],
+            [1.0, ndv.x_a],
+            # [1.0, 0.0],
             [ndv.x_a / (ndv.r_a**2), 1.0]
         ])
         C = np.array([
@@ -531,12 +531,12 @@ if __name__ == "__main__":
                 du_k = du[:]
                 du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
 
-                # u[:,i+1] = u[:,i] + du
-                # v[:,i+1] = v[:,i] + dv
-                # a[:,i+1] = a[:,i] + da
-                u[1,i+1] = u[1,i] + du[1]
-                v[1,i+1] = v[1,i] + dv[1]
-                a[1,i+1] = a[1,i] + da[1]
+                u[:,i+1] = u[:,i] + du
+                v[:,i+1] = v[:,i] + dv
+                a[:,i+1] = a[:,i] + da
+                # u[1,i+1] = u[1,i] + du[1]
+                # v[1,i+1] = v[1,i] + dv[1]
+                # a[1,i+1] = a[1,i] + da[1]
 
                 F[:,i+1] = aero(i+1)
                 # delta_F = F[:,i+1] - F[:,i]
@@ -588,27 +588,33 @@ if __name__ == "__main__":
             def analytical_pitch(t, a0=np.radians(3)):
                 return a0 * np.cos(t / ndv.U)
             
-            plot_data_and_psd(axs["a"], axs["a_psd"], vec_t_nd, np.degrees(analytical_pitch(vec_t_nd)), "Analytical Pitch", "--")
+            # plot_data_and_psd(axs["a"], axs["a_psd"], vec_t_nd, np.degrees(analytical_pitch(vec_t_nd)), "Analytical Pitch", "--")
 
             uvlm_t = []
             uvlm_h = []
             uvlm_a = []
+            uvlm_hd = []
+            uvlm_ad = []
             uvlm_f_h = []
             uvlm_f_a = []
             with open("build/windows/x64/debug/2dof.txt", "r") as f:
                 f.readline() # skip first line
                 for line in f:
-                    t, h, a, f_h, f_a = map(float, line.split())
+                    t, h, a, hd, ad, f_h, f_a = map(float, line.split())
                     uvlm_t.append(t)
                     uvlm_h.append(h)
                     uvlm_a.append(a)
+                    uvlm_hd.append(hd)
+                    uvlm_ad.append(ad)
                     uvlm_f_h.append(f_h)
                     uvlm_f_a.append(f_a)
 
-            plot_data_and_psd(axs["h"], axs["h_psd"], uvlm_t, uvlm_h, "UVLM", ":", 3)
-            plot_data_and_psd(axs["a"], axs["a_psd"], uvlm_t, np.degrees(uvlm_a), "UVLM", ":", 3)
-            plot_data_and_psd(axs["fh"], axs["fh_psd"], uvlm_t, uvlm_f_h, "UVLM", ":", 3)
-            plot_data_and_psd(axs["fa"], axs["fa_psd"], uvlm_t, uvlm_f_a, "UVLM", ":", 3)
+            plot_data_and_psd(axs["h"], axs["h_psd"], uvlm_t, uvlm_h, "UVLM", "o", 3)
+            plot_data_and_psd(axs["a"], axs["a_psd"], uvlm_t, np.degrees(uvlm_a), "UVLM", "o", 3)
+            plot_data_and_psd(axs["hd"], axs["hd_psd"], uvlm_t, uvlm_hd, "UVLM", "o", 3)
+            plot_data_and_psd(axs["ad"], axs["ad_psd"], uvlm_t, uvlm_ad, "UVLM", "o", 3)
+            plot_data_and_psd(axs["fh"], axs["fh_psd"], uvlm_t, uvlm_f_h, "UVLM", "o", 3)
+            plot_data_and_psd(axs["fa"], axs["fa_psd"], uvlm_t, uvlm_f_a, "UVLM", "o", 3)
 
             # Formatting
             format_axs(axs["h"], r"$\bar{t}$", r"$\bar{h}$")

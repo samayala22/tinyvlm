@@ -32,7 +32,7 @@
 
 #define COUPLED 1
 #define COUPLED_NOAERO 1
-#define COUPLED_NOAERO_NOHEAVE 1
+// #define COUPLED_NOAERO_NOHEAVE 1
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
@@ -562,7 +562,14 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
 
         #ifdef COUPLED
 
-        data_2dof << t_nd << " " << u_h.view()(0,i) << " " << u_h.view()(1,i) << " " << F_h.view()(0, i) << " " << F_h.view()(1, i) << "\n";
+        data_2dof << t_nd 
+            << " " << u_h.view()(0,i)
+            << " " << u_h.view()(1,i)
+            << " " << v_h.view()(0,i)
+            << " " << v_h.view()(1,i)
+            << " " << F_h.view()(0, i)
+            << " " << F_h.view()(1, i)
+            << "\n";
 
         // Output:
         for (const auto& [wake_d, wake_h] : zip(verts_wake.views(), verts_wake_h.views())) {
