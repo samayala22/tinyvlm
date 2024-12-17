@@ -1,5 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 import mpld3
 import scipy as sp
 from scipy.fft import fft, ifft, fftfreq
@@ -377,28 +380,69 @@ def segment_and_fit_psd(frequencies, psd_db):
 
     return fitted_psd
 
-def plot_data_and_psd(axs_d, axs_psd, t, data, label, linestyle='-', zorder=1):
+def compute_psd(t, data):
+    """Compute PSD with consistent parameters"""
     sampling_rate = 1 / np.mean(np.diff(t))
-    n_points = len(t)
-
-    frequencies, psd = sp.signal.welch(data, 
-                              fs=sampling_rate,
-                              nperseg=n_points//2,
-                              )
-    psd_db_raw = 10 * np.log10(psd)
+    frequencies, psd = sp.signal.welch(
+        data, 
+        fs=sampling_rate,
+        nperseg=len(t)//2
+    )
+    mask = frequencies < 1.0
+    psd_db = 10 * np.log10(psd)
     # psd_db = segment_and_fit_psd(frequencies, psd_db_raw)
 
-    mask = frequencies < 1.0
+    return frequencies[mask], psd_db[mask]
 
-    axs_d.plot(t, data, linestyle, label=label, zorder=zorder, markersize=1)
-    # axs_psd.plot(frequencies[mask], psd_db[mask], label=label)
-    axs_psd.plot(frequencies[mask], psd_db_raw[mask], linestyle, label=label, zorder=zorder, markersize=1)
+def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', marker_size=4):
+    """Add time series and PSD data to plotly figure"""
+    # Add time series data
+    fig.add_trace(
+        go.Scattergl(
+            x=time, 
+            y=data, 
+            name=name,
+            mode=mode,
+            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
+            showlegend=True
+        ),
+        row=row_data, 
+        col=col_data
+    )
+    
+    # Add PSD data
+    frequencies, psd = compute_psd(time, data)
+    fig.add_trace(
+        go.Scattergl(
+            x=frequencies,
+            y=psd,
+            name=name,
+            mode=mode,
+            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
+            showlegend=False
+        ),
+        row=row_data+1,
+        col=col_data
+    )
 
-def format_axs(axs, xlabel, ylabel):
-    axs.set_xlabel(xlabel)
-    axs.set_ylabel(ylabel)
-    axs.grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-    axs.legend()
+def format_subplot(fig, row, col, xlabel, ylabel):
+    """Format a specific subplot with labels and grid"""
+    fig.update_xaxes(
+        title_text=xlabel,
+        row=row,
+        col=col,
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='rgba(128, 128, 128, 0.2)',
+    )
+    fig.update_yaxes(
+        title_text=ylabel,
+        row=row,
+        col=col,
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='rgba(128, 128, 128, 0.2)',
+    )
 
 if __name__ == "__main__":
     psi1 = 0.165
@@ -565,32 +609,6 @@ if __name__ == "__main__":
         peaks_a_t_i, peaks_a_d_i = get_peaks(vec_t_nd, u[1, :])
 
         if (len(vec_U) == 1):
-            fig, axs = plt.subplot_mosaic(
-                [["h", "hd", "fh"], ["h_psd", "hd_psd", "fh_psd"], ["a", "ad", "fa"], ["a_psd", "ad_psd", "fa_psd"]],  # Disposition des graphiques
-                constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-                figsize=(16, 9),  # Ajuster la taille de la figure (x,y)
-            )
-
-            plot_data_and_psd(axs["h"], axs["h_psd"], vec_t_nd, u[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            plot_data_and_psd(axs["h"], axs["h_psd"], monolithic_sol.t, monolithic_sol.y[0, :], label="Monolithic")
-            plot_data_and_psd(axs["hd"], axs["hd_psd"], vec_t_nd, v[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            plot_data_and_psd(axs["hd"], axs["hd_psd"], monolithic_sol.t, monolithic_sol.y[2, :], label="Monolithic")
-            plot_data_and_psd(axs["fh"], axs["fh_psd"], vec_t_nd, F[0, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            plot_data_and_psd(axs["a"], axs["a_psd"], vec_t_nd, np.degrees(u[1, :]), label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            plot_data_and_psd(axs["a"], axs["a_psd"], monolithic_sol.t, np.degrees(monolithic_sol.y[1, :]), label="Monolithic")
-            plot_data_and_psd(axs["ad"], axs["ad_psd"], vec_t_nd, v[1, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-            plot_data_and_psd(axs["ad"], axs["ad_psd"], monolithic_sol.t, monolithic_sol.y[3, :], label="Monolithic")
-            plot_data_and_psd(axs["fa"], axs["fa_psd"], vec_t_nd, F[1, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
-        
-            # def analytical_pitch(t, a0=np.radians(3)):
-            #     return a0 * np.cos(t / ndv.U)
-            
-            # def analytical_pitch_vel(t, a0=np.radians(3)):
-            #     return - (a0 / ndv.U) * np.sin(t / ndv.U)
-            
-            # plot_data_and_psd(axs["a"], axs["a_psd"], vec_t_nd, np.degrees(analytical_pitch(vec_t_nd)), "Analytical Pitch", "--")
-            # plot_data_and_psd(axs["ad"], axs["ad_psd"], vec_t_nd, analytical_pitch_vel(vec_t_nd), "Analytical Pitch Vel", "--")
-            
             uvlm_t = []
             uvlm_h = []
             uvlm_a = []
@@ -609,40 +627,84 @@ if __name__ == "__main__":
                     uvlm_ad.append(ad)
                     uvlm_f_h.append(f_h)
                     uvlm_f_a.append(f_a)
-
-            plot_data_and_psd(axs["h"], axs["h_psd"], uvlm_t, uvlm_h, "UVLM", "o", 3)
-            plot_data_and_psd(axs["a"], axs["a_psd"], uvlm_t, np.degrees(uvlm_a), "UVLM", "o", 3)
-            plot_data_and_psd(axs["hd"], axs["hd_psd"], uvlm_t, uvlm_hd, "UVLM", "o", 3)
-            plot_data_and_psd(axs["ad"], axs["ad_psd"], uvlm_t, uvlm_ad, "UVLM", "o", 3)
-            plot_data_and_psd(axs["fh"], axs["fh_psd"], uvlm_t, uvlm_f_h, "UVLM", "o", 3)
-            plot_data_and_psd(axs["fa"], axs["fa_psd"], uvlm_t, uvlm_f_a, "UVLM", "o", 3)
-
-            # Formatting
-            format_axs(axs["h"], r"$\bar{t}$", r"$\bar{h}$")
-            format_axs(axs["hd"], r"$\bar{t}$", r"$\bar{h'}$")
-            format_axs(axs["fh"], r"$\bar{t}$", "Heave Force")
-            format_axs(axs["h_psd"], r"$f$", "Amplitude (dB)")
-            format_axs(axs["hd_psd"], r"$f$", "Amplitude (dB)")
-            format_axs(axs["fh_psd"], r"$f$", "Amplitude (dB)")
-            format_axs(axs["a"], r"$\bar{t}$", r"$\alpha$")
-            format_axs(axs["ad"], r"$\bar{t}$", r"$\alpha'$")
-            format_axs(axs["fa"], r"$\bar{t}$", "Pitch Force")
-            format_axs(axs["a_psd"], r"$f$", "Amplitude (dB)")
-            format_axs(axs["ad_psd"], r"$f$", "Amplitude (dB)")
-            format_axs(axs["fa_psd"], r"$f$", "Amplitude (dB)")
             
-            fig.suptitle(r"2 DOF Aeroelastic response at $\bar{U} = %s$ (%s Pitch Spring)" % (round(U_vel, 3), torsional_spring_names[torsional_spring]))
+            fig = make_subplots(
+                rows=4, cols=3,
+                subplot_titles=(
+                    'Heave', 'Heave Velocity', 'Heave Force',
+                    'Heave PSD', 'Heave Velocity PSD', 'Heave Force PSD',
+                    'Pitch', 'Pitch Velocity', 'Pitch Force',
+                    'Pitch PSD', 'Pitch Velocity PSD', 'Pitch Force PSD'
+                ),
+                vertical_spacing=0.1,
+                horizontal_spacing=0.08
+            )
 
-            mpld3.save_html(fig, "freeplay.html")
-            with open("freeplay.html", "r+") as f:
-                content = f.read()\
-                    .replace('https://d3js.org/d3.v5.js', 'https://d3js.org/d3.v3.min.js')\
-                    .replace('https://mpld3.github.io/js/mpld3.v0.5.10.js', 'https://mpld3.github.io/js/mpld3.v0.2.js')
-                f.seek(0)
-                f.write(content)
-                f.truncate()
-                
-            plt.show()
+            # Heave plots
+            add_data_and_psd(fig, vec_t_nd, u[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 1)
+            add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[0, :], "Monolithic", 1, 1)
+            add_data_and_psd(fig, uvlm_t, uvlm_h, "UVLM", 1, 1, mode='markers')
+
+            # Heave velocity plots
+            add_data_and_psd(fig, vec_t_nd, v[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 2)
+            add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[2, :], "Monolithic", 1, 2)
+            add_data_and_psd(fig, uvlm_t, uvlm_hd, "UVLM", 1, 2, mode='markers')
+
+            # Heave force plots
+            add_data_and_psd(fig, vec_t_nd, F[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 3)
+            add_data_and_psd(fig, uvlm_t, uvlm_f_h, "UVLM", 1, 3, mode='markers')
+
+            # Pitch plots (degrees)
+            add_data_and_psd(fig, vec_t_nd, np.degrees(u[1, :]), f"Iterative (ε = {newton_err_thresh})", 3, 1)
+            add_data_and_psd(fig, monolithic_sol.t, np.degrees(monolithic_sol.y[1, :]), "Monolithic", 3, 1)
+            add_data_and_psd(fig, uvlm_t, np.degrees(uvlm_a), "UVLM", 3, 1, mode='markers')
+
+            # Pitch velocity plots
+            add_data_and_psd(fig, vec_t_nd, v[1, :], f"Iterative (ε = {newton_err_thresh})", 3, 2)
+            add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[3, :], "Monolithic", 3, 2)
+            add_data_and_psd(fig, uvlm_t, uvlm_ad, "UVLM", 3, 2, mode='markers')
+
+            # Pitch force plots
+            add_data_and_psd(fig, vec_t_nd, F[1, :], f"Iterative (ε = {newton_err_thresh})", 3, 3)
+            add_data_and_psd(fig, uvlm_t, uvlm_f_a, "UVLM", 3, 3, mode='markers')
+
+            # Format all subplots
+            # Time series plots - Row 1
+            format_subplot(fig, 1, 1, r"$\bar{t}$", r"$\bar{h}$")
+            format_subplot(fig, 1, 2, r"$\bar{t}$", r"$\bar{\dot{h}}$")
+            format_subplot(fig, 1, 3, r"$\bar{t}$", r"$F_{h}$")
+            
+            # PSD plots - Row 2
+            format_subplot(fig, 2, 1, r"$\bar{f}$", "Amplitude (dB)")
+            format_subplot(fig, 2, 2, r"$\bar{f}$", "Amplitude (dB)")
+            format_subplot(fig, 2, 3, r"$\bar{f}$", "Amplitude (dB)")
+            
+            # Time series plots - Row 3
+            format_subplot(fig, 3, 1, r"$\bar{t}$", r"$\alpha$ (deg)")
+            format_subplot(fig, 3, 2, r"$\bar{t}$", r"$\dot{\alpha}$")
+            format_subplot(fig, 3, 3, r"$\bar{t}$", r"$F_{\alpha}$")
+            
+            # PSD plots - Row 4
+            format_subplot(fig, 4, 1, r"$\bar{f}$", "Amplitude (dB)")
+            format_subplot(fig, 4, 2, r"$\bar{f}$", "Amplitude (dB)")
+            format_subplot(fig, 4, 3, r"$\bar{f}$", "Amplitude (dB)")
+
+            fig.update_layout(
+                title=f"2 DOF Aeroelastic response at Ū = {round(U_vel, 3)} ({torsional_spring_names[torsional_spring]} Pitch Spring)",
+                title_x=0.5,
+                autosize=True,
+                showlegend=True,
+                template="plotly_white",
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=1.0
+                )
+            )
+
+            fig.write_html("build/freeplay.html", include_mathjax='cdn')
+
 
         # X = fft(u, axis=1)
         X = fft(monolithic_sol.y[0:2, :], axis=1)
