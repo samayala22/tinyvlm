@@ -137,7 +137,8 @@ if __name__ == "__main__":
     # def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    def pitch(t): return np.radians(np.sin(omega * t))
+    # def pitch(t): return np.radians(np.sin(omega * t))
+    def pitch(t): return np.radians(3) * np.cos(t / (0.2 * 6.285))
     def heave(t): return 0
 
     fig, axs = plt.subplot_mosaic(
@@ -162,15 +163,18 @@ if __name__ == "__main__":
                 uvlm_cl.append(cl)
                 uvlm_cm.append(cm)
         
-        axs_cl.plot(uvlm_t_nd, uvlm_cl, label=label)
-        axs_cm.plot(uvlm_t_nd, uvlm_cm, label=label)
+        axs_cl.plot(uvlm_t_nd, - np.array(uvlm_cl) / (np.pi * 100), label=label)
+        axs_cm.plot(uvlm_t_nd, 2 * np.array(uvlm_cm) / (np.pi * 100 * 0.5**2), label=label)
 
     plot_uvlm(axs["cl"], axs["cm"], "build/windows/x64/debug/2dof_aero.txt", "UVLM")
 
     vec_cl, vec_cm = cl_theodorsen3(vec_t_nd, pitch, heave, a_h)
 
-    axs["cl"].plot(vec_t_nd, vec_cl, label="Theodorsen")    
-    axs["cm"].plot(vec_t_nd, vec_cm, label="Theodorsen")
+    # axs["cl"].plot(vec_t_nd, vec_cl, label="Theodorsen")    
+    # axs["cm"].plot(vec_t_nd, vec_cm, label="Theodorsen")
+
+    axs["cl"].plot(vec_t_nd, - vec_cl / (np.pi * 100), label="Theodorsen")    
+    axs["cm"].plot(vec_t_nd, 2 * vec_cm / (np.pi * 100 * 0.5**2), label="Theodorsen")
     
     axs["cl"].set_xlabel('t')
     axs["cl"].set_ylabel('CL')

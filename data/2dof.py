@@ -585,11 +585,15 @@ if __name__ == "__main__":
             plot_data_and_psd(axs["ad"], axs["ad_psd"], monolithic_sol.t, monolithic_sol.y[3, :], label="Monolithic")
             plot_data_and_psd(axs["fa"], axs["fa_psd"], vec_t_nd, F[1, :], label=f"Iterative ($\epsilon$ = {newton_err_thresh})")
         
-            def analytical_pitch(t, a0=np.radians(3)):
-                return a0 * np.cos(t / ndv.U)
+            # def analytical_pitch(t, a0=np.radians(3)):
+            #     return a0 * np.cos(t / ndv.U)
+            
+            # def analytical_pitch_vel(t, a0=np.radians(3)):
+            #     return - (a0 / ndv.U) * np.sin(t / ndv.U)
             
             # plot_data_and_psd(axs["a"], axs["a_psd"], vec_t_nd, np.degrees(analytical_pitch(vec_t_nd)), "Analytical Pitch", "--")
-
+            # plot_data_and_psd(axs["ad"], axs["ad_psd"], vec_t_nd, analytical_pitch_vel(vec_t_nd), "Analytical Pitch Vel", "--")
+            
             uvlm_t = []
             uvlm_h = []
             uvlm_a = []
@@ -615,6 +619,20 @@ if __name__ == "__main__":
             plot_data_and_psd(axs["ad"], axs["ad_psd"], uvlm_t, uvlm_ad, "UVLM", "o", 3)
             plot_data_and_psd(axs["fh"], axs["fh_psd"], uvlm_t, uvlm_f_h, "UVLM", "o", 3)
             plot_data_and_psd(axs["fa"], axs["fa_psd"], uvlm_t, uvlm_f_a, "UVLM", "o", 3)
+
+            # uvlm_aero_t = []
+            # uvlm_aero_cl = []
+            # uvlm_aero_cm = []
+            # with open("build/windows/x64/debug/2dof_aero.txt", "r") as f:
+            #     f.readline() # skip first line
+            #     for line in f:
+            #         t, cl, cm = map(float, line.split())
+            #         uvlm_aero_t.append(t)
+            #         uvlm_aero_cl.append(cl)
+            #         uvlm_aero_cm.append(cm)
+
+            # plot_data_and_psd(axs["fh"], axs["fh_psd"], uvlm_aero_t, - np.array(uvlm_aero_cl) / (np.pi * ndv.mu), "UVLM Aero", "o", 3)
+            # plot_data_and_psd(axs["fa"], axs["fa_psd"], uvlm_aero_t, 2 * np.array(uvlm_aero_cm) / (np.pi * ndv.mu * ndv.r_a**2), "UVLM Aero", "o", 3)
 
             # Formatting
             format_axs(axs["h"], r"$\bar{t}$", r"$\bar{h}$")
@@ -656,15 +674,6 @@ if __name__ == "__main__":
 
         # freqs[1, idx] = freq_ratio(peaks_a_t_i[-1] - peaks_a_t_i[0], len(peaks_a_t_i)-1)
         # freqs[0, idx] = freq_ratio(peaks_h_t_i[-1] - peaks_h_t_i[0], len(peaks_h_t_i)-1)
-
-    # fig, axs = plt.subplot_mosaic(
-    #     [["freq"]],  # Disposition des graphiques
-    #     constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-    #     figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
-    # )
-    # axs["freq"].plot(vec_U, freqs[0, :], "o")
-    # axs["freq"].plot(vec_U, freqs[1, :], "o")
-    # plt.show()
 
     if (len(vec_U) > 1):
         fig, axs = plt.subplot_mosaic(

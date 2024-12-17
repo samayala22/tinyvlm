@@ -31,7 +31,7 @@
     } while (0)
 
 #define COUPLED 1
-#define COUPLED_NOAERO 1
+// #define COUPLED_NOAERO 1
 // #define COUPLED_NOAERO_NOHEAVE 1
 
 using namespace vlm;
@@ -458,7 +458,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         to_radians(3.0f)
     );
     #else
-    KinematicMatrix init_pos = linalg::identity;
+    KinematicMatrix init_pos = assembly.surface_kinematics()[0]->transform(0.0f);
     #endif
 
     for (const auto& [transform_h, transform_d] : zip(transforms_h.views(), transforms.views())) {
@@ -519,11 +519,13 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
     solver->solve(lhs.view(), rhs.view().reshape(rhs.size(), 1));
     update_wake_and_gamma(0);
 
-    std::ofstream data_2dof_aero("2dof_aero.txt");
-    data_2dof_aero << 1.0f << "\n";
-
+    #ifdef COUPLED
     std::ofstream data_2dof("2dof.txt");
     data_2dof << 1.0f << "\n";
+    #else
+    std::ofstream data_2dof_aero("2dof_aero.txt");
+    data_2dof_aero << 1.0f << "\n";
+    #endif
 
     std::vector<tiny::VtuMesh<f32, i64, i8>> vtu_meshes;
     for (i64 m = 0; m < assembly_wings.size(); m++) {
@@ -560,6 +562,17 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         const f32 t_nd = (f32)i * dt_nd;
         t_h.view()(i) = t_nd;
 
+        if (i < 3) {
+            // std::cout << "\nverts_wing: \n" << verts_wing.views()[0].slice(0, All, All) << "\n";
+            // std::cout << "\ngamma_wing: \n" << gamma_wing.views()[0].slice(0, All) << "\n";
+            // std::cout << "\ngamma_wing_prev: \n" << gamma_wing_prev.views()[0].slice(0, All) << "\n";
+            // std::cout << "\ngamma_wing_delta: \n" << gamma_wing_delta.views()[0].slice(0, All) << "\n";
+            // std::cout << "\nvel: \n" << velocities.views()[0].slice(0, All, All) << "\n";
+            // std::cout << "\nareas: \n" << areas_d.views()[0].slice(0, All) << "\n";
+            // std::cout << "\nnormals: \n" << normals_d.views()[0].slice(0, All, All) << "\n";
+            // std::cout << "\naero: \n" << aero_forces.views()[0].slice(0, All, All) << "\n";
+        }
+
         #ifdef COUPLED
 
         data_2dof << t_nd 
@@ -567,8 +580,8 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             << " " << u_h.view()(1,i)
             << " " << v_h.view()(0,i)
             << " " << v_h.view()(1,i)
-            << " " << F_h.view()(0, i)
-            << " " << F_h.view()(1, i)
+            << " " << F_h.view()(0,i)
+            << " " << F_h.view()(1,i)
             << "\n";
 
         // Output:
@@ -578,11 +591,14 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         }
 
         verts_wing.views()[0].to(verts_wing_h.views()[0]); // for output
+        
+        // Temporary Position correctness checks
         const f32 w_alpha = wing_alpha();
         const f32 w_h_nd = wing_h(1 + vars.a_h);
         ASSERT_NEAR(w_h_nd, -u_h.view()(0, i), 1e-5f);
         ASSERT_NEAR(w_alpha, u_h.view()(1, i), 1e-5f);
 
+        // Wake outputs
         for (i64 m = 0; m < assembly_wings.size(); m++) {
             const auto& verts_wake_m = verts_wake_h.views()[m];
             const auto& wake_cell_type_m = wake_cell_type.views()[m];
@@ -604,10 +620,15 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             };
         }
 
+        // more io
         std::string base_it_name = "2dof_" + std::to_string(i);
         tiny::write_pvtu<f32>("./2dof/", base_it_name, {}, {}, vtu_meshes.size());
         for (i64 m = 0; m < vtu_meshes.size(); m++) {
             tiny::write_vtu<f32, i64, i8, f32>("./2dof/" + base_it_name + "/" + base_it_name + "_" + std::to_string(m) + ".vtu", vtu_meshes[m], {}, {});
+        }
+
+        for (const auto& [gamma_wing_i, gamma_wing_prev_i] : zip(gamma_wing.views(), gamma_wing_prev.views())) {
+            gamma_wing_i.to(gamma_wing_prev_i);
         }
         
         dF.view().fill(0.f);
@@ -629,6 +650,14 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 dF.view(),
                 dt_nd // dimensionless dt
             );
+
+            // NOTE: this doesnt work on the GPU backend
+            #ifdef COUPLED_NOAERO_NOHEAVE
+            du.view()(0) = 0.0f;
+            dv.view()(0) = 0.0f;
+            da.view()(0) = 0.0f;
+            #endif
+
             du.view().to(du_h.view());
 
             u_d.view().slice(All, i).to(u_d.view().slice(All, i+1));
@@ -646,9 +675,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 return translation_matrix<fwd::Float>({
                     0.0f,
                     0.0f,
-                    // u_h.view()(0, i+1)
                     - u_h.view()(0, i+1) - v_h.view()(0, i+1) * t
-                    // - u_h.view()(0, i+1) - v_h.view()(0, i+1) * t - 0.5f * a_h.view()(0, i+1) * t*t
                 });
             });
             const KinematicNode pitch([&](const fwd::Float& t) {
@@ -663,9 +690,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                         1.0f,
                         0.0f
                     }, 
-                    // u_h.view()(1, i+1)
                     u_h.view()(1, i+1) + v_h.view()(1, i+1) * t
-                    // u_h.view()(1, i+1) + v_h.view()(1, i+1) * t + 0.5f * a_h.view()(1, i+1) * t*t
                 );
             });
 
@@ -673,7 +698,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             
             // Manually compute the transform (update_transforms(assembly, t+dt))
             auto fs = assembly.kinematics()->transform_dual(t_nd+dt_nd);
-            auto transform_dual = linalg::mul(linalg::mul(fs, heave.transform_dual(0.0f)), pitch.transform_dual(0.0f));
+            auto transform_dual = linalg::mul(fs, linalg::mul(heave.transform_dual(0.0f), pitch.transform_dual(0.0f)));
             auto transform = dual_to_float(transform_dual);
             auto ref_pt_4 = linalg::mul(transform, {1 + vars.a_h, 0.0f, 0.0f, 1.0f});
 
@@ -735,7 +760,35 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             backend->rhs_assemble_velocities(rhs.view(), normals_d.views(), velocities.views());
             backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), i+1);
             solver->solve(lhs.view(), rhs.view().reshape(rhs.size(), 1));
-            update_wake_and_gamma(i+1);
+            // update_wake_and_gamma(i+1);
+
+            {
+                i64 begin = 0;
+                for (i64 m = 0; m < assembly_wings.size(); m++) {
+                    const auto& gamma_wing_i = gamma_wing.views()[m];
+                    const auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
+                    const auto& gamma_wake_i = gamma_wake.views()[m];
+                    i64 end = begin + gamma_wing_i.size();
+
+                    // Copy solution to gamma_wing
+                    rhs.view().slice(Range{begin, end}).to(gamma_wing_i.reshape(gamma_wing_i.size()));
+                    
+                    // Update gamma_delta
+                    gamma_wing_i.to(gamma_wing_delta_i);
+                    
+                    // Shed wake
+                    gamma_wing_i.slice(All, -1).to(gamma_wake_i.slice(All, -1-(i+1)));
+                    
+                    // Compute delta
+                    backend->blas->axpy(
+                        -1.0f,
+                        gamma_wing_i.slice(All, Range{0, -2}),
+                        gamma_wing_delta_i.slice(All, Range{1, -1})
+                    );
+                    
+                    begin = end;
+                }
+            }
 
             const linalg::float3 freestream = -assembly.kinematics()->linear_velocity(t_nd+dt_nd, {0.f, 0.f, 0.f});
             backend->forces_unsteady(
@@ -758,7 +811,6 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 backend->sum(areas_d.views()[0])
             );
 
-            
             const linalg::float3 cm = backend->coeff_cm(
                 aero_forces.views()[0],
                 verts_wing.views()[0],
@@ -769,7 +821,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 backend->mesh_mac(verts_wing.views()[0], areas_d.views()[0])
             );
 
-            F_h.view()(0, i+1) = - cl / (PI_f * vars.mu); // no negative sign i think
+            F_h.view()(0, i+1) = - cl / (PI_f * vars.mu);
             F_h.view()(1, i+1) = (2.f*cm.y) / (PI_f * vars.mu * pow(vars.r_a, 2));
 
             #ifdef COUPLED_NOAERO
@@ -789,7 +841,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 break;
             }
         } // while loop
-        
+
         // std::printf("%d| iters: %d\n", i, iteration);
         #else
         // Classic UVLM:
@@ -839,7 +891,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             backend->mesh_mac(verts_wing.views()[0], areas_d.views()[0])
         );
 
-        data_2dof_aero << t_nd << " " << cl << " " << cm.y <<"\n";
+        data_2dof_aero << t_nd+dt_nd << " " << cl << " " << cm.y <<"\n";
         #endif
     } // simulation loop
 
@@ -869,15 +921,12 @@ int main() {
     vars.x_a = 0.25f;
     vars.mu = 100.0f;
     vars.r_a = 0.5f;
-    #ifdef COUPLED
     vars.U_a = flutter_ratio * flutter_speed;
-    #else
-    vars.U_a = 2.0f; // THIS IS NOT ND U_INF
-    #endif
 
     KinematicsTree kinematics_tree;
 
     #ifdef COUPLED
+    std::cout << "COUPLED SIMULATION\n";
     auto freestream = kinematics_tree.add([=](const fwd::Float& t) {
         return translation_matrix<fwd::Float>({
             -t,
@@ -893,7 +942,7 @@ int main() {
         simulation.run(assembly, vars, t_final_nd);
     }
     #else 
-
+    std::cout << "PURE AERO SIMULATION\n";
     auto freestream = kinematics_tree.add([=](const fwd::Float& t) {
         return translation_matrix<fwd::Float>({
             -t,
@@ -902,11 +951,19 @@ int main() {
         });
     });
 
-    const f32 k = 0.5; // reduced frequency
-    const f32 omega = k / vars.b;
-    const f32 amplitude = 1.f; // amplitude in degrees
+    // const f32 k = 0.5; // reduced frequency
+    // const f32 omega = k / vars.b;
+    // const f32 amplitude = 1.f; // amplitude in degrees
+    // auto pitch = kinematics_tree.add([=](const fwd::Float& t) {
+    //     return rotation_matrix<fwd::Float>({1 + vars.a_h, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_radians(amplitude) * fwd::sin(omega * t));
+    // })->after(freestream);
+
     auto pitch = kinematics_tree.add([=](const fwd::Float& t) {
-        return rotation_matrix<fwd::Float>({1 + vars.a_h, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_radians(amplitude) * fwd::sin(omega * t));
+        return rotation_matrix<fwd::Float>(
+            {1 + vars.a_h, 0.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f},
+            to_radians(3.f) * fwd::cos(t / vars.U_a)
+        );
     })->after(freestream);
 
     for (const auto& [mesh_name, backend_name] : simulations) {
@@ -917,6 +974,5 @@ int main() {
     }
     #endif
     
-
     return 0;
 }
