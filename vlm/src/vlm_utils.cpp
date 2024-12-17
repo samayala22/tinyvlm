@@ -17,11 +17,3 @@ linalg::float3 vlm::compute_lift_axis(const linalg::float3& freestream_) {
 linalg::float3 vlm::compute_stream_axis(const linalg::float3& freestream_) {
     return linalg::normalize(freestream_);
 }
-
-f32 vlm::to_degrees(f32 radians) {
-    return radians * 180.0f / PI_f;
-}
-
-f32 vlm::to_radians(f32 degrees) {
-    return degrees * PI_f / 180.0f;
-}

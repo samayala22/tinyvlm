@@ -31,6 +31,7 @@
     } while (0)
 
 #define COUPLED 1
+// #define COUPLED_VTU_IO 1
 // #define COUPLED_NOAERO 1
 // #define COUPLED_NOAERO_NOHEAVE 1
 
@@ -269,8 +270,26 @@ void UVLM_2DOF::alloc_buffers() {
     accel_solver->init(M_d.view());
 }
 
-f32 torsional_func(f32 alpha) {
-    return alpha;
+// f32 torsional_func(f32 alpha) {
+//     return alpha;
+// }
+
+// def alpha_freeplay(alpha, M0 = 0.0, Mf = 0.0, delta = np.radians(0.5), a_f = np.radians(0.25)):
+//     if (alpha < a_f):
+//         return M0 + alpha - a_f
+//     elif (alpha >= a_f and alpha <= (a_f + delta)):
+//         return M0 + Mf * (alpha - a_f)
+//     else: # alpha > a_F + delta
+//         return M0 + alpha - a_f + delta * (Mf - 1)
+
+f32 torsional_func(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(0.5f), f32 a_f = to_radians(0.25f)) {
+    if (alpha < a_f) {
+        return M0 + alpha - a_f;
+    } else if (alpha >= a_f && alpha <= (a_f + delta)) {
+        return M0 + Mf * (alpha - a_f);
+    } else { // alpha > a_F + delta
+        return M0 + alpha - a_f + delta * (Mf - 1);
+    }
 }
 
 void UVLM_2DOF::update_wake_and_gamma(i64 iteration) {
@@ -527,6 +546,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
     data_2dof_aero << 1.0f << "\n";
     #endif
 
+    #ifdef COUPLED_VTU_IO
     std::vector<tiny::VtuMesh<f32, i64, i8>> vtu_meshes;
     for (i64 m = 0; m < assembly_wings.size(); m++) {
         const auto& verts_wing_m = verts_wing_h.views()[m];
@@ -554,6 +574,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
     }
 
     std::unique_ptr<tiny::VtuDataAccessor<f32>> vtu_timesteps = std::make_unique<TensorViewAccessor<f32>>(t_h.view().reshape(t_h.view().size(), 1));
+    #endif
 
     // Transient simulation loop
     // for (i32 i = 0; i < t_steps-2; i++) {
@@ -561,17 +582,6 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
 
         const f32 t_nd = (f32)i * dt_nd;
         t_h.view()(i) = t_nd;
-
-        if (i < 3) {
-            // std::cout << "\nverts_wing: \n" << verts_wing.views()[0].slice(0, All, All) << "\n";
-            // std::cout << "\ngamma_wing: \n" << gamma_wing.views()[0].slice(0, All) << "\n";
-            // std::cout << "\ngamma_wing_prev: \n" << gamma_wing_prev.views()[0].slice(0, All) << "\n";
-            // std::cout << "\ngamma_wing_delta: \n" << gamma_wing_delta.views()[0].slice(0, All) << "\n";
-            // std::cout << "\nvel: \n" << velocities.views()[0].slice(0, All, All) << "\n";
-            // std::cout << "\nareas: \n" << areas_d.views()[0].slice(0, All) << "\n";
-            // std::cout << "\nnormals: \n" << normals_d.views()[0].slice(0, All, All) << "\n";
-            // std::cout << "\naero: \n" << aero_forces.views()[0].slice(0, All, All) << "\n";
-        }
 
         #ifdef COUPLED
 
@@ -584,14 +594,13 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             << " " << F_h.view()(1,i)
             << "\n";
 
-        // Output:
+        #ifdef COUPLED_VTU_IO
         for (const auto& [wake_d, wake_h] : zip(verts_wake.views(), verts_wake_h.views())) {
             wake_d.slice(All, -1-i, All).to(wake_h.slice(All, -1-i, All));
             wake_d.slice(All, -1-i, All).to(wake_h.slice(All, -2-i, All));
         }
 
         verts_wing.views()[0].to(verts_wing_h.views()[0]); // for output
-        
         // Temporary Position correctness checks
         const f32 w_alpha = wing_alpha();
         const f32 w_h_nd = wing_h(1 + vars.a_h);
@@ -626,6 +635,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         for (i64 m = 0; m < vtu_meshes.size(); m++) {
             tiny::write_vtu<f32, i64, i8, f32>("./2dof/" + base_it_name + "/" + base_it_name + "_" + std::to_string(m) + ".vtu", vtu_meshes[m], {}, {});
         }
+        #endif 
 
         for (const auto& [gamma_wing_i, gamma_wing_prev_i] : zip(gamma_wing.views(), gamma_wing_prev.views())) {
             gamma_wing_i.to(gamma_wing_prev_i);
@@ -637,7 +647,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         i32 iteration = 0;
         const i32 max_iter = 50;
 
-        while (backend->blas->norm(du_k.view()) > 1e-7f) {
+        while (backend->blas->norm(du_k.view()) > EPS_f) {
             du.view().to(du_k.view());
             integrator.step(
                 M_d.view(),
@@ -711,56 +721,11 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
             backend->wake_shed(verts_wing.views(), verts_wake.views(), i+1);
 
             wing_velocities(transform_dual, colloc_h.views()[0], velocities_h.views()[0], velocities.views()[0]);
-            // {
-            //     for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
-            //     for (const auto& [vw_h, vw_d] : zip(verts_wing_h.views(), verts_wing.views())) vw_d.to(vw_h);
-            //     auto& wing_h = verts_wing_h.views()[0];
-            //     auto& col_h = colloc_h.views()[0];
-            //     auto& col_vel_h = velocities_h.views()[0];
-            //     const linalg::float3 pt0 = linalg::float3{wing_h(0, 0, 0), wing_h(0, 0, 1), wing_h(0, 0, 2)};
-            //     const linalg::float3 pt1 = linalg::float3{wing_h(0, 1, 0), wing_h(0, 1, 1), wing_h(0, 1, 2)};
-            //     const linalg::float3 chord_axis = linalg::normalize(pt1 - pt0);
-            //     linalg::float3 elastic_pt = pt0 + (1.f+vars.a_h) * chord_axis - 0.25f * (pt1 - pt0);
-            //     ASSERT_NEAR(ref_pt_4.x, elastic_pt.x, 1e-4f);
-            //     ASSERT_NEAR(ref_pt_4.y, elastic_pt.y, 1e-4f);
-            //     ASSERT_NEAR(ref_pt_4.z, elastic_pt.z, 1e-4f);
-            //     elastic_pt.y = col_h(0, 0, 1);
-            //     const linalg::float3 omega = linalg::float3{0.0f, v_h.view()(1, i+1), 0.0f};
-            //     for (i64 p = 0; p < col_h.shape(1); p++) {
-            //         const linalg::float3 col_pt = {col_h(0, p, 0), col_h(0, p, 1), col_h(0, p, 2)};
-            //         const linalg::float3 v_p = linalg::cross(omega, col_pt - elastic_pt);
-            //         ASSERT_EQ(v_p.y, 0.0f);
-            //         linalg::float3 col_vel = {
-            //             -1.f + v_p.x,
-            //             v_p.y,
-            //             - v_h.view()(0, i+1) + v_p.z
-            //         };
-            //         // if (i < 3) {
-            //         //     std::cout << "col_pt: " << col_pt << "\n";
-            //         //     std::cout << "v_p: " << v_p << "\n";
-            //         //     std::cout << "h_dot: " << v_h.view()(0, i+1) << "\n";
-            //         //     std::cout << "alpha_dot: " << v_h.view()(1, i+1) << "\n";
-            //         //     std::cout << "col_vel: " << col_vel << "\n";
-            //         //     std::cout << "col_vel_h: " << -col_vel_h(0, p, 0) << " " << -col_vel_h(0, p, 1) << " " << -col_vel_h(0, p, 2) << "\n";
-            //         //     std::cout << "\n";
-            //         // }
-            //         // ASSERT_NEAR(col_vel.x, -col_vel_h(0, p, 0), 1e-4f);
-            //         // ASSERT_NEAR(col_vel.y, -col_vel_h(0, p, 1), 1e-4f);
-            //         // ASSERT_NEAR(col_vel.z, -col_vel_h(0, p, 2), 1e-4f);
-            //         for (i64 ii = 0; ii < col_h.shape(0); ii++) {
-            //             col_vel_h(ii, p, 0) = -col_vel.x;
-            //             col_vel_h(ii, p, 1) = -col_vel.y;
-            //             col_vel_h(ii, p, 2) = -col_vel.z;
-            //         }
-            //     }
-            //     col_vel_h.to(velocities.views()[0]);
-            // }
 
             rhs.view().fill(0.f);
             backend->rhs_assemble_velocities(rhs.view(), normals_d.views(), velocities.views());
             backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), i+1);
             solver->solve(lhs.view(), rhs.view().reshape(rhs.size(), 1));
-            // update_wake_and_gamma(i+1);
 
             {
                 i64 begin = 0;
@@ -895,7 +860,9 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
         #endif
     } // simulation loop
 
+    #ifdef COUPLED_VTU_IO
     tiny::write_pvd<f32>(".", "2dof", ".pvtu", vtu_timesteps);
+    #endif
 }
 
 int main() {
@@ -908,7 +875,7 @@ int main() {
 
     const f32 flutter_speed = 6.285f;
     const f32 flutter_ratio = 0.2f;
-    const f32 t_final_nd = 90.f;
+    const f32 t_final_nd = 1000.f;
 
     UVLM_2DOF_Vars vars;
     vars.b = 0.5f;

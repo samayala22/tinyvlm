@@ -61,8 +61,13 @@ linalg::float3 compute_freestream(const f32 u_inf, const f32 alpha, const f32 be
 linalg::float3 compute_lift_axis(const linalg::float3& freestream_);
 linalg::float3 compute_stream_axis(const linalg::float3& freestream_);
 
-f32 to_degrees(f32 radians);
-f32 to_radians(f32 degrees);
+constexpr f32 to_degrees(f32 radians) {
+    return radians * 180.0f / PI_f;
+}
+
+constexpr f32 to_radians(f32 degrees) {
+    return degrees * PI_f / 180.0f;
+}
 
 template<typename T>
 constexpr T pow(T base, int exponent) {

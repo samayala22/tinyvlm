@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import mpld3
 import scipy as sp
 from scipy.fft import fft, ifft, fftfreq
 from scipy.integrate import solve_ivp
@@ -389,9 +390,9 @@ def plot_data_and_psd(axs_d, axs_psd, t, data, label, linestyle='-', zorder=1):
 
     mask = frequencies < 1.0
 
-    axs_d.plot(t, data, linestyle, label=label, zorder=zorder, markersize=2)
+    axs_d.plot(t, data, linestyle, label=label, zorder=zorder, markersize=1)
     # axs_psd.plot(frequencies[mask], psd_db[mask], label=label)
-    axs_psd.plot(frequencies[mask], psd_db_raw[mask], linestyle, label=label, zorder=zorder, markersize=2)
+    axs_psd.plot(frequencies[mask], psd_db_raw[mask], linestyle, label=label, zorder=zorder, markersize=1)
 
 def format_axs(axs, xlabel, ylabel):
     axs.set_xlabel(xlabel)
@@ -411,7 +412,7 @@ if __name__ == "__main__":
     # vec_U = np.linspace(1.0, 7, 50)
     vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     newton_err_thresh = 1e-7
-    torsional_spring = 2
+    torsional_spring = 0
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
     if (torsional_spring == 0):
@@ -448,7 +449,7 @@ if __name__ == "__main__":
         # Dimensionless parameters
         dt_nd = 0.2
         # t_final_nd = U_vel * 200.0
-        t_final_nd = 90.0
+        t_final_nd = 1000.0
         vec_t_nd = np.arange(0, t_final_nd, dt_nd)
         n = len(vec_t_nd)
 
@@ -534,13 +535,9 @@ if __name__ == "__main__":
                 u[:,i+1] = u[:,i] + du
                 v[:,i+1] = v[:,i] + dv
                 a[:,i+1] = a[:,i] + da
-                # u[1,i+1] = u[1,i] + du[1]
-                # v[1,i+1] = v[1,i] + dv[1]
-                # a[1,i+1] = a[1,i] + da[1]
 
                 F[:,i+1] = aero(i+1)
-                # delta_F = F[:,i+1] - F[:,i]
-                delta_F = np.zeros(2)
+                delta_F = F[:,i+1] - F[:,i]
                 delta_F[0] += - (ndv.omega / ndv.U)**2 * du[0]
                 delta_F[1] += - 1/(ndv.U**2) * (torsional_func(u[1,i+1]) - torsional_func(u[1,i]))
 
@@ -601,7 +598,7 @@ if __name__ == "__main__":
             uvlm_ad = []
             uvlm_f_h = []
             uvlm_f_a = []
-            with open("build/windows/x64/debug/2dof.txt", "r") as f:
+            with open("build/windows/x64/release/2dof.txt", "r") as f:
                 f.readline() # skip first line
                 for line in f:
                     t, h, a, hd, ad, f_h, f_a = map(float, line.split())
@@ -620,20 +617,6 @@ if __name__ == "__main__":
             plot_data_and_psd(axs["fh"], axs["fh_psd"], uvlm_t, uvlm_f_h, "UVLM", "o", 3)
             plot_data_and_psd(axs["fa"], axs["fa_psd"], uvlm_t, uvlm_f_a, "UVLM", "o", 3)
 
-            # uvlm_aero_t = []
-            # uvlm_aero_cl = []
-            # uvlm_aero_cm = []
-            # with open("build/windows/x64/debug/2dof_aero.txt", "r") as f:
-            #     f.readline() # skip first line
-            #     for line in f:
-            #         t, cl, cm = map(float, line.split())
-            #         uvlm_aero_t.append(t)
-            #         uvlm_aero_cl.append(cl)
-            #         uvlm_aero_cm.append(cm)
-
-            # plot_data_and_psd(axs["fh"], axs["fh_psd"], uvlm_aero_t, - np.array(uvlm_aero_cl) / (np.pi * ndv.mu), "UVLM Aero", "o", 3)
-            # plot_data_and_psd(axs["fa"], axs["fa_psd"], uvlm_aero_t, 2 * np.array(uvlm_aero_cm) / (np.pi * ndv.mu * ndv.r_a**2), "UVLM Aero", "o", 3)
-
             # Formatting
             format_axs(axs["h"], r"$\bar{t}$", r"$\bar{h}$")
             format_axs(axs["hd"], r"$\bar{t}$", r"$\bar{h'}$")
@@ -650,6 +633,15 @@ if __name__ == "__main__":
             
             fig.suptitle(r"2 DOF Aeroelastic response at $\bar{U} = %s$ (%s Pitch Spring)" % (round(U_vel, 3), torsional_spring_names[torsional_spring]))
 
+            mpld3.save_html(fig, "freeplay.html")
+            with open("freeplay.html", "r+") as f:
+                content = f.read()\
+                    .replace('https://d3js.org/d3.v5.js', 'https://d3js.org/d3.v3.min.js')\
+                    .replace('https://mpld3.github.io/js/mpld3.v0.5.10.js', 'https://mpld3.github.io/js/mpld3.v0.2.js')
+                f.seek(0)
+                f.write(content)
+                f.truncate()
+                
             plt.show()
 
         # X = fft(u, axis=1)
