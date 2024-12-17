@@ -22,8 +22,8 @@ jobs:
         os: [ubuntu-latest]
         arch: [x86_64]
         mode: [release, debug]
-        compiler: [clang, gcc]
-        sanitizer: [address, undefined] # thread removed due to bugs
+        compiler: [gcc] # disabled clang because of openmp linking issues
+        sanitizer: [address, undefined] # thread removed due to false positives
 
     steps:
       - name: Checkout repository
@@ -39,7 +39,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev clang libomp-dev libc++-dev gcc g++ gobjc
+          sudo apt-get install -y libopenblas-dev libgl1-mesa-dev libglu1-mesa-dev clang libomp-dev libc++-dev gcc g++
 
       - name: Set xmake env
         run: echo "XMAKE_GLOBALDIR=${{ runner.workspace }}/xmake-global" >> $GITHUB_ENV
@@ -75,7 +75,7 @@ jobs:
       # Config xmake
       - name: Config
         run: |
-          xmake f -vD -y -a ${{ matrix.arch }} -m ${{ matrix.mode }} --toolchain=${{ matrix.compiler }} --policies=build.sanitizer.${{ matrix.sanitizer }}
+          xmake f -vD -y --toolchain=${{ matrix.compiler }} -a ${{ matrix.arch }} -m ${{ matrix.mode }} --policies=build.sanitizer.${{ matrix.sanitizer }}
 
       - name: Cache xmake dependencies
         uses: actions/cache/save@v4

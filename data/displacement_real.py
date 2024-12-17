@@ -23,6 +23,8 @@ coords_wake = []
 with open("build/windows/x64/release/wing_data.txt") as f:
     # first line
     nc, ns = map(int, f.readline().split())
+    nc = nc-1
+    ns = ns-1
     timesteps = int(f.readline())
     for i in range(timesteps):
         coords = np.zeros((3, (ns+1)*(nc+1)), dtype=np.float32)
