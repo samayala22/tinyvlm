@@ -33,7 +33,6 @@
 #define COUPLED 1
 // #define COUPLED_VTU_IO 1
 // #define COUPLED_NOAERO 1
-// #define COUPLED_NOAERO_NOHEAVE 1
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
@@ -274,14 +273,6 @@ void UVLM_2DOF::alloc_buffers() {
 //     return alpha;
 // }
 
-// def alpha_freeplay(alpha, M0 = 0.0, Mf = 0.0, delta = np.radians(0.5), a_f = np.radians(0.25)):
-//     if (alpha < a_f):
-//         return M0 + alpha - a_f
-//     elif (alpha >= a_f and alpha <= (a_f + delta)):
-//         return M0 + Mf * (alpha - a_f)
-//     else: # alpha > a_F + delta
-//         return M0 + alpha - a_f + delta * (Mf - 1)
-
 f32 torsional_func(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(0.5f), f32 a_f = to_radians(0.25f)) {
     if (alpha < a_f) {
         return M0 + alpha - a_f;
@@ -367,11 +358,7 @@ void UVLM_2DOF::initialize_structure_data(const UVLM_2DOF_Vars& vars, const i64 
 
     M_hv(0, 0) = 1.0f;
     M_hv(1, 0) = vars.x_a / pow(vars.r_a, 2);
-    #ifdef COUPLED_NOAERO_NOHEAVE
-    M_hv(0, 1) = 0.0f;
-    #else
     M_hv(0, 1) = vars.x_a;
-    #endif
     M_hv(1, 1) = 1.0f;
 
     C_hv(0, 0) = 2.0f * vars.zeta_h * (vars.omega / vars.U_a);
@@ -494,8 +481,7 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
     const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
     const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
     const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
-    // const f32 dt_nd = last_panel_chord / linalg::length(assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f}));
-    const f32 dt_nd = last_panel_chord;
+    const f32 dt_nd = last_panel_chord; // nd freestream = 1
     const i64 t_steps = static_cast<i64>(t_final_nd / dt_nd);
 
     std::cout << "dt_nd: " << dt_nd << "\n";
@@ -660,13 +646,6 @@ void UVLM_2DOF::run(const Assembly& assembly, const UVLM_2DOF_Vars& vars, f32 t_
                 dF.view(),
                 dt_nd // dimensionless dt
             );
-
-            // NOTE: this doesnt work on the GPU backend
-            #ifdef COUPLED_NOAERO_NOHEAVE
-            du.view()(0) = 0.0f;
-            dv.view()(0) = 0.0f;
-            da.view()(0) = 0.0f;
-            #endif
 
             du.view().to(du_h.view());
 
@@ -875,7 +854,7 @@ int main() {
 
     const f32 flutter_speed = 6.285f;
     const f32 flutter_ratio = 0.2f;
-    const f32 t_final_nd = 1000.f;
+    const f32 t_final_nd = 100.f;
 
     UVLM_2DOF_Vars vars;
     vars.b = 0.5f;

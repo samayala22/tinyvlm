@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.integrate as spi
 import scipy.special as scsp
+from pathlib import Path
 
 EPS_sqrt_f = np.sqrt(1.19209e-07)
 
@@ -26,14 +27,18 @@ def uvlm_data(filename):
     uvlm_t = []
     uvlm_z = []
     uvlm_alpha = []
-    with open(f"build/windows/x64/release/{filename}.txt", "r") as f:
-        k = float(f.readline()) # get reduced frequency of the simulation
-        for line in f:
-            time_step, z, cl, alpha = line.split()
-            uvlm_t.append(float(time_step))
-            uvlm_z.append(float(z))
-            uvlm_cl.append(float(cl))
-            uvlm_alpha.append(float(alpha))
+    filepath = f"build/windows/x64/debug/{filename}.txt"
+    if Path(filepath).exists():
+        with open(filepath, "r") as f:
+            k = float(f.readline()) # get reduced frequency of the simulation
+            for line in f:
+                time_step, z, cl, alpha = line.split()
+                uvlm_t.append(float(time_step))
+                uvlm_z.append(float(z))
+                uvlm_cl.append(float(cl))
+                uvlm_alpha.append(float(alpha))
+    else:
+        print(f"File {filepath} not found")
 
     uvlm_alpha = np.array(uvlm_alpha)
     uvlm_cl = np.array(uvlm_cl)
@@ -68,7 +73,8 @@ fig, axs = plt.subplot_mosaic(
 )
 
 files = [
-    "cl_data",
+    "cl_data_CPU",
+    "cl_data_CUDA",
     # "cl_data_025",
     # "cl_data_050",
     # "cl_data_075",

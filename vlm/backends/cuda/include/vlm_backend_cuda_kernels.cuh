@@ -8,8 +8,20 @@ namespace vlm {
 
 namespace cg = cooperative_groups;
 
+// TODO: verify that these thresholds are correct for single precision floats
 constexpr f32 RCUT = 1e-10f;
 constexpr f32 RCUT2 = 1e-5f;
+
+struct DataDims {
+    i64 panel_shape_0;
+    i64 panel_shape_1;
+    i64 panel_stride_1;
+    i64 panel_stride_2;
+    i64 vertex_shape_0;
+    i64 vertex_shape_1;
+    i64 vertex_stride_1;
+    i64 vertex_stride_2;
+};
 
 template<typename T = i32>
 struct Dim3 {
@@ -363,7 +375,7 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(i64 wake_m, i64 w
     const i32 lane = block.thread_rank() % warpSize;
     
     float induced_vel = 0.0f;
-    if (i < wake_m * wake_n || j < wing_mn) {
+    if (i < wake_m * wake_n || j < wing_mn) { // TODO: this might be an AND instead of OR
         const i64 v0 = i + i / wake_n;
         const i64 v1 = v0 + 1;
         const i64 v3 = v0 + wake_n+1;
@@ -395,43 +407,175 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(i64 wake_m, i64 w
     }
 }
 
-template<i32 X, i32 Y = 1, i32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_unsteady_cl_single(i64 m, i64 n, i64 ld, const f32* verts_wing, i64 verts_wing_ld, const f32* gamma_wing_delta, const f32* gamma_wing, const f32* gamma_wing_prev, const f32* velocities, i64 velocities_ld, const f32* areas, const f32* normals, i64 normals_ld, float3 freestream, f32 dt, f32* cl) {
-    const cg::thread_block block = cg::this_thread_block();
-    const i64 j = blockIdx.x * blockDim.x + threadIdx.x; // wake_verts
-    const i64 i = blockIdx.y * blockDim.y + threadIdx.y; // colloc
-    const i32 wid = block.thread_rank() / warpSize;
-    const i32 lane = block.thread_rank() % warpSize;
+__global__ void kernel_forces_unsteady(
+    DataDims dims,
+    f32* verts_wing,
+    f32* gamma_delta,
+    f32* gamma,
+    f32* gamma_prev,
+    f32* velocities,
+    f32* areas,
+    f32* normals,
+    f32* forces,
+    f32 dt
+)
+{
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // ns
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y; // nc
 
-    if (i >= m|| j >= n) return;
-    
+    if (i >= dims.panel_shape_0 || j >= dims.panel_shape_1) return;
+
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
-    const float3 span_axis{0.f, 1.f, 0.f}; // TODO: obtain from the local frame
-    const float3 lift_axis = normalize(cross(freestream, span_axis));
 
-    const i64 lidx = i * ld + j;
+    const float3 V{
+        velocities[0 * dims.panel_stride_2 + j * dims.panel_stride_1 + i],
+        velocities[1 * dims.panel_stride_2 + j * dims.panel_stride_1 + i],
+        velocities[2 * dims.panel_stride_2 + j * dims.panel_stride_1 + i]
+    };
 
-    const float3 vel{velocities[0*velocities_ld + lidx], velocities[1*velocities_ld + lidx], velocities[2*velocities_ld + lidx]};
+    const float3 vertex0{
+        verts_wing[0 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i],
+        verts_wing[1 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i],
+        verts_wing[2 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i]
+    };
 
-    const i64 v0 = (i+0) * (ld + 1) + j;
-    const i64 v1 = (i+0) * (ld + 1) + j + 1;
+    const float3 vertex1{
+        verts_wing[0 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i + 1],
+        verts_wing[1 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i + 1],
+        verts_wing[2 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i + 1]
+    };
 
-    const float3 vertex0{verts_wing[0*verts_wing_ld + v0], verts_wing[1*verts_wing_ld + v0], verts_wing[2*verts_wing_ld + v0]}; // upper left
-    const float3 vertex1{verts_wing[0*verts_wing_ld + v1], verts_wing[1*verts_wing_ld + v1], verts_wing[2*verts_wing_ld + v1]}; // upper right
-    const float3 normal{normals[0*normals_ld + lidx], normals[1*normals_ld + lidx], normals[2*normals_ld + lidx]};
-    
+    const float3 normal{
+        normals[0 * dims.panel_stride_2 + j * dims.panel_stride_1 + i],
+        normals[1 * dims.panel_stride_2 + j * dims.panel_stride_1 + i],
+        normals[2 * dims.panel_stride_2 + j * dims.panel_stride_1 + i]
+    };
+
     float3 force{0.f, 0.f, 0.f};
-    const f32 gamma_dt = (gamma_wing[lidx] - gamma_wing_prev[lidx]) / dt; // backward difference
-    
-    // Joukowski method
-    force += rho * gamma_wing_delta[lidx] * cross(vel, vertex1 - vertex0); // steady contribution
-    force += rho * gamma_dt * areas[lidx] * normal; // unsteady contribution
-    float cl_local = dot(force, lift_axis);
+    const f32 gamma_dt = (gamma[j * dims.panel_stride_1 + i] - gamma_prev[j * dims.panel_stride_1 + i]) / dt; // backward difference
 
-    atomicAdd(cl, cl_local);
-    // cl_local = warp_reduce_sum(cl_local);
-    // if (lane == 0) {
-    //     atomicAdd(cl, cl_local);
-    // }
+    // Joukowski method (https://arc.aiaa.org/doi/10.2514/1.J052136)
+    force += rho * gamma_delta[j * dims.panel_stride_1 + i] * cross(V, vertex1 - vertex0); // steady contribution
+    force += rho * gamma_dt * areas[j * dims.panel_stride_1 + i] * normal; // unsteady contribution
+    
+    forces[0 * dims.panel_stride_2 + j * dims.panel_stride_1 + i] = force.x;
+    forces[1 * dims.panel_stride_2 + j * dims.panel_stride_1 + i] = force.y;
+    forces[2 * dims.panel_stride_2 + j * dims.panel_stride_1 + i] = force.z;
 }
+
+__global__ void kernel_coeff_cl(
+    DataDims dims,
+    f32* forces,
+    float3 lift_axis,
+    f32* cl // return value
+)
+{
+    const cg::thread_block block = cg::this_thread_block();
+    const i64 lane = block.thread_rank() % warpSize;
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // ns
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y; // nc
+
+    f32 cl_local = 0.0f;
+
+    if (i < dims.panel_shape_0 && j < dims.panel_shape_1) {
+        float3 force{
+            forces[0 * dims.panel_stride_2 + j * dims.panel_stride_1 + i],
+            forces[1 * dims.panel_stride_2 + j * dims.panel_stride_1 + i],
+            forces[2 * dims.panel_stride_2 + j * dims.panel_stride_1 + i]
+        };
+        cl_local = dot(force, lift_axis);
+    }
+    cl_local = warp_reduce_sum(cl_local);
+    if (lane == 0) {
+        atomicAdd(cl, cl_local);
+    }
+}
+
+__global__ void kernel_coeff_cm(
+    DataDims dims,
+    f32* forces, 
+    f32* verts_wing,
+    float3 ref_pt,
+    f32* cm_x,
+    f32* cm_y,
+    f32* cm_z
+)
+{
+    const cg::thread_block block = cg::this_thread_block();
+    const i64 lane = block.thread_rank() % warpSize;
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // ns
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y; // nc
+
+    float3 cm_local = {0.0f, 0.0f, 0.0f};
+
+    if (i < dims.panel_shape_0 && j < dims.panel_shape_1) {
+
+        const float3 vertex0{
+            verts_wing[0 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i],
+            verts_wing[1 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i],
+            verts_wing[2 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i]
+        };
+
+        const float3 vertex1{
+            verts_wing[0 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i + 1],
+            verts_wing[1 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i + 1],
+            verts_wing[2 * dims.vertex_stride_2 + j * dims.vertex_stride_1 + i + 1]
+        };
+
+        const float3 force{
+            forces[0 * dims.panel_stride_2 + j * dims.panel_stride_1 + i],
+            forces[1 * dims.panel_stride_2 + j * dims.panel_stride_1 + i],
+            forces[2 * dims.panel_stride_2 + j * dims.panel_stride_1 + i]
+        };
+
+        const float3 lever = 0.5f * (vertex0 + vertex1) - ref_pt; // force applied at the center of leading edge vortex line
+        cm_local = cross(lever, force);
+    }
+
+    cm_local.x = warp_reduce_sum(cm_local.x);
+    cm_local.y = warp_reduce_sum(cm_local.y);
+    cm_local.z = warp_reduce_sum(cm_local.z);
+
+    if (lane == 0) {
+        atomicAdd(cm_x, cm_local.x);
+        atomicAdd(cm_y, cm_local.y);
+        atomicAdd(cm_z, cm_local.z);
+    }
+}
+
+__global__ void kernel_mac(
+    DataDims dims,
+    f32* verts_wing,
+    f32* mac // return value
+)
+{
+    const cg::thread_block block = cg::this_thread_block();
+    const i64 lane = block.thread_rank() % warpSize;
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // ns
+
+    f32 mac_local = 0.0f;
+    if (i < dims.panel_shape_0) {
+        const f32 dx0 = verts_wing[0 * dims.vertex_stride_2 + i + 0] - verts_wing[0 * dims.vertex_stride_2 + (dims.vertex_shape_1 - 1) * dims.vertex_stride_1 + i + 0];
+        const f32 dy0 = verts_wing[1 * dims.vertex_stride_2 + i + 0] - verts_wing[1 * dims.vertex_stride_2 + (dims.vertex_shape_1 - 1) * dims.vertex_stride_1 + i + 0];
+        const f32 dz0 = verts_wing[2 * dims.vertex_stride_2 + i + 0] - verts_wing[2 * dims.vertex_stride_2 + (dims.vertex_shape_1 - 1) * dims.vertex_stride_1 + i + 0];
+        const f32 dx1 = verts_wing[0 * dims.vertex_stride_2 + i + 1] - verts_wing[0 * dims.vertex_stride_2 + (dims.vertex_shape_1 - 1) * dims.vertex_stride_1 + i + 1];
+        const f32 dy1 = verts_wing[1 * dims.vertex_stride_2 + i + 1] - verts_wing[1 * dims.vertex_stride_2 + (dims.vertex_shape_1 - 1) * dims.vertex_stride_1 + i + 1];
+        const f32 dz1 = verts_wing[2 * dims.vertex_stride_2 + i + 1] - verts_wing[2 * dims.vertex_stride_2 + (dims.vertex_shape_1 - 1) * dims.vertex_stride_1 + i + 1];
+        const f32 c0 = sqrt(dx0 * dx0 + dy0 * dy0 + dz0 * dz0);
+        const f32 c1 = sqrt(dx1 * dx1 + dy1 * dy1 + dz1 * dz1);
+
+        const f32 dx3 = verts_wing[0 * dims.vertex_stride_2 + i + 1] - verts_wing[0 * dims.vertex_stride_2 + i + 0];
+        const f32 dy3 = verts_wing[1 * dims.vertex_stride_2 + i + 1] - verts_wing[1 * dims.vertex_stride_2 + i + 0];
+        const f32 dz3 = verts_wing[2 * dims.vertex_stride_2 + i + 1] - verts_wing[2 * dims.vertex_stride_2 + i + 0];
+        const f32 width = sqrt(dx3 * dx3 + dy3 * dy3 + dz3 * dz3);
+        
+        mac_local = 0.5f * (c0 * c0 + c1 * c1) * width;
+    }
+
+    mac_local = warp_reduce_sum(mac_local);
+    if (lane == 0) {
+        atomicAdd(mac, mac_local);
+    }
+}
+
 } // namespace vlm

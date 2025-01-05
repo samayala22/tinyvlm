@@ -200,6 +200,7 @@ void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>&
 }
 
 BackendCPU::BackendCPU() : Backend(create_memory_manager(), create_blas()) {
+    name = "CPU";
     print_cpu_info();
 }
 
@@ -499,10 +500,7 @@ linalg::float3 BackendCPU::coeff_cm(
             const linalg::float3 v1 = {verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // right leading vortex line
             const linalg::float3 force = {forces(i, j, 0), forces(i, j, 1), forces(i, j, 2)};
 
-            // const linalg::float3 dst_to_ref = ref_pt - 0.5f * (v0 + v1);
-            // cm += linalg::cross(force, dst_to_ref);
-
-            const linalg::float3 f_applied = 0.5f * (v0 + v1);
+            const linalg::float3 f_applied = 0.5f * (v0 + v1); // force applied at the center of leading edge vortex line
             const linalg::float3 lever = f_applied - ref_pt;
             cm += linalg::cross(lever, force);
         }

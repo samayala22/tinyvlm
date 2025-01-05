@@ -14,15 +14,13 @@ namespace vlm {
 
 class Backend {
     public:
+        std::string name;
         const std::unique_ptr<Memory> memory;
         std::unique_ptr<BLAS> blas;
 
-        // TODO: remove these
-        f32* d_val = nullptr; // intermediate value used for reduction
-
         f32 sigma_vatistas = 0.0f;
-        Backend(std::unique_ptr<Memory> memory_, std::unique_ptr<BLAS> blas_);
-        virtual ~Backend();
+        Backend(std::unique_ptr<Memory> memory_, std::unique_ptr<BLAS> blas_) : memory(std::move(memory_)), blas(std::move(blas_)) {};
+        virtual ~Backend() = default;
 
         // Kernels that run for all the meshes
         virtual void lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView3D<Location::Device>&  verts_wake, std::vector<i32>& condition, i32 iteration) = 0;

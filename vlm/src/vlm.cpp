@@ -426,7 +426,7 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
     backend->lhs_assemble(lhs.view(), colloc_d.views(), normals_d.views(), verts_wing.views(), verts_wake.views(), condition0 , 0);
     solver->factorize(lhs.view());
 
-    std::ofstream cl_data("cl_data.txt");
+    std::ofstream cl_data("cl_data_" + backend->name + ".txt");
     cl_data << "0.5" << "\n"; // TODO: this should be according to inputs
 
     // 4. Transient simulation loop

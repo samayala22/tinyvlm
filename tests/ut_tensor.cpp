@@ -17,20 +17,6 @@
 
 using namespace vlm;
 
-void print3d(const TensorView<f32, 3, Location::Host>& tensor) {
-    // Print the 3D tensor
-    for (i64 z = 0; z < tensor.shape(2); z++) {
-        std::printf("Layer %lld:\n", z);
-        for (i64 x = 0; x < tensor.shape(0); x++) {
-            for (i64 y = 0; y < tensor.shape(1); y++) {
-                std::printf("%6.1f ", tensor(x, y, z));
-            }
-            std::printf("\n");
-        }
-        std::printf("\n");
-    }
-}
-
 int main(int, char**) {
     const std::vector<std::string> backends = get_available_backends();
 

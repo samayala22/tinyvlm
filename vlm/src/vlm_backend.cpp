@@ -37,15 +37,6 @@ std::vector<std::string> vlm::get_available_backends() {
     return backends;
 }
 
-Backend::Backend(std::unique_ptr<Memory> memory_, std::unique_ptr<BLAS> blas_) : memory(std::move(memory_)), blas(std::move(blas_)) {
-    d_val = (f32*)memory->alloc(Location::Device, sizeof(f32));
-}
-
-Backend::~Backend() {
-    // TODO: move this
-    memory->free(Location::Device, d_val);
-}
-
 f32 Backend::coeff_steady_cl_multi(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_delta, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas) {
     f32 cl = 0.0f;
     f32 total_area = 0.0f;

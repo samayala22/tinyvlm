@@ -493,7 +493,7 @@ if __name__ == "__main__":
         # Dimensionless parameters
         dt_nd = 0.2
         # t_final_nd = U_vel * 200.0
-        t_final_nd = 1000.0
+        t_final_nd = 100.0
         vec_t_nd = np.arange(0, t_final_nd, dt_nd)
         n = len(vec_t_nd)
 
