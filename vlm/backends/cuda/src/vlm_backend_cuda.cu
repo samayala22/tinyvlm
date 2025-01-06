@@ -8,8 +8,6 @@
 #include <taskflow/cuda/cudaflow.hpp>
 
 // CUDA
-#include <cusolverDn.h>
-#include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include "helper_math.cuh"
 #include <vector_types.h>
@@ -30,27 +28,6 @@ using namespace vlm;
         } \
     } while (0)
 
-#define CHECK_CUSOLVER(call) \
-    do { \
-        const cusolverStatus_t err = (call); \
-        if (err != CUSOLVER_STATUS_SUCCESS) { \
-            fprintf(stderr, "cuSolver Error in %s at line %d: %d\n", \
-                    __FILE__, __LINE__, err); \
-            exit(EXIT_FAILURE); \
-        } \
-    } while (0)
-
-#define CHECK_CUBLAS(call) \
-    do { \
-        const cublasStatus_t err = (call); \
-        if (err != CUBLAS_STATUS_SUCCESS) { \
-            fprintf(stderr, "cuBLAS Error in %s at line %d: %d\n", \
-                    __FILE__, __LINE__, err); \
-            exit(EXIT_FAILURE); \
-        } \
-    } while (0)
-
-
 void print_cuda_info() {
     cudaDeviceProp device_props;
     cudaGetDeviceProperties(&device_props, 0);
@@ -67,125 +44,115 @@ public:
     }
 
     void create() {
-        // Create handlers
-        CHECK_CUSOLVER(cusolverDnCreate(&m_cusolver));
-        CHECK_CUBLAS(cublasCreate(&m_cublas));
         // Create CUDA stream
         CHECK_CUDA(cudaStreamCreate(&m_stream));
-        // Set handler streams
-        CHECK_CUSOLVER(cusolverDnSetStream(m_cusolver, m_stream));
-        CHECK_CUBLAS(cublasSetStream(m_cublas, m_stream));
     }
 
     void destroy() {
-        CHECK_CUSOLVER(cusolverDnDestroy(m_cusolver));
-        CHECK_CUBLAS(cublasDestroy(m_cublas));
         CHECK_CUDA(cudaStreamDestroy(m_stream)); // destroy stream last
     }
 
-    cusolverDnHandle_t cusolver() {return(m_cusolver);}
     cudaStream_t stream() {return(m_stream);}
-    cublasHandle_t cublas() {return(m_cublas);}
     void sync() {CHECK_CUDA(cudaStreamSynchronize(m_stream));}
 
 private:
-    cusolverDnHandle_t m_cusolver = nullptr;
     cudaStream_t m_stream = nullptr;
-    cublasHandle_t m_cublas = nullptr;
     
     CtxManager() = default;
     ~CtxManager() = default;
 };
 
+template<typename T>
+void launch_fill_kernel(Location location, T* ptr, i64 stride, T value, i64 size) {
+    switch (location) {
+    case Location::Device: {
+        constexpr Dim3<i32> block{1024};
+        const Dim3<i64> n{(i64)size};
+        kernel_fill<T><<<grid_size(block, n)(), block()>>>(ptr, stride, value, size);
+        CHECK_CUDA(cudaGetLastError());
+        break;
+    }
+    case Location::Host: {
+        if (stride == 1) {
+            std::fill(ptr, ptr + size, value);
+        } else {
+            for (i64 i = 0; i < size; i++) {
+                ptr[i * stride] = value;
+            }
+        }
+        break;
+    }
+    }
+}
+
 /// @brief Memory manager implementation for the CUDA backend
-class MemoryCUDA final : public Memory {
+class CUDA_Memory final : public Memory {
     public:
-        MemoryCUDA() : Memory(false) {}
-        ~MemoryCUDA() = default;
-        void* alloc(MemoryLocation location, std::size_t size) const override {
+        CUDA_Memory() : Memory(false) {}
+        ~CUDA_Memory() = default;
+        __host__ void* alloc(Location location, i64 size) const override {
             void* res = nullptr;
             switch (location) {
-                case MemoryLocation::Device: CHECK_CUDA(cudaMalloc(&res, size)); break;
-                case MemoryLocation::Host: CHECK_CUDA(cudaMallocHost(&res, size)); break;
+                case Location::Device: CHECK_CUDA(cudaMalloc(&res, size)); break;
+                case Location::Host: CHECK_CUDA(cudaMallocHost(&res, size)); break;
             }
             return res;
         }
 
-        void free(MemoryLocation location, void* ptr) const override {
+        __host__ void free(Location location, void* ptr) const override {
             switch (location) {
-                case MemoryLocation::Device: CHECK_CUDA(cudaFree(ptr)); break;
-                case MemoryLocation::Host: CHECK_CUDA(cudaFreeHost(ptr)); break;
+                case Location::Device: CHECK_CUDA(cudaFree(ptr)); break;
+                case Location::Host: CHECK_CUDA(cudaFreeHost(ptr)); break;
             }
         }
 
-        void copy(MemoryTransfer transfer, void* dst, const void* src, std::size_t size) const override {
-            switch (transfer) {
-                case MemoryTransfer::HostToDevice: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyHostToDevice)); break;
-                case MemoryTransfer::DeviceToHost: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost)); break;
-                case MemoryTransfer::HostToHost: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyHostToHost)); break;
-                case MemoryTransfer::DeviceToDevice: CHECK_CUDA(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToDevice)); break;
+        __host__ void copy(Location dst_loc, void* dst, i64 dst_stride, Location src_loc, const void* src, i64 src_stride, i64 elem_size, i64 size) const override {
+            cudaMemcpyKind kind;
+            if (dst_loc == Location::Host && src_loc == Location::Device) {
+                kind = cudaMemcpyDeviceToHost;
+            } else if (dst_loc == Location::Device && src_loc == Location::Host) {
+                kind = cudaMemcpyHostToDevice;
+            } else if (dst_loc == Location::Device && src_loc == Location::Device) {
+                kind = cudaMemcpyDeviceToDevice;
+            } else if (dst_loc == Location::Host && src_loc == Location::Host) {
+                kind = cudaMemcpyHostToHost;
+            }
+
+            if (dst_stride == 1 && src_stride == 1) {
+                CHECK_CUDA(cudaMemcpy(dst, src, size * elem_size, kind));
+            } else {
+                CHECK_CUDA(cudaMemcpy2D(dst, dst_stride * elem_size, src, src_stride * elem_size, elem_size, size, kind));
             }
         }
-        void fill_f32(MemoryLocation location, float* ptr, float value, std::size_t size) const override {
-            switch (location) {
-                case MemoryLocation::Device: {
-                    constexpr Dim3<u32> block{1024};
-                    const Dim3<u64> n{size};
-                    kernel_fill_f32<block.x><<<grid_size(block, n)(), block()>>>(ptr, value, size);
-                    CHECK_CUDA(cudaGetLastError());
-                    break;
-                }
-                case MemoryLocation::Host: {
-                    std::fill(ptr, ptr + size, value);
-                    break;
-                }
-            }
-        };
+
+        __host__ void fill(Location location, float* ptr, i64 stride, float value, i64 size) const override { launch_fill_kernel(location, ptr, stride, value, size); }
+        __host__ void fill(Location location, double *ptr, i64 stride, double value, i64 size) const override { launch_fill_kernel(location, ptr, stride, value, size); }
 };
 
-BackendCUDA::BackendCUDA() : Backend(std::make_unique<MemoryCUDA>())  {
+BackendCUDA::BackendCUDA() : Backend(create_memory_manager(), create_blas())  {
+    name = "CUDA";
     print_cuda_info();
     CtxManager::getInstance().create();
+    d_cl = (f32*)memory->alloc(Location::Device, sizeof(f32));
+    d_cd = (f32*)memory->alloc(Location::Device, sizeof(f32));
+    d_cm_x = (f32*)memory->alloc(Location::Device, sizeof(f32));
+    d_cm_y = (f32*)memory->alloc(Location::Device, sizeof(f32));
+    d_cm_z = (f32*)memory->alloc(Location::Device, sizeof(f32));
+    d_mac = (f32*)memory->alloc(Location::Device, sizeof(f32));
 }
 
 BackendCUDA::~BackendCUDA() {
+    memory->free(Location::Device, d_cl);
+    memory->free(Location::Device, d_cd);
+    memory->free(Location::Device, d_cm_x);
+    memory->free(Location::Device, d_cm_y);
+    memory->free(Location::Device, d_cm_z);
+    memory->free(Location::Device, d_mac);
     CtxManager::getInstance().destroy();
 }
 
-void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) {
-    assert(gamma_delta.layout.dims() == 1);
-    assert(gamma.layout.dims() == 1);
-    
-    for (const auto& surf : gamma_delta.layout.surfaces())  {
-        f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
-        const f32* s_gamma = gamma.ptr + surf.offset;
-        memory->copy(MemoryTransfer::DeviceToDevice, s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
-        
-        constexpr Dim3<u32> block{32, 32};
-        const Dim3<u64> n{surf.nc-1, surf.ns};
-        kernel_gamma_delta<block.x, block.y><<<grid_size(block, n)(), block()>>>(n.x, n.y, s_gamma_delta + surf.ns, s_gamma + surf.ns);
-        CHECK_CUDA(cudaGetLastError());
-    };
-
-    // tf::Taskflow taskflow;
-
-    // auto kernels = taskflow.emplace([&](tf::cudaFlow& cf){
-    //     for (const auto& surf : gamma_delta.layout.surfaces())  {
-    //         f32* s_gamma_delta = gamma_delta.ptr + surf.offset;
-    //         const f32* s_gamma = gamma.ptr + surf.offset;
-    //         tf::cudaTask copy = cf.copy(s_gamma_delta, s_gamma, surf.ns * sizeof(*s_gamma_delta));
-                
-    //         constexpr Dim3<u32> block{32, 32};
-    //         const Dim3<u64> n{surf.nc-1, surf.ns};
-    //         tf::cudaTask kernel = cf.kernel(grid_size(block, n), block, 0, kernel_gamma_delta, n.x, n.y, s_gamma_delta + surf.ns, s_gamma + surf.ns).succede(copy);
-    //     };
-    // });
-    // auto check = taskflow.emplace([&](){
-    //     CHECK_CUDA(cudaGetLastError());
-    // }).succede(kernels);
-
-    // Executor::get().run(taskflow).wait();
-}
+std::unique_ptr<Memory> BackendCUDA::create_memory_manager() { return std::make_unique<CUDA_Memory>(); }
+// std::unique_ptr<Kernels> create_kernels() { return std::make_unique<CPU_Kernels>(); }
 
 /// @brief Assemble the left hand side matrix
 /// @details
@@ -198,71 +165,111 @@ void BackendCUDA::gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCUDA::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) {
-    assert(condition.size() == colloc.layout.surfaces().size());
+void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView3D<Location::Device>& verts_wake, std::vector<i32>& condition, i32 iteration) {
+    // tiny::ScopedTimer timer("LHS");
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
+    constexpr Dim3<i32> block{32, 16};
+    tf::Taskflow graph;
 
-    for (u32 i = 0; i < colloc.layout.surfaces().size(); i++) {
-        f32* lhs_section = lhs.ptr + colloc.layout.offset(i) * lhs.layout.stride();
-        
-        f32* vwing_section = verts_wing.ptr + verts_wing.layout.offset(i);
-        f32* vwake_section = verts_wake.ptr + verts_wake.layout.offset(i);
-        const u64 end_wing = (colloc.layout.nc(i) - 1) * colloc.layout.ns(i);
-        
-        constexpr Dim3<u32> block{32, 16};
-        const Dim3<u64> n{lhs.layout.m(), end_wing};
-        // wing pass
-        kernel_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
-            n.x,
-            n.y,
-            lhs_section,
-            colloc.ptr,
-            colloc.layout.stride(),
-            vwing_section,
-            verts_wing.layout.stride(),
-            verts_wing.layout.ns(i),
-            normals.ptr, normals.layout.stride(),
-            sigma_vatistas
-        );
-        CHECK_CUDA(cudaGetLastError());
+    auto begin = graph.placeholder();
+    auto end = graph.placeholder();
 
-        const Dim3<u64> n2{lhs.layout.m(), colloc.layout.ns(i)};
-        // last wing row
-        kernel_influence<block.x, block.y><<<grid_size(block, n2)(), block()>>>(
-            n2.x,
-            n2.y, 
-            lhs_section + end_wing * lhs.layout.stride(),
-            colloc.ptr,
-            colloc.layout.stride(),
-            vwing_section + (verts_wing.layout.nc(i)-2)*verts_wing.layout.ns(i),
-            verts_wing.layout.stride(),
-            verts_wing.layout.ns(i),
-            normals.ptr,
-            normals.layout.stride(),
-            sigma_vatistas
-        );
-        CHECK_CUDA(cudaGetLastError());
+    i64 offset_j = 0;
+    for (i32 m_j = 0; m_j < colloc.size(); m_j++) {
+        i64 offset_i = 0;
+        for (i32 m_i = 0; m_i < colloc.size(); m_i++) {
+            const i64 condition_idx = m_i + m_j * static_cast<i64>(colloc.size());
+            auto colloc_i = colloc[m_i];
+            auto colloc_j = colloc[m_j];
+            auto normals_i = normals[m_i];
+            auto verts_wing_j = verts_wing[m_j];
+            auto verts_wake_j = verts_wake[m_j];
 
-        while (condition[i] < iteration) {
-            const Dim3<u64> n3{lhs.layout.m(), colloc.layout.ns(i)};
-            // each wake row
-            kernel_influence<block.x, block.y><<<grid_size(block, n3)(), block()>>>(
-                n3.x,
-                n3.y,
-                lhs_section + end_wing * lhs.layout.stride(),
-                colloc.ptr,
-                colloc.layout.stride(),
-                vwake_section + (verts_wake.layout.nc(i) - condition[i] - 2) * verts_wake.layout.ns(i),
-                verts_wake.layout.stride(),
-                verts_wake.layout.ns(i), 
-                normals.ptr,
-                normals.layout.stride(),
-                sigma_vatistas
-            );
-            CHECK_CUDA(cudaGetLastError());
-            condition[i]++;
+            f32* lhs_section = lhs.ptr() + offset_i + offset_j * lhs.stride(1);
+
+            const i64 zero = 0;
+            const i64 end_wing = (colloc_j.shape(1) - 1) * colloc_j.shape(0);
+            
+            auto wing_pass = graph.emplace([=](){
+                const Dim3<i64> n{colloc_i.stride(2), end_wing};
+                kernel_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+                    n.x,
+                    n.y,
+                    lhs_section,
+                    lhs.stride(1),
+                    colloc_i.ptr(),
+                    colloc_i.stride(2),
+                    verts_wing_j.ptr(),
+                    verts_wing_j.stride(2),
+                    verts_wing_j.stride(1),
+                    normals_i.ptr(),
+                    normals_i.stride(2),
+                    sigma_vatistas
+                );
+                CHECK_CUDA(cudaGetLastError());
+            }).name("wing pass");
+
+            auto last_row = graph.emplace([=](){
+                const Dim3<i64> n{colloc_i.stride(2), colloc_j.shape(0)};
+                kernel_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+                    n.x,
+                    n.y,
+                    lhs_section + end_wing * lhs.stride(1),
+                    lhs.stride(1),
+                    colloc_i.ptr(),
+                    colloc_i.stride(2),
+                    verts_wing_j.ptr() + verts_wing_j.offset({0, -2, 0}),
+                    verts_wing_j.stride(2),
+                    verts_wing_j.stride(1),
+                    normals_i.ptr(),
+                    normals_i.stride(2),
+                    sigma_vatistas
+                );
+                CHECK_CUDA(cudaGetLastError());
+            }).name("last_row");            
+
+            auto cond = graph.emplace([=, &condition] {
+                return condition[condition_idx] < iteration ? 0 : 1; // 0 means continue, 1 means break (exit loop)
+            }).name("condition");
+
+            auto wake_pass = graph.emplace([=, &condition](){
+                const Dim3<i64> n{colloc_i.stride(2), colloc_j.shape(0)};
+                kernel_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+                    n.x,
+                    n.y,
+                    lhs_section + end_wing * lhs.stride(1),
+                    lhs.stride(1),
+                    colloc_i.ptr(),
+                    colloc_i.stride(2),
+                    verts_wake_j.ptr() + verts_wake_j.offset({0, -2-condition[condition_idx], 0}),
+                    verts_wake_j.stride(2),
+                    verts_wake_j.stride(1),
+                    normals_i.ptr(),
+                    normals_i.stride(2),
+                    sigma_vatistas
+                );
+                CHECK_CUDA(cudaGetLastError());
+            }).name("wake pass");
+            
+            auto back = graph.emplace([=, &condition]{
+                ++condition[condition_idx];
+                return 0; // 0 means continue
+            }).name("while back");
+
+            begin.precede(wing_pass, last_row);
+            wing_pass.precede(end);
+            last_row.precede(cond);
+            cond.precede(wake_pass, end); // 0 and 1
+            wake_pass.precede(back);
+            back.precede(cond);
+
+            offset_i += colloc[m_i].stride(2); // this is assuming contiguous view
         }
+        offset_j += colloc[m_j].stride(2);  // this is assuming contiguous view
     }
+
+    // graph.dump(std::cout);
+    Executor::get().run(graph).wait();
 }
 
 /// @brief Add velocity contributions to the right hand side vector
@@ -271,289 +278,303 @@ void BackendCUDA::lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, c
 /// @param rhs right hand side vector
 /// @param normals normals of all surfaces
 /// @param velocities displacement velocities of all surfaces
-void BackendCUDA::rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) {
+void BackendCUDA::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& velocities) {
     // const tiny::ScopedTimer timer("RHS");
-    assert(rhs.layout.stride() == rhs.size()); // single dim
-    assert(rhs.layout.stride() == normals.layout.stride());
-    assert(rhs.layout.stride() == velocities.layout.stride());
-    assert(rhs.layout.dims() == 1);
-
-    constexpr Dim3<u32> block{768};
-    const Dim3<u64> n{rhs.size()};
-    kernel_rhs_assemble_velocities<block.x><<<grid_size(block, n)(), block()>>>(n.x, rhs.ptr, velocities.ptr, velocities.layout.stride(), normals.ptr, normals.layout.stride());
+    
+    i64 offset = 0;
+    for (i64 m = 0; m < normals.size(); m++) {
+        assert(offset <= rhs.size());
+        const auto& normals_i = normals[m];
+        const auto& velocities_m = velocities[m];
+        constexpr Dim3<i32> block{768};
+        const Dim3<i64> n{normals_i.stride(2)};
+        kernel_rhs_assemble_velocities<block.x><<<grid_size(block, n)(), block()>>>(
+            n.x,
+            rhs.ptr() + offset,
+            velocities_m.ptr(),
+            velocities_m.stride(2),
+            normals_i.ptr(),
+            normals_i.stride(2)
+        );
+        offset += normals_i.stride(2);
+    }
 }
 
-void BackendCUDA::rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) {
+void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, i32 iteration) {
     if (iteration == 0) return; // cuda doesnt support 0 sized domain
-    constexpr Dim3<u32> block{32, 16};
+    constexpr Dim3<i32> block{32, 16};
 
-    for (u32 i = 0; i < rhs.layout.surfaces().size(); i++) {
-        const u64 wake_m  = iteration;
-        const u64 wake_n  = verts_wake.layout.ns(i) - 1;
-        const Dim3<u64> n{wake_m * wake_n, rhs.layout.size()};
+    for (i32 i = 0; i < normals.size(); i++) {
+        const auto& colloc_i = colloc[i];
+        const auto& normals_i = normals[i];
+        const auto& gamma_wake_i = gamma_wake[i];
+        const auto& verts_wake_i = verts_wake[i];
+        const i64 wake_m  = iteration;
+        const i64 wake_n  = verts_wake_i.shape(0) - 1;
+        const Dim3<i64> n{wake_m * wake_n, rhs.size()};
         kernel_wake_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
             wake_m, 
             wake_n,
-            rhs.layout.size(),
-            colloc.ptr,
-            colloc.layout.stride(),
-            normals.ptr,
-            normals.layout.stride(),
-            verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i),
-            verts_wake.layout.stride(),
-            gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration) * gamma_wake.layout.ns(i),
-            rhs.ptr,
+            rhs.size(),
+            colloc_i.ptr(),
+            colloc_i.stride(2),
+            normals_i.ptr(),
+            normals_i.stride(2),
+            verts_wake_i.ptr() + verts_wake_i.offset({0, -1-iteration, 0}),
+            verts_wake_i.stride(2),
+            gamma_wake_i.ptr() + gamma_wake_i.offset({0, gamma_wake_i.shape(1) - iteration}),
+            rhs.ptr(),
             sigma_vatistas
         );
         CHECK_CUDA(cudaGetLastError());
     }
 }
 
-void BackendCUDA::displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) {
+void BackendCUDA::displace_wake_rollup(MultiTensorView3D<Location::Device>& wake_rollup, const MultiTensorView3D<Location::Device>& verts_wake, const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wake, f32 dt, i32 iteration) {
     // TODO
 }
 
-void BackendCUDA::gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) {
-    // const tiny::ScopedTimer timer("Shed Gamma");
-
-    memory->copy(MemoryTransfer::DeviceToDevice, gamma_wing_prev.ptr, gamma_wing.ptr, gamma_wing.size_bytes());
-    for (u64 i = 0; i < gamma_wake.layout.surfaces().size(); i++) {
-        assert(iteration < gamma_wake.layout.nc(i));
-        f32* gamma_wake_ptr = gamma_wake.ptr + gamma_wake.layout.offset(i) + (gamma_wake.layout.nc(i) - iteration - 1) * gamma_wake.layout.ns(i);
-        f32* gamma_wing_ptr = gamma_wing.ptr + gamma_wing.layout.offset(i) + (gamma_wing.layout.nc(i) - 1) * gamma_wing.layout.ns(i); // last row
-        memory->copy(MemoryTransfer::DeviceToDevice, gamma_wake_ptr, gamma_wing_ptr, gamma_wing.layout.ns(i) * sizeof(f32));
-    }
-}
-
-void BackendCUDA::lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
-    int bufsize = 0;
-    CHECK_CUSOLVER(cusolverDnSgetrf_bufferSize(CtxManager::getInstance().cusolver(), lhs.layout.m(), lhs.layout.n(), lhs.ptr, lhs.layout.stride(), &bufsize));
-    d_solver_info = (i32*)memory->alloc(MemoryLocation::Device, sizeof(i32));
-    d_solver_buffer = (f32*)memory->alloc(MemoryLocation::Device, sizeof(f32) * bufsize);
-    d_solver_ipiv = (i32*)memory->alloc(MemoryLocation::Device, sizeof(i32) * lhs.layout.n());
-}
-
-void BackendCUDA::lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) {
-    // const tiny::ScopedTimer timer("Factor");
-    assert(lhs.layout.m() == lhs.layout.n()); // square matrix
-    const int32_t n = static_cast<int32_t>(lhs.layout.n());
-    int h_info = 0;
-
-    CHECK_CUSOLVER(cusolverDnSgetrf(CtxManager::getInstance().cusolver(), n, n, lhs.ptr, n, d_solver_buffer, d_solver_ipiv, d_solver_info));
-    memory->copy(MemoryTransfer::DeviceToHost, &h_info, d_solver_info, sizeof(int));
-    if (h_info != 0) std::printf("Error: LU factorization failed\n");
-};
-
-void BackendCUDA::lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) {
-    // tiny::ScopedTimer timer("Solve");
-    //default_backend.solve();
-    const i32 n = static_cast<int32_t>(lhs.layout.n());
-    i32 h_info = 0;
-
-    memory->copy(MemoryTransfer::DeviceToDevice, gamma.ptr, rhs.ptr, rhs.size_bytes());
-    CHECK_CUSOLVER(cusolverDnSgetrs(CtxManager::getInstance().cusolver(), CUBLAS_OP_N, n, 1, lhs.ptr, n, d_solver_ipiv, gamma.ptr, n, d_solver_info));
-    memory->copy(MemoryTransfer::DeviceToHost, &h_info, d_solver_info, sizeof(int));
-    if (h_info != 0) std::printf("Error: LU solve failed\n");
-}
-
-f32 BackendCUDA::coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const FlowData& flow, f32 area) {
+// TODO: deprecate
+f32 BackendCUDA::coeff_steady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) {
     f32 h_cl = 0.0f;
-    cudaMemset(d_val, 0, sizeof(f32));
-    constexpr Dim3<u32> block{32, 16};
-    const Dim3<u64> n{gamma_delta.layout.ns(), gamma_delta.layout.nc()};
+    cudaMemset(d_cl, 0, sizeof(f32));
+    constexpr Dim3<i32> block{32, 16};
+    const Dim3<i64> n{gamma_delta.shape(0), gamma_delta.shape(1)};
     kernel_coeff_steady_cl_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
         n.y,
         n.x,
-        verts_wing.ptr,
-        verts_wing.layout.ld(),
-        verts_wing.layout.stride(),
-        gamma_delta.ptr,
-        gamma_delta.layout.ld(),
+        verts_wing.ptr(),
+        verts_wing.stride(1),
+        verts_wing.stride(2),
+        gamma_delta.ptr(),
+        gamma_delta.stride(1),
         float3{flow.freestream.x, flow.freestream.y, flow.freestream.z},
         float3{flow.lift_axis.x, flow.lift_axis.y, flow.lift_axis.z},
         flow.rho,
-        d_val
+        d_cl
     );
     CHECK_CUDA(cudaGetLastError());
-    memory->copy(MemoryTransfer::DeviceToHost, &h_cl, d_val, sizeof(f32));
+    memory->copy(Location::Host, &h_cl, 1, Location::Device, d_cl, 1, sizeof(f32), 1);
     CtxManager::getInstance().sync();
     
     return h_cl / (0.5f * flow.rho * linalg::length2(flow.freestream) * area);
 }
 
-f32 BackendCUDA::coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow, const View<f32, MultiSurface>& areas) {
-    f32 cl = 0.0f;
-    f32 total_area = 0.0f;
-    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
-        const auto gamma_delta_local = gamma_delta.layout.subview(gamma_delta.ptr, i);
-        const auto areas_local = areas.layout.subview(areas.ptr, i);
-        const f32 area_local = mesh_area(areas_local);
-        const f32 wing_cl = coeff_steady_cl_single(verts_wing_local, gamma_delta_local, flow, area_local);
-        cl += wing_cl * area_local;
-        total_area += area_local;
-    }
-    cl /= total_area;
-    return cl;
-}
-
-f32 BackendCUDA::coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& velocities, const View<f32, SingleSurface>& areas, const View<f32, SingleSurface>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) {    
-    const f32 rho = 1.0f; // TODO: remove hardcoded rho
-    f32 h_cl = 0.0f;
-    cudaMemset(d_val, 0, sizeof(f32));
-    constexpr Dim3<u32> block{32, 16};
-    const Dim3<u64> n{gamma.layout.ns(), gamma.layout.nc()};
-    kernel_coeff_unsteady_cl_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
-        n.y,
-        n.x,
-        gamma.layout.ld(),
-        verts_wing.ptr,
-        verts_wing.layout.stride(),
-        gamma_delta.ptr,
-        gamma.ptr,
-        gamma_prev.ptr,
-        velocities.ptr,
-        velocities.layout.stride(),
-        areas.ptr,
-        normals.ptr,
-        normals.layout.stride(),
-        float3{freestream.x, freestream.y, freestream.z},
-        dt,
-        d_val
+void BackendCUDA::forces_unsteady(
+    const TensorView3D<Location::Device>& verts_wing,
+    const TensorView2D<Location::Device>& gamma_delta,
+    const TensorView2D<Location::Device>& gamma,
+    const TensorView2D<Location::Device>& gamma_prev,
+    const TensorView3D<Location::Device>& velocities,
+    const TensorView2D<Location::Device>& areas,
+    const TensorView3D<Location::Device>& normals,
+    const TensorView3D<Location::Device>& forces,
+    f32 dt
+)
+{
+    constexpr Dim3<i32> block{32, 16};
+    const Dim3<i64> n{gamma_delta.shape(0), gamma_delta.shape(1)};
+    DataDims dims;
+    dims.panel_shape_0 = normals.shape(0);
+    dims.panel_shape_1 = normals.shape(1);
+    dims.panel_stride_1 = normals.stride(1);
+    dims.panel_stride_2 = normals.stride(2);
+    dims.vertex_shape_0 = verts_wing.shape(0);
+    dims.vertex_shape_1 = verts_wing.shape(1);
+    dims.vertex_stride_1 = verts_wing.stride(1);
+    dims.vertex_stride_2 = verts_wing.stride(2);
+    kernel_forces_unsteady<<<grid_size(block, n)(), block()>>>(
+        dims,
+        verts_wing.ptr(),
+        gamma_delta.ptr(),
+        gamma.ptr(),
+        gamma_prev.ptr(),
+        velocities.ptr(),
+        areas.ptr(),
+        normals.ptr(),
+        forces.ptr(),
+        dt
     );
     CHECK_CUDA(cudaGetLastError());
-    memory->copy(MemoryTransfer::DeviceToHost, &h_cl, d_val, sizeof(f32));
-    CtxManager::getInstance().sync();
-    
+    // stream sync
+}
+
+f32 BackendCUDA::coeff_cl(
+    const TensorView3D<Location::Device>& forces,
+    const linalg::float3& lift_axis,
+    const linalg::float3& freestream,
+    const f32 rho,
+    const f32 area
+)
+{
+    cudaMemset(d_cl, 0, sizeof(f32));
+    constexpr Dim3<i32> block{32, 16};
+    const Dim3<i64> n{forces.shape(0), forces.shape(1)};
+    DataDims dims;
+    dims.panel_shape_0 = forces.shape(0);
+    dims.panel_shape_1 = forces.shape(1);
+    dims.panel_stride_1 = forces.stride(1);
+    dims.panel_stride_2 = forces.stride(2);
+    kernel_coeff_cl<<<grid_size(block, n)(), block()>>>(
+        dims,
+        forces.ptr(),
+        float3{lift_axis.x, lift_axis.y, lift_axis.z},
+        d_cl
+    );
+    CHECK_CUDA(cudaGetLastError());
+    // stream sync
+    f32 h_cl = 0.0f;
+    memory->copy(Location::Host, &h_cl, 1, Location::Device, d_cl, 1, sizeof(f32), 1);
     return h_cl / (0.5f * rho * linalg::length2(freestream) * area);
 }
 
-f32 BackendCUDA::coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, const linalg::alias::float3& freestream, f32 dt) {
-        f32 cl = 0.0f;
-    f32 total_area = 0.0f;
-    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        const auto verts_wing_local = verts_wing.layout.subview(verts_wing.ptr, i);
-        const auto areas_local = areas.layout.subview(areas.ptr, i);
-        const auto gamma_delta_local = gamma_wing_delta.layout.subview(gamma_wing_delta.ptr, i);
-        const auto gamma_wing_local = gamma_wing.layout.subview(gamma_wing.ptr, i);
-        const auto gamma_wing_prev_local = gamma_wing_prev.layout.subview(gamma_wing_prev.ptr, i);
-        const auto velocities_local = velocities.layout.subview(velocities.ptr, i);
-        const auto normals_local = normals.layout.subview(normals.ptr, i);
+linalg::float3 BackendCUDA::coeff_cm(
+    const TensorView3D<Location::Device>& forces,
+    const TensorView3D<Location::Device>& verts_wing,
+    const linalg::float3& ref_pt,
+    const linalg::float3& freestream,
+    const f32 rho,
+    const f32 area,
+    const f32 mac
+)
+{
+    cudaMemset(d_cm_x, 0, sizeof(f32));
+    cudaMemset(d_cm_y, 0, sizeof(f32));
+    cudaMemset(d_cm_z, 0, sizeof(f32));
 
-        const f32 area_local = mesh_area(areas_local);
-        const f32 wing_cl = coeff_unsteady_cl_single(verts_wing_local, gamma_delta_local, gamma_wing_local, gamma_wing_prev_local, velocities_local, areas_local, normals_local, freestream, dt, area_local);
-        cl += wing_cl * area_local;
-        total_area += area_local;
-    }
-    cl /= total_area;
-    return cl;
-}
-
-f32 BackendCUDA::coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) {
-    f32 h_cd = 0.0f;
-    cudaMemset(d_val, 0, sizeof(f32));
-    constexpr Dim3<u32> block{64, 8};
-    const Dim3<u64> n{verts_wake.layout.ns()-1, verts_wake.layout.ns()-1};
-    kernel_coeff_steady_cd_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
-        verts_wake.ptr,
-        verts_wake.layout.stride(),
-        verts_wake.layout.nc(),
-        verts_wake.layout.ns(),
-        gamma_wake.ptr,
-        sigma_vatistas,
-        d_val
+    constexpr Dim3<i32> block{32, 16};
+    const Dim3<i64> n{forces.shape(0), forces.shape(1)};
+    DataDims dims;
+    dims.panel_shape_0 = forces.shape(0);
+    dims.panel_shape_1 = forces.shape(1);
+    dims.panel_stride_1 = forces.stride(1);
+    dims.panel_stride_2 = forces.stride(2);
+    dims.vertex_shape_0 = verts_wing.shape(0);
+    dims.vertex_shape_1 = verts_wing.shape(1);
+    dims.vertex_stride_1 = verts_wing.stride(1);
+    dims.vertex_stride_2 = verts_wing.stride(2);
+    kernel_coeff_cm<<<grid_size(block, n)(), block()>>>(
+        dims,
+        forces.ptr(),
+        verts_wing.ptr(),
+        float3{ref_pt.x, ref_pt.y, ref_pt.z},
+        d_cm_x,
+        d_cm_y,
+        d_cm_z
     );
     CHECK_CUDA(cudaGetLastError());
-    memory->copy(MemoryTransfer::DeviceToHost, &h_cd, d_val, sizeof(f32));
+    // stream sync
+    linalg::float3 h_cm;
+    memory->copy(Location::Host, &h_cm.x, 1, Location::Device, d_cm_x, 1, sizeof(f32), 1);
+    memory->copy(Location::Host, &h_cm.y, 1, Location::Device, d_cm_y, 1, sizeof(f32), 1);
+    memory->copy(Location::Host, &h_cm.z, 1, Location::Device, d_cm_z, 1, sizeof(f32), 1);
+    
+    return h_cm / (0.5f * rho * linalg::length2(freestream) * area * mac);
+}
+
+f32 BackendCUDA::coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
+    f32 h_cd = 0.0f;
+    cudaMemset(d_cd, 0, sizeof(f32));
+    constexpr Dim3<i32> block{64, 8};
+    const Dim3<i64> n{verts_wake.shape(0)-1, verts_wake.shape(0)-1};
+    kernel_coeff_steady_cd_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+        verts_wake.ptr(),
+        verts_wake.stride(2),
+        verts_wake.shape(1),
+        verts_wake.shape(0),
+        gamma_wake.ptr(),
+        sigma_vatistas,
+        d_cd
+    );
+    CHECK_CUDA(cudaGetLastError());
+    memory->copy(Location::Host, &h_cd, 1, Location::Device, d_cd, 1, sizeof(f32), 1);
     CtxManager::getInstance().sync();
     return h_cd / (linalg::length2(flow.freestream) * area);
 }
 
-// TODO: move in backend.cpp ?
-f32 BackendCUDA::coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& gamma_wake, const FlowData& flow, const View<f32, MultiSurface>& areas) {
-    // const tiny::ScopedTimer timer("Compute CL");
-    f32 cd = 0.0f;
-    f32 total_area = 0.0f;
-    for (u64 i = 0; i < verts_wake.layout.surfaces().size(); i++) {
-        const auto verts_wake_local = verts_wake.layout.subview(verts_wake.ptr, i);
-        const auto gamma_wake_local = gamma_wake.layout.subview(gamma_wake.ptr, i);
-        const auto areas_local = areas.layout.subview(areas.ptr, i);
-        const f32 area_local = mesh_area(areas_local);
-        const f32 wing_cd = coeff_steady_cd_single(verts_wake_local, gamma_wake_local, flow, area_local);
-        cd += wing_cd * area_local;
-        total_area += area_local;
-    }
-    cd /= total_area;
-    return cd;
-}
+void BackendCUDA::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) {
+    for (int m = 0; m < colloc.size(); m++) {
+        const auto& colloc_i = colloc[m];
+        const auto& normals_i = normals[m];
+        const auto& areas_i = areas[m];
+        const auto& verts_wing_m = verts_wing[m];
 
-void BackendCUDA::mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) {
-    for (int m = 0; m < colloc.layout.surfaces().size(); m++) {
-        const f32* verts_wing_ptr = verts_wing.ptr + verts_wing.layout.offset(m);
-        f32* colloc_ptr = colloc.ptr + colloc.layout.offset(m);
-        f32* normals_ptr = normals.ptr + normals.layout.offset(m);
-        f32* areas_ptr = areas.ptr + areas.layout.offset(m);
-
-        constexpr Dim3<u32> block{24, 32}; // ns, nc
-        const Dim3<u64> n{colloc.layout.ns(m), colloc.layout.nc(m)};
-        kernel_mesh_metrics<block.x, block.y><<<grid_size(block, n)(), block()>>>(n.y, n.x, colloc_ptr, colloc.layout.stride(), normals_ptr, normals.layout.stride(), areas_ptr, verts_wing_ptr, verts_wing.layout.stride(), alpha_rad);
+        constexpr Dim3<i32> block{32, 16}; // ns, nc
+        const Dim3<i64> n{colloc_i.shape(0), colloc_i.shape(1)};
+        kernel_mesh_metrics<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+            n.y,
+            n.x,
+            colloc_i.ptr(),
+            colloc_i.stride(2),
+            normals_i.ptr(),
+            normals_i.stride(2),
+            areas_i.ptr(),
+            verts_wing_m.ptr(),
+            verts_wing_m.stride(2),
+            alpha_rad
+        );
     }
 }
 
-f32 BackendCUDA::mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) {
-    // TODO
-    return 0.0f;
-}
-
-void BackendCUDA::displace_wing(const View<f32, Tensor<3>>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) {
-    // const tiny::ScopedTimer t("Mesh::move");
-    assert(transforms.layout.shape(2) == verts_wing.layout.surfaces().size());
-    assert(verts_wing.layout.size() == verts_wing_init.layout.size());
-
-    const f32 alpha = 1.0f;
-    const f32 beta = 0.0f;
-
-    // TODO: parallel for
-    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        CHECK_CUBLAS(cublasSgemm(
-            CtxManager::getInstance().cublas(),
-            CUBLAS_OP_N,
-            CUBLAS_OP_T,
-            static_cast<int>(verts_wing.layout.surface(i).size()),
-            4,            
-            4,
-            &alpha,
-            verts_wing_init.ptr + verts_wing_init.layout.offset(i),
-            static_cast<int>(verts_wing_init.layout.stride()),
-            transforms.ptr + transforms.layout.stride(2)*i,
-            4,
-            &beta,
-            verts_wing.ptr + verts_wing.layout.offset(i),
-            static_cast<int>(verts_wing.layout.stride())
-        ));
-    }
-}
-
-void BackendCUDA::wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, u32 iteration) {
-    assert(verts_wing.layout.surfaces().size() == verts_wake.layout.surfaces().size());
-    for (u64 i = 0; i < verts_wing.layout.surfaces().size(); i++) {
-        assert(iteration < verts_wake.layout.nc(i));
-        f32* vwing = verts_wing.ptr + verts_wing.layout.offset(i) + (verts_wing.layout.nc(i) - 1) * verts_wing.layout.ns(i);
-        f32* vwake = verts_wake.ptr + verts_wake.layout.offset(i) + (verts_wake.layout.nc(i) - iteration - 1) * verts_wake.layout.ns(i);
-
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 0*verts_wake.layout.stride(), vwing + 0*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 1*verts_wake.layout.stride(), vwing + 1*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
-        memory->copy(MemoryTransfer::DeviceToDevice, vwake + 2*verts_wake.layout.stride(), vwing + 2*verts_wing.layout.stride(), verts_wing.layout.ns(i) * sizeof(f32));
-    }
-}
-
-f32 BackendCUDA::mesh_area(const View<f32, SingleSurface>& areas) {
-    cudaMemset(d_val, 0, sizeof(f32));
-    constexpr Dim3<u32> block{512}; // ns, nc
-    const Dim3<u64> n{areas.layout.size()};
-    kernel_reduce<<<grid_size(block, n)(), block()>>>(n.x, areas.ptr, d_val);
+f32 BackendCUDA::mesh_mac(
+    const TensorView3D<Location::Device>& verts_wing,
+    const TensorView2D<Location::Device>& areas
+) 
+{
+    cudaMemset(d_mac, 0, sizeof(f32));
+    constexpr Dim3<i32> block{768};
+    const Dim3<i64> n{areas.shape(0)};
+    DataDims dims;
+    dims.panel_shape_0 = areas.shape(0);
+    dims.panel_shape_1 = areas.shape(1);
+    dims.vertex_shape_0 = verts_wing.shape(0);
+    dims.vertex_shape_1 = verts_wing.shape(1);
+    dims.vertex_stride_1 = verts_wing.stride(1);
+    dims.vertex_stride_2 = verts_wing.stride(2);
+    kernel_mac<<<grid_size(block, n)(), block()>>>(
+        dims,
+        verts_wing.ptr(),
+        d_mac
+    );
     CHECK_CUDA(cudaGetLastError());
-    f32 h_area;
-    memory->copy(MemoryTransfer::DeviceToHost, &h_area, d_val, sizeof(f32));
-    return h_area;
+    // stream sync
+    f32 h_mac = 0.0f;
+    memory->copy(Location::Host, &h_mac, 1, Location::Device, d_mac, 1, sizeof(f32), 1);
+    return h_mac / sum(areas);
+}
+
+f32 BackendCUDA::sum(const TensorView1D<Location::Device>& tensor) {
+    f32* d_sum = (f32*)memory->alloc(Location::Device, sizeof(*d_sum));
+    f32 h_sum;
+    cudaMemset(d_sum, 0, sizeof(f32)); // TODO: use fill instead ?
+    constexpr Dim3<i32> block{768};
+    const Dim3<i64> n{tensor.size()};
+    kernel_reduce<<<grid_size(block, n)(), block()>>>(
+        tensor.shape(0),
+        tensor.ptr(),
+        d_sum
+    );
+    CHECK_CUDA(cudaGetLastError());
+    memory->copy(Location::Host, &h_sum, 1, Location::Device, d_sum, 1, sizeof(f32), 1);
+    memory->free(Location::Device, d_sum);
+    return h_sum;
+}
+
+f32 BackendCUDA::sum(const TensorView2D<Location::Device>& tensor) {
+    f32* d_sum = (f32*)memory->alloc(Location::Device, sizeof(*d_sum));
+    f32 h_sum;
+    cudaMemset(d_sum, 0, sizeof(f32));
+    constexpr Dim3<i32> block{768};
+    const Dim3<i64> n{tensor.size()};
+    kernel_reduce_2D<<<grid_size(block, n)(), block()>>>(
+        tensor.shape(0),
+        tensor.shape(1),
+        tensor.ptr(),
+        tensor.stride(1),
+        d_sum
+    );
+    CHECK_CUDA(cudaGetLastError());
+    memory->copy(Location::Host, &h_sum, 1, Location::Device, d_sum, 1, sizeof(f32), 1);
+    memory->free(Location::Device, d_sum);
+    return h_sum;
 }

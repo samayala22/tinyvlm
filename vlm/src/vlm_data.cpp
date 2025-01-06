@@ -12,7 +12,7 @@ FlowData::FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f3
     stream_axis(compute_stream_axis(freestream)) {
 }
 
-FlowData::FlowData(const linalg::alias::float3& freestream_, const f32 rho_): 
+FlowData::FlowData(const linalg::float3& freestream_, const f32 rho_): 
     alpha(std::atan(freestream_.z / std::sqrt(freestream_.x*freestream_.x + freestream_.y*freestream_.y))),
     beta(std::atan(freestream_.y / freestream_.x)),
     u_inf(linalg::length(freestream_)),

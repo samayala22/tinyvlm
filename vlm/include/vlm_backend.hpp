@@ -1,53 +1,134 @@
 #pragma once
 
+#include <memory>
+
 #include "vlm_fwd.hpp"
 #include "vlm_types.hpp"
 #include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
 #include "vlm_memory.hpp"
 
+#include "linalg.h"
+
 namespace vlm {
 
 class Backend {
     public:
+        std::string name;
         const std::unique_ptr<Memory> memory;
-
-        i32* d_solver_info = nullptr;
-        i32* d_solver_ipiv = nullptr;
-        f32* d_solver_buffer = nullptr;
-        f32* d_val = nullptr; // intermediate value used for reduction
+        std::unique_ptr<BLAS> blas;
 
         f32 sigma_vatistas = 0.0f;
-        Backend(std::unique_ptr<Memory> memory_) : memory(std::move(memory_)) {
-            d_val = (f32*)memory->alloc(MemoryLocation::Device, sizeof(f32));
-        }
-        virtual ~Backend();
+        Backend(std::unique_ptr<Memory> memory_, std::unique_ptr<BLAS> blas_) : memory(std::move(memory_)), blas(std::move(blas_)) {};
+        virtual ~Backend() = default;
 
         // Kernels that run for all the meshes
-        virtual void lhs_assemble(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& verts_wake, std::vector<u32>& condition, u32 iteration) = 0;
-        virtual void rhs_assemble_velocities(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& velocities) = 0;
-        virtual void rhs_assemble_wake_influence(View<f32, MultiSurface>& rhs, const View<f32, MultiSurface>& gamma_wake, const View<f32, MultiSurface>& colloc, const View<f32, MultiSurface>& normals, const View<f32, MultiSurface>& verts_wake, u32 iteration) = 0;
-        virtual void displace_wake_rollup(View<f32, MultiSurface>& wake_rollup, const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wake, f32 dt, u32 iteration) = 0;
-        virtual void displace_wing(const View<f32, Tensor<3>>& transforms, View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wing_init) = 0;
-        virtual void wake_shed(const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& verts_wake, u32 iteration) = 0;
-        virtual void gamma_shed(View<f32, MultiSurface>& gamma_wing, View<f32, MultiSurface>& gamma_wing_prev, View<f32, MultiSurface>& gamma_wake, u32 iteration) = 0;
-        virtual void gamma_delta(View<f32, MultiSurface>& gamma_delta, const View<f32, MultiSurface>& gamma) = 0;
-        virtual void lu_allocate(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) = 0;
-        virtual void lu_factor(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs) = 0;
-        virtual void lu_solve(View<f32, Matrix<MatrixLayout::ColMajor>>& lhs, View<f32, MultiSurface>& rhs, View<f32, MultiSurface>& gamma) = 0;
-        
-        // Per mesh kernels 
-        virtual f32 coeff_steady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const FlowData& flow, f32 area) = 0;
-        virtual f32 coeff_steady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_delta, const FlowData& flow, const View<f32, MultiSurface>& areas) = 0;
-        virtual f32 coeff_steady_cd_single(const View<f32, SingleSurface>& verts_wake, const View<f32, SingleSurface>& gamma_wake, const FlowData& flow, f32 area) = 0;
-        virtual f32 coeff_steady_cd_multi(const View<f32, MultiSurface>& verts_wake, const View<f32, MultiSurface>& gamma_wake, const FlowData& flow, const View<f32, MultiSurface>& areas) = 0;
-        virtual f32 coeff_unsteady_cl_single(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& gamma_delta, const View<f32, SingleSurface>& gamma, const View<f32, SingleSurface>& gamma_prev, const View<f32, SingleSurface>& local_velocities, const View<f32, SingleSurface>& areas, const View<f32, SingleSurface>& normals, const linalg::alias::float3& freestream, f32 dt, f32 area) = 0;
-        virtual f32 coeff_unsteady_cl_multi(const View<f32, MultiSurface>& verts_wing, const View<f32, MultiSurface>& gamma_wing_delta, const View<f32, MultiSurface>& gamma_wing, const View<f32, MultiSurface>& gamma_wing_prev, const View<f32, MultiSurface>& velocities, const View<f32, MultiSurface>& areas, const View<f32, MultiSurface>& normals, const linalg::alias::float3& freestream, f32 dt) = 0;
-        // virtual linalg::alias::float3 coeff_steady_cm(const FlowData& flow, const f32 area, const f32 chord, const u64 j, const u64 n) = 0;
+        virtual void lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView3D<Location::Device>&  verts_wake, std::vector<i32>& condition, i32 iteration) = 0;
+        virtual void rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& velocities) = 0;
+        virtual void rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>&  verts_wake, i32 iteration) = 0;
+        virtual void displace_wake_rollup(MultiTensorView3D<Location::Device>& wake_rollup, const MultiTensorView3D<Location::Device>&  verts_wake, const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wake, f32 dt, i32 iteration) = 0;
+        void displace_wing(const MultiTensorView2D<Location::Device>& transforms, MultiTensorView3D<Location::Device>&  verts_wing, MultiTensorView3D<Location::Device>& verts_wing_init);
+        void wake_shed(const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wake, i32 iteration);
 
-        virtual void mesh_metrics(const f32 alpha_rad, const View<f32, MultiSurface>& verts_wing, View<f32, MultiSurface>& colloc, View<f32, MultiSurface>& normals, View<f32, MultiSurface>& areas) = 0;
-        virtual f32 mesh_mac(const View<f32, SingleSurface>& verts_wing, const View<f32, SingleSurface>& areas) = 0;
-        virtual f32 mesh_area(const View<f32, SingleSurface>& areas) = 0;
+        // TODO: deprecate
+        virtual f32 coeff_steady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) = 0;
+        f32 coeff_steady_cl_multi(const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView2D<Location::Device>& gamma_delta, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas);
+        virtual f32 coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) = 0;
+        f32 coeff_steady_cd_multi(const MultiTensorView3D<Location::Device>&  verts_wake, const MultiTensorView2D<Location::Device>& gamma_wake, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas);
+        
+        virtual void forces_unsteady(
+            const TensorView3D<Location::Device>& verts_wing,
+            const TensorView2D<Location::Device>& gamma_delta,
+            const TensorView2D<Location::Device>& gamma,
+            const TensorView2D<Location::Device>& gamma_prev,
+            const TensorView3D<Location::Device>& velocities,
+            const TensorView2D<Location::Device>& areas,
+            const TensorView3D<Location::Device>& normals,
+            const TensorView3D<Location::Device>& forces,
+            f32 dt
+        ) = 0;
+        virtual f32 coeff_cl(
+            const TensorView3D<Location::Device>& forces,
+            const linalg::float3& lift_axis,
+            const linalg::float3& freestream,
+            const f32 rho,
+            const f32 area
+        ) = 0;
+        virtual linalg::float3 coeff_cm(
+            const TensorView3D<Location::Device>& forces,
+            const TensorView3D<Location::Device>& verts_wing,
+            const linalg::float3& ref_pt,
+            const linalg::float3& freestream,
+            const f32 rho,
+            const f32 area,
+            const f32 mac
+        ) = 0;
+
+        void forces_unsteady_multibody(
+            const MultiTensorView3D<Location::Device>& verts_wing,
+            const MultiTensorView2D<Location::Device>& gamma_delta,
+            const MultiTensorView2D<Location::Device>& gamma,
+            const MultiTensorView2D<Location::Device>& gamma_prev,
+            const MultiTensorView3D<Location::Device>& velocities,
+            const MultiTensorView2D<Location::Device>& areas,
+            const MultiTensorView3D<Location::Device>& normals,
+            const MultiTensorView3D<Location::Device>& forces,
+            f32 dt
+        );
+        f32 coeff_cl_multibody(
+            const MultiTensorView3D<Location::Device>& aero_forces,
+            const MultiTensorView2D<Location::Device>& areas,
+            const linalg::float3& freestream,
+            f32 rho
+        );
+        linalg::float3 coeff_cm_multibody(
+            const MultiTensorView3D<Location::Device>& aero_forces,
+            const MultiTensorView3D<Location::Device>& verts_wing,
+            const linalg::float3& ref_pt,
+            const linalg::float3& freestream, 
+            f32 rho,
+            f32 area,
+            f32 mac
+        );
+
+        virtual void mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>&  verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) = 0;
+        virtual f32 mesh_mac(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& areas) = 0;
+
+        virtual f32 sum(const TensorView1D<Location::Device>& tensor) = 0;
+        virtual f32 sum(const TensorView2D<Location::Device>& tensor) = 0;
+
+        virtual std::unique_ptr<Memory> create_memory_manager() = 0; // todo: deprecate
+        // virtual std::unique_ptr<Kernels> create_kernels() = 0;
+        virtual std::unique_ptr<LU> create_lu_solver() = 0;
+        virtual std::unique_ptr<BLAS> create_blas() = 0; // todo: deprecate
+};
+
+class BLAS {
+    public:
+        enum class Trans { Yes, No };
+        explicit BLAS() = default;
+        virtual ~BLAS() = default;
+
+        virtual void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, const TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) = 0;
+        virtual void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
+        virtual void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) = 0;
+        virtual void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) = 0; // Y = alpha * X + Y
+        virtual f32 norm(const TensorView<f32, 1, Location::Device>& x) = 0;
+};
+
+class LU {
+    public:
+        explicit LU(std::unique_ptr<Memory> memory) : m_memory(std::move(memory)) {}
+        virtual ~LU() = default;
+        
+        virtual void init(const TensorView<f32, 2, Location::Device>& A) = 0;
+        virtual void factorize(const TensorView<f32, 2, Location::Device>& A) = 0;
+        virtual void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) = 0;
+        void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x) {
+            return solve(A, x.reshape(x.shape(0), 1));
+        }
+    protected:
+        std::unique_ptr<Memory> m_memory;
 };
 
 std::unique_ptr<Backend> create_backend(const std::string& backend_name);

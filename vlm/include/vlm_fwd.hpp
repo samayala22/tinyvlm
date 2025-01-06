@@ -4,9 +4,12 @@ namespace vlm {
 
 class FlowData;
 class Memory;
-class Mesh;
+class Kernels;
+class LU;
+class BLAS;
 class Backend;
-class Kinematics;
+class KinematicNode;
+class KinematicsTree;
 template<typename Interpolator> class Database2D;
 template<typename Interpolator> class WingProfile;
 

@@ -4,31 +4,8 @@
 #include <cstring>
 #include <cstdio>
 
-// #ifdef _WIN32
-// #include <windows.h>
-// #else
-// #include <sys/ioctl.h>
-// #include <unistd.h>
-// #endif
-
 namespace tiny {
-
-inline int get_terminal_width() {
-// #ifdef _WIN32
-//     CONSOLE_SCREEN_BUFFER_INFO csbi;
-//     if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
-//         return csbi.srWindow.Right - csbi.srWindow.Left + 1;
-//     }
-// #else
-//     struct winsize w;
-//     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0) {
-//         return w.ws_col;
-//     }
-// #endif
-    // Return a default value if unable to get the terminal size
-    return 100;
-}
-
+    
 class pbar {
 private:
     int start_, end_, step_; // idx range
@@ -46,16 +23,8 @@ private:
         const int hours = static_cast<int>(t) / 3600;
         const int minutes = (static_cast<int>(t) % 3600) / 60;
         const int seconds = static_cast<int>(t) % 60;
-        
-        out[0] = '0' + hours / 10;
-        out[1] = '0' + hours % 10;
-        out[2] = ':';
-        out[3] = '0' + minutes / 10;
-        out[4] = '0' + minutes % 10;
-        out[5] = ':';
-        out[6] = '0' + seconds / 10;
-        out[7] = '0' + seconds % 10;
-        out[8] = '\0'; // null terminate
+
+        std::snprintf(out, 9, "%02d:%02d:%02d", hours, minutes, seconds);
     }
 
     // out must have 8 bytes of space
@@ -99,10 +68,9 @@ public:
             skip = static_cast<int>(n / elapsed / rate);
         }
 
-        const int terminal_width = get_terminal_width();
-        const int bar_length = terminal_width - 50;
+        constexpr int bar_length = 25;
 
-        char prog_bar[101] = {0};  // Assuming max bar length is 100
+        char prog_bar[bar_length+1] = {0};  // Assuming max bar length is 100
         if (total > 0) {
             const int filled_length = static_cast<int>(bar_length * progress);
             std::fill_n(prog_bar, filled_length, '#');
@@ -129,15 +97,15 @@ public:
         int current;
     public:
         iterator(pbar& t, int start) : bar(t), current(start) {}
-        iterator& operator++() {
+        [[nodiscard]] iterator& operator++() {
             current += bar.step_;
             bar.update(1);
             return *this;
         }
-        bool operator!=(const iterator& other) const {
+        [[nodiscard]] bool operator!=(const iterator& other) const {
             return current < other.current;
         }
-        int operator*() const { return current; }
+        [[nodiscard]] int operator*() const { return current; }
     };
 
     iterator begin() { return iterator(*this, start_); }

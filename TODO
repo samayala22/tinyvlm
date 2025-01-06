@@ -1,9 +1,9 @@
 - Move some of the logic from theodorsen test case to its own class
 - Consider calling delta_gamma directly from lu_solve
 - Get rid of exceptions
-- All backend functions should return a tf::Task so that we can build a single taskflow graph
+- All backend functions should return a tf::Task so that we can build a single taskflow graph -> most probably cancelled for now
 - Retire Mesh object as it is simply not generic enough, all geometry data is simulation specific
-- Cleanup vlm_types to include the bare minimum headers
-- Use vlm_types in vlm_memory
-// store kinematics in the backend ??
-// store flow properties in the backend ??
+- Take care of the narrowing conversions and uint <-> int comparisons
+- Share code between backends and move most of the multi-body scheduling logic to be backend agnostic (consider retuning a tf::Task from each backend)
+- Kinematics are currently defined for each surface. It would be more practical to group the surfaces in a hierarchy (body -> lifting surface)
+- Write a transient PVTU interface with tinyvtu

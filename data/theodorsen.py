@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.integrate as spi
 import scipy.special as scsp
+from pathlib import Path
 
 EPS_sqrt_f = np.sqrt(1.19209e-07)
 
@@ -26,14 +27,18 @@ def uvlm_data(filename):
     uvlm_t = []
     uvlm_z = []
     uvlm_alpha = []
-    with open(f"build/windows/x64/release/{filename}.txt", "r") as f:
-        k = float(f.readline()) # get reduced frequency of the simulation
-        for line in f:
-            time_step, z, cl, alpha = line.split()
-            uvlm_t.append(float(time_step))
-            uvlm_z.append(float(z))
-            uvlm_cl.append(float(cl))
-            uvlm_alpha.append(float(alpha))
+    filepath = f"build/windows/x64/debug/{filename}.txt"
+    if Path(filepath).exists():
+        with open(filepath, "r") as f:
+            k = float(f.readline()) # get reduced frequency of the simulation
+            for line in f:
+                time_step, z, cl, alpha = line.split()
+                uvlm_t.append(float(time_step))
+                uvlm_z.append(float(z))
+                uvlm_cl.append(float(cl))
+                uvlm_alpha.append(float(alpha))
+    else:
+        print(f"File {filepath} not found")
 
     uvlm_alpha = np.array(uvlm_alpha)
     uvlm_cl = np.array(uvlm_cl)
@@ -54,7 +59,7 @@ ar = 10000 # aspect ratio
 b = 0.5 # half chord
 c = 2*b # chord
 a = ar / c # full span
-pitch_axis = -0.5 # leading edge
+pitch_axis = -0.5 # quarter chord
 
 # Theodorsen numerical simulation param
 cycles = 5 # number of periods
@@ -68,7 +73,8 @@ fig, axs = plt.subplot_mosaic(
 )
 
 files = [
-    "cl_data"
+    "cl_data_CPU",
+    "cl_data_CUDA",
     # "cl_data_025",
     # "cl_data_050",
     # "cl_data_075",
@@ -85,16 +91,16 @@ for file in files:
     uvlm_cycle_idx = int((1 - 1 / cycles) * n - 1)
 
     # sudden acceleration
-    def pitch(t): return np.radians(5)
-    def heave(t): return 0
+    # def pitch(t): return np.radians(5)
+    # def heave(t): return 0
 
     # pure heaving
     # def pitch(t): return 0
     # def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    # def pitch(t): return np.radians(np.sin(omega * t))
-    # def heave(t): return 0
+    def pitch(t): return np.radians(3.0 * np.sin(omega * t))
+    def heave(t): return 0
 
     def w(s: float): 
         return u_inf * pitch(s) + derivative(heave, s) + b * (0.5 - pitch_axis) * derivative(pitch, s)
@@ -121,24 +127,24 @@ for file in files:
     axs["heave"].plot(angle[cycle_idx:], cl_theo[cycle_idx:], label=f"Theodorsen (k={k})")
 
     axs["time"].scatter(uvlm_t, uvlm_cl, label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
-    axs["heave"].scatter(uvlm_alpha[uvlm_cycle_idx:], uvlm_cl[uvlm_cycle_idx:], label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
+    axs["heave"].scatter(np.degrees(uvlm_alpha[uvlm_cycle_idx:]), uvlm_cl[uvlm_cycle_idx:], label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
 
     analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cycle_idx:]])
     difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
     error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx)) 
     print(f"Freq: {k}, Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
 
-axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
+# axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
 
-jl_t = []
-jl_cl = []
-with open("build/windows/x64/release/jl_cl.txt", "r") as f:
-    for line in f:
-        t, cl = line.split()
-        jl_t.append(float(t))
-        jl_cl.append(float(cl))
+# jl_t = []
+# jl_cl = []
+# with open("build/windows/x64/release/jl_cl.txt", "r") as f:
+#     for line in f:
+#         t, cl = line.split()
+#         jl_t.append(float(t))
+#         jl_cl.append(float(cl))
 
-axs["time"].plot(jl_t, jl_cl, label="VortexLattice.jl")
+# axs["time"].plot(jl_t, jl_cl, label="VortexLattice.jl")
 
 axs["time"].set_xlabel('t')
 axs["time"].set_ylabel('CL')
