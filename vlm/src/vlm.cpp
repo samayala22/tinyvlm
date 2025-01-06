@@ -96,59 +96,6 @@ void VLM::alloc_buffers() {
     for (const auto& wake : verts_wake.views()) wake.slice(All, All, 3).fill(1.f);
 }
 
-void print(const TensorView2D<Location::Device>& tensor) {
-    for (i64 i = 0; i < tensor.shape(0); i++) {
-        for (i64 j = 0; j < tensor.shape(1); j++) {
-            std::printf("%6.6f ", tensor(i, j));
-        }
-        std::printf("\n");
-    }
-}
-
-void print(const char* name, const MultiTensorView3D<Location::Device>& tensor) {
-    std::printf("%s\n", name);
-    for (i64 m = 0; m < tensor.size(); m++) {
-        std::printf("Surface %lld\n", m);
-        for (i64 j = 0; j < tensor[m].shape(1); j++) {
-            for (i64 i = 0; i < tensor[m].shape(0); i++) {
-                std::printf("x: %6.6f y: %6.6f z: %6.6f\n", tensor[m](i, j, 0), tensor[m](i, j, 1), tensor[m](i, j, 2));
-            }
-        }
-    }
-}
-
-template<Location L>
-void print(const char* name, const TensorView2D<L>& tensor) {
-    std::printf("%s\n", name);
-    for (i64 j = 0; j < tensor.shape(1); j++) {
-        for (i64 i = 0; i < tensor.shape(0); i++) {
-            std::printf("i: %6lld j: %6lld %6.6f\n", i, j, tensor(i, j));
-        }
-    }
-}
-
-template<Location L>
-void print(const char* name, const TensorView3D<L>& tensor) {
-    std::printf("%s\n", name);
-    for (i64 j = 0; j < tensor.shape(1); j++) {
-        for (i64 i = 0; i < tensor.shape(0); i++) {
-            std::printf("x: %6.6f y: %6.6f z: %6.6f\n", tensor(i, j, 0), tensor(i, j, 1), tensor(i, j, 2));
-        }
-    }
-}
-
-void print(const char* name, const MultiTensorView2D<Location::Device>& tensor) {
-    std::printf("%s\n", name);
-    for (i64 m = 0; m < tensor.size(); m++) {
-        const auto& tensor_m = tensor[m];
-        for (i64 j = 0; j < tensor_m.shape(1); j++) {
-            for (i64 i = 0; i < tensor_m.shape(0); i++) {
-                std::printf("%6.6f \n", tensor_m(i, j));
-            }
-        }
-    }
-}
-
 AeroCoefficients VLM::run(const FlowData& flow) {
     // Reset buffer state
     lhs.view().fill(0.f);
