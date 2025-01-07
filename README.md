@@ -14,7 +14,7 @@
 - [X] NL-VLM
 - [X] UVLM
 - [ ] NL-UVLM
-- [ ] NLHB-UVLM
+- [ ] Panel Method
 
 # Correctors
 
@@ -28,40 +28,8 @@
 - [X] ISPC
 - [X] CUDA
 
-# Maintainability
+# Documentation
 
-- [X] Clangd
-- [X] Clang-Format
-- [X] Clang-Tidy
-- [X] Testing framework (via `xmake test`)
-- [X] Compilation CI
-- [ ] Documented code (doxygen style)
+This project is heavy work in progress as part of my Master's thesis. 
 
-## Build and run
-
-Requirements: 
-- Windows (MSVC compiler) or Linux (GCC or Clang)
-- [xmake](https://xmake.io/#/) build system
-    - For Windows, the [installer](https://github.com/xmake-io/xmake/releases) is recommended
-    - For Linux, run `curl -fsSL https://xmake.io/shget.text | bash`
-
-Then build and run the default config:
-
-```bash
-xmake -y -v && xmake run
-```
-
-The solver should run and output the aerodynamic coefficients along with some time metrics:
-
-```
-reading plot3d mesh
-number of panels: 4096
-ns: 64
-nc: 64
-LHS: 12.106 ms
-RHS: 4 us
-Solve: 341.976 ms
-Compute forces: 104 us
->>> Alpha: 5.0 | CL = 0.464887 CD = 0.005636 CMx = 1.157476 CMy = -0.017555 CMz = 0.101128
-SOLVER RUN: 358.235 ms
-```
+There is currently no plan to provide a user guide or public documentation. 
