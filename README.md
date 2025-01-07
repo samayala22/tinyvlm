@@ -25,7 +25,7 @@
 
 # Backends
 
-- [X] ISPC
+- [X] [ISPC](https://github.com/ispc/ispc) + [Taskflow](https://github.com/taskflow/taskflow)
 - [X] CUDA
 
 # Documentation
