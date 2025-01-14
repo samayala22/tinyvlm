@@ -7,7 +7,6 @@
 
 #include <cassert>
 #include <iostream>
-#include <limits>
 #include <memory>
 
 using namespace vlm;
@@ -46,6 +45,7 @@ public:
         return {ni-1, nj-1};
     }
 
+    // TODO: deprecate this function
     void read(std::ifstream& f, const TensorView3D<Location::Host>& vertices) const override {
         i64 ni, nj, nk;
         i64 blocks;
@@ -59,19 +59,19 @@ public:
         for (i64 j = 0; j < nj; j++) {
             for (i64 i = 0; i < ni; i++) {
                 f >> x;
-                vertices(j, i, 0) = x;
+                vertices(j, i, 0) = x; // scatter
             }
         }
         for (i64 j = 0; j < nj; j++) {
             for (i64 i = 0; i < ni; i++) {
                 f >> y;
-                vertices(j, i, 1) = y;
+                vertices(j, i, 1) = y; // scatter
             }
         }
         for (i64 j = 0; j < nj; j++) {
             for (i64 i = 0; i < ni; i++) {
                 f >> z;
-                vertices(j, i, 2) = z;
+                vertices(j, i, 2) = z; // scatter
             }
         }
 
@@ -85,6 +85,36 @@ public:
         for (i64 i = 1; i < ni; i++) {
             if ( vertices(0, i, 1) != first_y) {
                 throw std::runtime_error("Mesh vertices should be ordered in chordwise direction"); // todo get rid of throw
+            }
+        }
+    }
+
+    void read2(std::ifstream& f, const TensorView3D<Location::Host>& vertices) const override {
+        i64 ni, nj, nk;
+        i64 blocks;
+        f32 x, y, z;
+        f >> blocks;
+        f >> ni >> nj >> nk;
+        assert(vertices.shape(0) == ni);
+        assert(vertices.shape(1) == nj);
+        assert(vertices.shape(2) == 4);
+        
+        for (i64 j = 0; j < nj; j++) {
+            for (i64 i = 0; i < ni; i++) {
+                f >> x;
+                vertices(i, j, 0) = x; // store
+            }
+        }
+        for (i64 j = 0; j < nj; j++) {
+            for (i64 i = 0; i < ni; i++) {
+                f >> y;
+                vertices(i, j, 1) = y; // store
+            }
+        }
+        for (i64 j = 0; j < nj; j++) {
+            for (i64 i = 0; i < ni; i++) {
+                f >> z;
+                vertices(i, j, 2) = z; // store
             }
         }
     }
@@ -108,11 +138,17 @@ SurfDims MeshIO::get_dims(const std::string& filename) const {
     return dims;
 }
 
-void MeshIO::read(const std::string& filename, const TensorView3D<Location::Host>& vertices) const {
+void MeshIO::read(const std::string& filename, const TensorView3D<Location::Host>& vertices, bool legacy) const {
     std::ifstream file_stream(filename);
     if (!file_stream.is_open()) {
         throw std::runtime_error("Failed to open mesh file");
     }
-    _file->read(file_stream, vertices);
-    mesh_quarterchord(vertices);
+    if (legacy) {
+        _file->read(file_stream, vertices);
+    } else {
+        _file->read2(file_stream, vertices);
+    }
+    if (legacy) {
+        mesh_quarterchord(vertices);
+    }
 }
