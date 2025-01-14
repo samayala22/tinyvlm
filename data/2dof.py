@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-import mpld3
 import scipy as sp
 from scipy.fft import fft, ifft, fftfreq
 from scipy.integrate import solve_ivp
@@ -268,6 +267,10 @@ def alpha_linear(alpha):
 
 def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
     def monolithic_system(t, y: np.ndarray):
+        """
+        system unknowns:
+        [h, a, hd, ad, x1, x2]
+        """
         M1 = np.zeros((6,6))
         M2 = np.zeros((6,6))
         V = np.zeros(6)
@@ -317,7 +320,8 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
         V[2] += - (ndv.omega/ndv.U)**2 * y[0]
         V[3] += - 1/(ndv.U**2) * M(y[1])
 
-        y_d = np.linalg.inv(M2) @ (M1 @ y + V)
+        y_d = np.linalg.solve(M2, M1 @ y + V)
+        # y_d = np.linalg.inv(M2) @ (M1 @ y + V)
 
         return y_d
     

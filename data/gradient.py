@@ -313,8 +313,8 @@ if __name__ == "__main__":
             errors[method_name].append(l2_err)
 
             # Plot first case only
-            # if ni == ni_vec[1]:
-            #     plot_results(verts, vals, grads, analytical_grads, method_name)
+            if ni == ni_vec[1]:
+                plot_results(verts, vals, grads, analytical_grads, method_name)
     
     end = time.time()
     print(f"{end - start:.3f} seconds")
