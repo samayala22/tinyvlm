@@ -93,7 +93,7 @@ def monolithic_system_3dof(v: Vars):
     d_alpha = 2*v.zeta_alpha*np.sqrt(v.m_w*v.k_alpha)
     d_beta = 2*v.zeta_beta*np.sqrt((v.m_t-v.m_w)*v.k_alpha)
 
-    c = 2*v.b # Note: this is incorrect !
+    c = 0.5
 
     sqrt_1_minus_c2 = np.sqrt(1 - c**2)
     acos_c = np.arccos(c)
@@ -267,7 +267,7 @@ if __name__ == "__main__":
         x_beta = 0.01795,
         r_alpha = 0.6840,
         r_beta = 0.07336,
-        U = 95.0
+        U = 22.0
     )
 
     dt = 0.01
