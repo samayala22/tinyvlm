@@ -90,19 +90,19 @@ def create_rectangle_mesh(ni, nj, w=1.0, h=1.0):
 # @nb.njit
 # def dfdy(x, y):  return 2*y + (3*x*x*(x**2-3*y**2)) / (x**2 + y**2)**2.5
 
-# @nb.njit
-# def f(x, y): return y**2 / (x**2 + y**2)
-# @nb.njit
-# def dfdx(x, y): return - 2*y**2*x / (x**2 + y**2)**2
-# @nb.njit
-# def dfdy(x, y): return 2*y*x**2 / (x**2 + y**2)**2
+@nb.njit
+def f(x, y): return y**2 / (x**2 + y**2)
+@nb.njit
+def dfdx(x, y): return - 2*y**2*x / (x**2 + y**2)**2
+@nb.njit
+def dfdy(x, y): return 2*y*x**2 / (x**2 + y**2)**2
 
-@nb.njit
-def f(x, y): return x**2 + y**2
-@nb.njit
-def dfdx(x, y): return 2*x
-@nb.njit
-def dfdy(x, y): return 2*y
+# @nb.njit
+# def f(x, y): return x**2 + y**2
+# @nb.njit
+# def dfdx(x, y): return 2*x
+# @nb.njit
+# def dfdy(x, y): return 2*y
 
 # @nb.njit
 # def f(x, y): return x + y
@@ -128,16 +128,24 @@ def gg(f: callable, centroids, areas, verts):
     for j in nb.prange(1, nj-1):
         for i in nb.prange(1, ni-1):
             f0 = f_(centroids[i, j])
-            grads[i, j] += 0.5 * (f_(centroids[i, j-1]) + f0) * rot_mat_c @ (verts[i+1, j] - verts[i, j])
-            grads[i, j] += 0.5 * (f_(centroids[i+1, j]) + f0) * rot_mat_c @ (verts[i+1, j+1] - verts[i+1, j])
-            grads[i, j] += 0.5 * (f_(centroids[i, j+1]) + f0) * rot_mat_c @ (verts[i, j+1] - verts[i+1, j+1])
-            grads[i, j] += 0.5 * (f_(centroids[i-1, j]) + f0) * rot_mat_c @ (verts[i, j] - verts[i, j+1])
-            grads[i, j] /= areas[i, j]
+            grad = np.zeros(2, dtype=np.float64)
+            grad += 0.5 * (f_(centroids[i, j-1]) + f0) * rot_mat_c @ (verts[i+1, j] - verts[i, j])
+            grad += 0.5 * (f_(centroids[i+1, j]) + f0) * rot_mat_c @ (verts[i+1, j+1] - verts[i+1, j])
+            grad += 0.5 * (f_(centroids[i, j+1]) + f0) * rot_mat_c @ (verts[i, j+1] - verts[i+1, j+1])
+            grad += 0.5 * (f_(centroids[i-1, j]) + f0) * rot_mat_c @ (verts[i, j] - verts[i, j+1])
+            grad /= areas[i, j]
+            grads[i, j] = grad
 
     return grads
 
 @nb.njit
 def mgg_face_contribution(v0, v1, c0, c1, f0, f1, g0, g1):
+        """
+        v0, v1: vertices of the face
+        c0, c1: center of i cell and neighboring cell
+        f0, f1: values of the cells at c0 and c1
+        g0, g1: gradients of the cells at c0 and c1
+        """
         x_f = 0.5 * (v1 + v0)
         delta_s = np.linalg.norm(v1 - v0)
         normal = rot_mat_c @ (v1 - v0) / delta_s
@@ -146,9 +154,13 @@ def mgg_face_contribution(v0, v1, c0, c1, f0, f1, g0, g1):
         alpha = np.dot(normal, r_f)
         grad_n = alpha * (f1 - f0) / delta_r + 0.5 * np.dot(g0 + g1, normal - alpha * r_f)
         return grad_n * (x_f - c0) * delta_s
+        # Same results ?? Numba
+        # x_f = 0.5 * (v1 + v0)
+        # r = x_f - 0.5 * (c1 + c0)
+        # return 0.5 * (f0 + f1 + np.dot(r, g0 + g1)) * rot_mat_c @ (v1 - v0)
 
 @nb.njit(parallel=True)
-def mgg(f: callable, centroids, areas, verts, tol=1e-8, max_iter=10):
+def mgg(f: callable, centroids, areas, verts, tol=1e-16, max_iter=100):
     ni, nj = centroids.shape[:2]
     grads = np.zeros((ni, nj, 2), dtype=np.float64)
     # new_grads = np.zeros((ni, nj, 2))
@@ -311,8 +323,8 @@ if __name__ == "__main__":
             errors[method_name].append(l2_err)
 
             # Plot first case only
-            # if ni == ni_vec[1]:
-            #     plot_results(verts, vals, grads, analytical_grads, method_name)
+            if ni == ni_vec[1]:
+                plot_results(verts, vals, grads, analytical_grads, method_name)
     
     end = time.time()
     print(f"{end - start:.3f} seconds")
