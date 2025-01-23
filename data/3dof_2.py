@@ -127,11 +127,12 @@ def create_monolithic_system(y0: np.ndarray, v: Vars):
         K_a[2, 2] = (-1 / np.pi**2) * (T5 - T10 * (T4 - T12))
         K_a = V**2 * K_a
         
-        # TODO: verify these coeffs
         d1 = 0.165
         d2 = 0.335
-        l1 = 0.041
-        l2 = 0.320
+        # l1 = 0.041
+        # l2 = 0.320
+        l1 = 0.0455
+        l2 = 0.300
 
         L_delta[0, 0] = d1
         L_delta[0, 1] = d2
@@ -256,9 +257,9 @@ if __name__ == "__main__":
         S_beta = 0.00395, # kg
         x_alpha = 0.4340,
         x_beta = 0.02,
-        omega_h = 6.7697, # Hz
-        omega_alpha = 8.3796, # Hz
-        omega_beta = 17.3971,
+        omega_h = 42.5352, # Hz
+        omega_alpha = 52.6506, # Hz
+        omega_beta = 109.3093,
         rho = 1.225, # kg/m^3
         zeta_h = 0.0133,
         zeta_alpha = 0.01626,
@@ -266,8 +267,8 @@ if __name__ == "__main__":
         U = 23.72 # m/s
     )
 
-    dt = 0.01
-    t_final = 5.0
+    dt = 0.02
+    t_final = 5 * v.omega_alpha
     vec_t = np.arange(0, t_final, dt)
     n = len(vec_t)
 
@@ -276,7 +277,7 @@ if __name__ == "__main__":
         0, # dh / dt
         0, # dalpha / dt
         0, # dbeta / dt
-        0.01, # h
+        0.005 / v.b, # h
         0, # alpha
         0, # beta
         0, # x1
@@ -305,10 +306,10 @@ if __name__ == "__main__":
     )
     add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1)
     add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2)
-    add_data_and_psd(fig, vec_t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1)
-    add_data_and_psd(fig, vec_t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2)
-    add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1)
-    add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2)
+    add_data_and_psd(fig, vec_t, mono.y[4, :], "Theodorsen", 3, 1)
+    add_data_and_psd(fig, vec_t, mono.y[1, :], "Theodorsen", 3, 2)
+    add_data_and_psd(fig, vec_t, mono.y[5, :], "Theodorsen", 5, 1)
+    add_data_and_psd(fig, vec_t, mono.y[2, :], "Theodorsen", 5, 2)
 
     format_subplot(fig, 1, 1, "t", r"y")
     format_subplot(fig, 1, 2, "t", r"$\dot{y}$")

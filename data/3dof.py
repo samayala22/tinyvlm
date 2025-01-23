@@ -8,6 +8,7 @@ import scipy as sp
 class Vars:
     b: float # half chord length
     a: float # nd elastic axis position relative to semi chord
+    c: float
     rho: float # fluid density (kg/m^3)
     m_w: float # mass of the wing (kg)
     m_t: float # mass of wing + flap (kg)
@@ -85,34 +86,33 @@ def monolithic_system_3dof(v: Vars):
     """
     S_alpha = v.x_alpha * v.m_w * v.b
     S_beta = v.x_beta * v.m_w * v.b
-    I_alpha = v.r_alpha**2 * v.m_w * v.b
-    I_beta = v.r_beta**2 * v.m_w * v.b
+    I_alpha = v.r_alpha**2 * v.m_w * v.b ** 2
+    I_beta = v.r_beta**2 * v.m_w * v.b ** 2
 
-    # Note unsure of these equations
-    d_y = 2*v.zeta_y*np.sqrt(v.m_t*v.k_y)
-    d_alpha = 2*v.zeta_alpha*np.sqrt(v.m_w*v.k_alpha)
-    d_beta = 2*v.zeta_beta*np.sqrt((v.m_t-v.m_w)*v.k_alpha)
+    omega_alpha = np.sqrt(v.k_alpha / (v.m_w * (v.r_alpha * v.b)**2))
+    omega_beta = np.sqrt(v.k_beta / (v.m_w * (v.r_beta * v.b)**2))
+    omega_y = np.sqrt(v.k_y / v.m_w)
+    d_y = 2*v.m_w*omega_y*v.zeta_y
+    d_alpha = 2*I_alpha*omega_alpha*v.zeta_alpha
+    d_beta = 2*I_beta*omega_beta*v.zeta_beta
 
-    c = 0.5
+    sqrt_1_minus_c2 = np.sqrt(1 - v.c**2)
+    acos_c = np.arccos(v.c)
 
-    sqrt_1_minus_c2 = np.sqrt(1 - c**2)
-    acos_c = np.arccos(c)
-    p  = (-1/3) * (sqrt_1_minus_c2)**3
-
-    T1 = (-1/3) * sqrt_1_minus_c2 * (2 + c**2) + c * acos_c
-    T2 = c * (1 - c**2) - sqrt_1_minus_c2 * (1 + c**2) * acos_c + c * (acos_c)**2
-    T3 = -((1/8) + c**2) * (acos_c)**2 + (1/4) * c * sqrt_1_minus_c2 * acos_c * (7 + 2 * c) - (1/8) * (1 - c**2) * (5 * c**2 + 4)
-    T4 = -acos_c + c * sqrt_1_minus_c2
-    T5 = -(1 - c**2) - (acos_c)**2 + 2 * c * sqrt_1_minus_c2 * acos_c
+    T1 = (-1/3) * sqrt_1_minus_c2 * (2 + v.c**2) + v.c * acos_c
+    T2 = v.c * (1 - v.c**2) - sqrt_1_minus_c2 * (1 + v.c**2) * acos_c + v.c * (acos_c)**2
+    T3 = -((1/8) + v.c**2) * (acos_c)**2 + (1/4) * v.c * sqrt_1_minus_c2 * acos_c * (7 + 2*v.c**2) - (1/8) * (1 - v.c**2) * (5 * v.c**2 + 4)
+    T4 = -acos_c + v.c * sqrt_1_minus_c2
+    T5 = -(1 - v.c**2) - (acos_c)**2 + 2 * v.c * sqrt_1_minus_c2 * acos_c
     T6 = T2
-    T7 = -((1/8) + c**2) * acos_c + (1/8) * c * sqrt_1_minus_c2 * (7 + 2 * c**2)
-    T8 = (-1/3) * sqrt_1_minus_c2 * (2 * c**2 + 1) + c * acos_c
-    T9 = (1/2) * (p + v.a * T4)
+    T7 = -((1/8) + v.c**2) * acos_c + (1/8) * v.c * sqrt_1_minus_c2 * (7 + 2 * v.c**2)
+    T8 = (-1/3) * sqrt_1_minus_c2 * (2 * v.c**2 + 1) + v.c * acos_c
+    T9 = (1/2) * ((1/3) * (sqrt_1_minus_c2)**3 + v.a * T4)
     T10 = sqrt_1_minus_c2 + acos_c
-    T11 = acos_c * (1 - 2 * c) + sqrt_1_minus_c2 * (2 - c)
-    T12 = sqrt_1_minus_c2 * (2 + c) - acos_c * (2 * c + 1)
-    T13 = (1/2) * (-T7 - (c - v.a) * T1)
-    T14 = (1/16) + (1/2) * v.a * c
+    T11 = acos_c * (1 - 2 * v.c) + sqrt_1_minus_c2 * (2 - v.c)
+    T12 = sqrt_1_minus_c2 * (2 + v.c) - acos_c * (2 * v.c + 1)
+    T13 = (1/2) * (-T7 - (v.c - v.a) * T1)
+    T14 = (1/16) + (1/2) * v.a * v.c
 
     c0 = 1.0
     c1 = 0.165
@@ -131,11 +131,11 @@ def monolithic_system_3dof(v: Vars):
 
     M[1, 0] = S_alpha - v.a * np.pi * v.rho * v.b**3
     M[1, 1] = I_alpha + np.pi * (1/8 + v.a**2) * v.rho * v.b**4
-    M[1, 2] = I_beta + S_beta * (c - v.a) * v.b - v.rho * v.b**4 * (T7 + (c - v.a) * T1)
+    M[1, 2] = I_beta + S_beta * (v.c - v.a) * v.b - v.rho * v.b**4 * (T7 + (v.c - v.a) * T1)
     M[1, 3] = 0
 
     M[2, 0] = S_beta - v.rho * v.b**3 * T1
-    M[2, 1] = I_beta + S_beta * (c - v.a) * v.b + 2 * v.rho * v.b**4 * T13
+    M[2, 1] = I_beta + S_beta * (v.c - v.a) * v.b + 2 * v.rho * v.b**4 * T13
     M[2, 2] = I_beta - (v.rho * v.b**4 / np.pi) * T3
     M[2, 3] = 0
 
@@ -151,7 +151,7 @@ def monolithic_system_3dof(v: Vars):
 
     C[1, 0] = -2 * np.pi * v.rho * v.b**2 * v.U * (v.a + 0.5) * (c0 - c1 - c3)
     C[1, 1] = d_alpha + (0.5 - v.a) * (1 - (c0 - c1 - c3) * (1 + 2 * v.a)) * np.pi * v.rho * v.b**3 * v.U
-    C[1, 2] = (T1 - T8 - (c - v.a) * T4 + T11 / 2 - (2 * v.a + 1) * T11 * (c0 - c1 - c3)) * v.rho * v.b**3 * v.U
+    C[1, 2] = (T1 - T8 - (v.c - v.a) * T4 + T11 / 2 - (2 * v.a + 1) * T11 * (c0 - c1 - c3)) * v.rho * v.b**3 * v.U
     C[1, 3] = -2 * np.pi * v.rho * v.U**2 * v.b**2 * (v.a + 0.5) * (c1 * c2 + c3 * c4)
 
     C[2, 0] = v.rho * v.U * v.b**2 * T12 * (c0 - c1 - c3)
@@ -254,6 +254,7 @@ if __name__ == "__main__":
     v = Vars(
         b = 0.127,
         a = -0.5,
+        c = 0.5,
         rho = 1.225,
         m_w = 1.7025,
         m_t = 3.5021,
@@ -267,7 +268,7 @@ if __name__ == "__main__":
         x_beta = 0.01795,
         r_alpha = 0.6840,
         r_beta = 0.07336,
-        U = 22.0
+        U = 24.0
     )
 
     dt = 0.01
@@ -285,7 +286,7 @@ if __name__ == "__main__":
     dF = np.zeros(4, dtype=np.float64)
 
     # Initial conditions
-    u[:, 0] = np.array([0, np.radians(3), 0, 0], dtype=np.float64)
+    u[:, 0] = np.array([0.01, 0, 0, 0], dtype=np.float64)
     v[:, 0] = np.array([0, 0, 0, 0], dtype=np.float64)
     a[:, 0] = np.linalg.solve(M, F[:, 0] - C @ v[:,0] - K @ u[:,0])
     
