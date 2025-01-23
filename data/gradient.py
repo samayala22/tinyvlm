@@ -6,6 +6,8 @@ import numba as nb
 
 import time
 
+nb.config.CACHE = True
+
 @nb.njit
 def cross2d(a, b):
     return a[0] * b[1] - a[1] * b[0]
