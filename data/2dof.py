@@ -267,9 +267,10 @@ def alpha_linear(alpha):
 
 def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
     def monolithic_system(t, y: np.ndarray):
+        # Yung p212
         """
         system unknowns:
-        [h, a, hd, ad, x1, x2]
+        q = [h, a, hd, ad, x1, x2]
         """
         M1 = np.zeros((6,6))
         M2 = np.zeros((6,6))
