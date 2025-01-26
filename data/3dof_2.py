@@ -209,10 +209,9 @@ def create_monolithic_system(y0: np.ndarray, v: Vars):
         D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
         D_s = 2 * mu * D_s
 
-        gamma = 10 # Cubic factor (0 for linear spring)
-        K_s[0, 0] = sigma**2 * (1 + gamma * y[3]**2)
+        # K_s[0, 0] = sigma**2 * (1 + gamma * y[3]**2)
         K_s[1, 1] = v.r_alpha**2
-        K_s[2, 2] = (v.omega_beta / v.omega_alpha)**2 * v.r_beta**2
+        # K_s[2, 2] = (v.omega_beta / v.omega_alpha)**2 * v.r_beta**2
         K_s = mu * K_s
 
         sqrt_1_minus_c2 = np.sqrt(1 - v.c**2)
@@ -320,6 +319,10 @@ def create_monolithic_system(y0: np.ndarray, v: Vars):
         M1[6:8, 0:3] = Q_v
         M1[6:8, 6:8] = L_lambda
 
+        # Nonlinear term
+        gamma = 0 # Cubic factor (0 for linear spring)
+        yn[0] = - mu * y[3] * sigma**2 * (1 + gamma * y[3]**2)
+        yn[2] = - mu * ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * alpha_freeplay(y[5])
         return np.linalg.solve(M2, M1 @ y + yn)
 
     return monolithic_system
@@ -335,8 +338,8 @@ def compute_psd(t, data):
     mask = frequencies < 1.0
     psd_db = 10 * np.log10(psd)
 
-    # return frequencies[mask], psd_db[mask]
-    return frequencies, psd
+    return frequencies[mask], psd[mask]
+    # return frequencies, psd
 
 def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', marker_size=4):
     """Add time series and PSD data to plotly figure"""
@@ -442,11 +445,11 @@ if __name__ == "__main__":
         zeta_h = 0.0113,
         zeta_alpha = 0.01626,
         zeta_beta = 0.0115,
-        U = 23.72 # m/s
+        U = 0.49 * 23.9 # m/s
     )
 
     dt = 0.02
-    t_final = 5 * v.omega_alpha
+    t_final = 10 * v.omega_alpha
     vec_t = np.arange(0, t_final, dt)
     n = len(vec_t)
 
@@ -461,6 +464,18 @@ if __name__ == "__main__":
         0, # x1
         0  # x2
     ], dtype=np.float64)
+
+    # y0 = np.array([
+    #     0, # dh / dt
+    #     0, # dalpha / dt
+    #     0, # dbeta / dt
+    #     0, # h
+    #     0, # alpha
+    #     np.radians(-2.12), # beta
+    #     0, # x1
+    #     0  # x2
+    # ], dtype=np.float64)
+
     system = create_monolithic_system(y0, v)
     mono = solve_ivp(system, (0, t_final), y0, t_eval=vec_t, method='RK45')
     
@@ -484,10 +499,10 @@ if __name__ == "__main__":
     )
     add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1)
     add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2)
-    add_data_and_psd(fig, vec_t, mono.y[4, :], "Theodorsen", 3, 1)
-    add_data_and_psd(fig, vec_t, mono.y[1, :], "Theodorsen", 3, 2)
-    add_data_and_psd(fig, vec_t, mono.y[5, :], "Theodorsen", 5, 1)
-    add_data_and_psd(fig, vec_t, mono.y[2, :], "Theodorsen", 5, 2)
+    add_data_and_psd(fig, vec_t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1)
+    add_data_and_psd(fig, vec_t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2)
+    add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1)
+    add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2)
 
     format_subplot(fig, 1, 1, "t", r"y")
     format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
