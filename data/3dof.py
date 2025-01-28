@@ -4,6 +4,7 @@ from plotly.subplots import make_subplots
 from dataclasses import dataclass
 import scipy as sp
 from scipy.integrate import solve_ivp
+from tqdm import tqdm
 
 @dataclass
 class Vars:
@@ -356,6 +357,20 @@ def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', ma
         row=row_data, 
         col=col_data
     )
+
+    # Plot peaks and valleys
+    peaks_idx0, _ = sp.signal.find_peaks(data) # peaks
+    peaks_idx1, _ = sp.signal.find_peaks(-data) # valleys
+    peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
+    fig.add_trace(
+        go.Scattergl(
+            x=time[peaks_idx], 
+            y=data[peaks_idx],
+            mode='markers',
+        ),
+        row=row_data, 
+        col=col_data
+    )
     
     # Add PSD data
     frequencies, psd = compute_psd(time, data)
@@ -419,116 +434,175 @@ if __name__ == "__main__":
     #     zeta_beta = 0.0133,
     #     U = 23.72 # m/s
     # )
-    
-    # Conner
-    v = Vars(
-        a = -0.5,
-        b = 0.127, # m
-        c = 0.5,
-        I_alpha = 0.01347, # kgm
-        I_beta = 0.0003264, # kgm
-        k_h = 2818.8, # kg/ms^2
-        k_alpha = 37.34, # kg/ms^2
-        k_beta = 3.9, # kg/ms^2
-        m = 1.5666, # kg/m
-        m_t = 3.39298, # kg/m
-        r_alpha = 0.7321,
-        r_beta = 0.1140,
-        S_alpha = 0.08587, # kg
-        S_beta = 0.00395, # kg
-        x_alpha = 0.4340,
-        x_beta = 0.02,
-        omega_h = 42.5352, # rad/s
-        omega_alpha = 52.6506, # rad/s
-        omega_beta = 109.3093, # rad/s
-        rho = 1.225, # kg/m^3
-        zeta_h = 0.0113,
-        zeta_alpha = 0.01626,
-        zeta_beta = 0.0115,
-        U = 0.49 * 23.9 # m/s
-    )
 
-    dt = 0.02
-    t_final = 10 * v.omega_alpha
-    vec_t = np.arange(0, t_final, dt)
-    n = len(vec_t)
+    # U_vec = [0.49 * 23.9]
+    # Interesting velocities:
+    # U_vec = [12.7778] # LCO transition
+    # U_vec = [12.63158]
+    # U_vec = [12.36842]
+    U_vec = np.linspace(2, 20, 150)
 
-    # hd, ad, bd, h, a, b, x1, x2
-    y0 = np.array([
-        0, # dh / dt
-        0, # dalpha / dt
-        0, # dbeta / dt
-        0.01 / v.b, # h
-        0, # alpha
-        0, # beta
-        0, # x1
-        0  # x2
-    ], dtype=np.float64)
+    beta_peaks = []
+    beta_vel = []
 
-    # y0 = np.array([
-    #     0, # dh / dt
-    #     0, # dalpha / dt
-    #     0, # dbeta / dt
-    #     0, # h
-    #     0, # alpha
-    #     np.radians(-2.12), # beta
-    #     0, # x1
-    #     0  # x2
-    # ], dtype=np.float64)
-
-    system = create_monolithic_system(y0, v)
-    mono = solve_ivp(system, (0, t_final), y0, t_eval=vec_t, method='RK45')
-    
-    if (not mono.success):
-        print("Monolithic solver failed")
-        exit(1)
-
-    # Plotting
-    fig = make_subplots(
-        rows=6, cols=2,
-        subplot_titles=(
-            'Heave', 'Heave Velocity',
-            'Heave PSD', 'Heave Velocity PSD',
-            'Wing Pitch', 'Wing Pitch Velocity',
-            'Pitch PSD', 'Pitch Velocity PSD',
-            'Flap', 'Flap Velocity',
-            'Flap PSD', 'Flap Velocity PSD'
-        ),
-        vertical_spacing=0.1,
-        horizontal_spacing=0.08
-    )
-    add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1)
-    add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2)
-    add_data_and_psd(fig, vec_t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1)
-    add_data_and_psd(fig, vec_t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2)
-    add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1)
-    add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2)
-
-    format_subplot(fig, 1, 1, "t", r"y")
-    format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
-    format_subplot(fig, 2, 1, "f", "Amplitude (dB)")
-    format_subplot(fig, 2, 2, "f", "Amplitude (dB)")
-    format_subplot(fig, 3, 1, "t", r"$\alpha$")
-    format_subplot(fig, 3, 2, "t", r"$\dot{\alpha}$")
-    format_subplot(fig, 4, 1, "f", "Amplitude (dB)")
-    format_subplot(fig, 4, 2, "f", "Amplitude (dB)")
-    format_subplot(fig, 5, 1, "t", r"$\beta$")
-    format_subplot(fig, 5, 2, "t", r"$\dot{\beta}$")
-    format_subplot(fig, 6, 1, "f", "Amplitude (dB)")
-    format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
-
-    fig.update_layout(
-        title="Theodorsen 3DOF Aeroelastic Response",
-        title_x=0.5,
-        autosize=True,
-        showlegend=True,
-        template="plotly_white",
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=1.0
+    for U in tqdm(U_vec): 
+        # Conner
+        v = Vars(
+            a = -0.5,
+            b = 0.127, # m
+            c = 0.5,
+            I_alpha = 0.01347, # kgm
+            I_beta = 0.0003264, # kgm
+            k_h = 2818.8, # kg/ms^2
+            k_alpha = 37.34, # kg/ms^2
+            k_beta = 3.9, # kg/ms^2
+            m = 1.5666, # kg/m
+            m_t = 3.39298, # kg/m
+            r_alpha = 0.7321,
+            r_beta = 0.1140,
+            S_alpha = 0.08587, # kg
+            S_beta = 0.00395, # kg
+            x_alpha = 0.4340,
+            x_beta = 0.02,
+            omega_h = 42.5352, # rad/s
+            omega_alpha = 52.6506, # rad/s
+            omega_beta = 109.3093, # rad/s
+            rho = 1.225, # kg/m^3
+            zeta_h = 0.0113,
+            zeta_alpha = 0.01626,
+            zeta_beta = 0.0115,
+            U = U # m/s
         )
-    )
 
-    fig.write_html("build/3dof.html", include_mathjax='cdn')
+        dt = 0.02
+        t_final = 30 * v.omega_alpha
+        vec_t = np.arange(0, t_final, dt)
+        n = len(vec_t)
+
+        # hd, ad, bd, h, a, b, x1, x2
+        y0 = np.array([
+            0, # dh / dt
+            0, # dalpha / dt
+            0, # dbeta / dt
+            0.01 / v.b, # h
+            0, # alpha
+            0, # beta
+            0, # x1
+            0  # x2
+        ], dtype=np.float64)
+
+        # y0 = np.array([
+        #     0, # dh / dt
+        #     0, # dalpha / dt
+        #     0, # dbeta / dt
+        #     0, # h
+        #     0, # alpha
+        #     np.radians(-2.12), # beta
+        #     0, # x1
+        #     0  # x2
+        # ], dtype=np.float64)
+
+        system = create_monolithic_system(y0, v)
+        mono = solve_ivp(system, (0, t_final), y0, t_eval=vec_t, method='RK45')
+        
+        if (not mono.success):
+            print("Monolithic solver failed")
+            exit(1)
+
+        angle_tolerance = 0.25 # degrees
+        last25_amp = np.degrees(mono.y[5, int(0.75 * n):])
+        peaks_idx0, _ = sp.signal.find_peaks(last25_amp)
+        peaks_idx1, _ = sp.signal.find_peaks(-last25_amp)
+        peaks_idx = np.sort(np.concatenate((peaks_idx0, peaks_idx1)))
+        amp_local = last25_amp[peaks_idx]
+        amp_peaks_local_unique = [amp_local[0]]
+        for amp in amp_local[1:]:
+            if not np.any(np.abs(amp - np.array(amp_peaks_local_unique)) < angle_tolerance):
+                amp_peaks_local_unique.append(amp)
+            
+        beta_peaks.extend(amp_peaks_local_unique)
+        beta_vel.extend([U] * len(amp_peaks_local_unique))
+
+        if len(U_vec) == 1:
+            # Plotting
+            fig = make_subplots(
+                rows=6, cols=2,
+                subplot_titles=(
+                    'Heave', 'Heave Velocity',
+                    'Heave PSD', 'Heave Velocity PSD',
+                    'Wing Pitch', 'Wing Pitch Velocity',
+                    'Pitch PSD', 'Pitch Velocity PSD',
+                    'Flap', 'Flap Velocity',
+                    'Flap PSD', 'Flap Velocity PSD'
+                ),
+                vertical_spacing=0.1,
+                horizontal_spacing=0.08
+            )
+            add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1) # h
+            add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2) # dh
+            add_data_and_psd(fig, vec_t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1) # alpha
+            add_data_and_psd(fig, vec_t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2) # dalpha
+            add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1) # beta
+            add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
+
+            format_subplot(fig, 1, 1, "t", r"y")
+            format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
+            format_subplot(fig, 2, 1, "f", "Amplitude (dB)")
+            format_subplot(fig, 2, 2, "f", "Amplitude (dB)")
+            format_subplot(fig, 3, 1, "t", r"$\alpha$")
+            format_subplot(fig, 3, 2, "t", r"$\dot{\alpha}$")
+            format_subplot(fig, 4, 1, "f", "Amplitude (dB)")
+            format_subplot(fig, 4, 2, "f", "Amplitude (dB)")
+            format_subplot(fig, 5, 1, "t", r"$\beta$")
+            format_subplot(fig, 5, 2, "t", r"$\dot{\beta}$")
+            format_subplot(fig, 6, 1, "f", "Amplitude (dB)")
+            format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
+
+            fig.update_layout(
+                title="Theodorsen 3DOF Aeroelastic Response",
+                title_x=0.5,
+                autosize=True,
+                showlegend=True,
+                template="plotly_white",
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=1.0
+                )
+            )
+
+            fig.write_html("build/3dof.html", include_mathjax='cdn')
+
+    if len(U_vec) > 1:
+        fig = make_subplots(
+            rows=1, cols=1,
+            subplot_titles=(
+                'Bifurcation Diagram'
+            ),
+            vertical_spacing=0.1,
+            horizontal_spacing=0.08
+        )
+
+        fig.add_trace(
+            go.Scattergl(
+                x=beta_vel, 
+                y=beta_peaks, 
+                name="beta",
+                mode='markers',
+                showlegend=True
+            ),
+            row=1, 
+            col=1
+        )
+
+        fig.update_xaxes(
+            title_text="U",
+            row=1,
+            col=1,
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(128, 128, 128, 0.2)',
+        )
+
+        fig.write_html("build/bifurcation.html", include_mathjax='cdn')
