@@ -439,8 +439,8 @@ if __name__ == "__main__":
     # Interesting velocities:
     # U_vec = [12.7778] # LCO transition
     # U_vec = [12.63158]
-    # U_vec = [12.36842]
-    U_vec = np.linspace(2, 20, 150)
+    U_vec = [12.36842]
+    # U_vec = np.linspace(2, 20, 150)
 
     beta_peaks = []
     beta_vel = []
@@ -475,7 +475,7 @@ if __name__ == "__main__":
         )
 
         dt = 0.02
-        t_final = 30 * v.omega_alpha
+        t_final = 15 * v.omega_alpha
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
