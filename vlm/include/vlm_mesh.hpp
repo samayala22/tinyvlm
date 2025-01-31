@@ -24,7 +24,7 @@ class MeshIO {
 public:
     MeshIO(const std::string& format);
     SurfDims get_dims(const std::string& filename) const;
-    void read(const std::string& filename, const TensorView3D<Location::Host>& vertices) const;
+    void read(const std::string& filename, const TensorView3D<Location::Host>& vertices, bool qc = true) const;
 
 private:
     std::unique_ptr<MeshFile> _file;

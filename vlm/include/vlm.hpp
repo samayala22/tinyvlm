@@ -47,7 +47,7 @@ class Simulation {
 
         MultiDim<2> assembly_wings;
 
-        Simulation(const std::string& backend_name, const std::vector<std::string>& meshes);
+        Simulation(const std::string& backend_name, const std::vector<std::string>& meshes, bool qc = true);
         virtual ~Simulation() = default;
 };
 

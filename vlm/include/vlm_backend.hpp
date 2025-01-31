@@ -84,11 +84,10 @@ class Backend {
         linalg::float3 coeff_cm_multibody(
             const MultiTensorView3D<Location::Device>& aero_forces,
             const MultiTensorView3D<Location::Device>& verts_wing,
+            const MultiTensorView2D<Location::Device>& areas,
             const linalg::float3& ref_pt,
             const linalg::float3& freestream, 
-            f32 rho,
-            f32 area,
-            f32 mac
+            f32 rho
         );
 
         virtual void mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>&  verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) = 0;

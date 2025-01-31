@@ -37,10 +37,12 @@ public:
         i64 blocks;
         f >> blocks;
         if (blocks != 1) {
+            std::printf("Only single block plot3d mesh is supported\n");
             throw std::runtime_error("Only single block plot3d mesh is supported");
         }
         f >> ni >> nj >> nk;
         if (nk != 1) {
+            std::printf("Only 2D plot3d mesh is supported\n");
             throw std::runtime_error("Only 2D plot3d mesh is supported");
         }
         return {ni-1, nj-1};
@@ -101,18 +103,19 @@ MeshIO::MeshIO(const std::string& format) {
 SurfDims MeshIO::get_dims(const std::string& filename) const {
     std::ifstream file(filename);
     if (!file.is_open()) {
-        throw std::runtime_error("Failed to open mesh file");
+        std::printf("Failed to open mesh file\n");
+        throw std::runtime_error("");
     }
     auto dims = _file->get_dims(file);
     std::printf("MESH: %s (%llu x %llu)\n", filename.c_str(), dims.first, dims.second);
     return dims;
 }
 
-void MeshIO::read(const std::string& filename, const TensorView3D<Location::Host>& vertices) const {
+void MeshIO::read(const std::string& filename, const TensorView3D<Location::Host>& vertices, bool qc) const {
     std::ifstream file_stream(filename);
     if (!file_stream.is_open()) {
         throw std::runtime_error("Failed to open mesh file");
     }
     _file->read(file_stream, vertices);
-    mesh_quarterchord(vertices);
+    if (qc) mesh_quarterchord(vertices);
 }

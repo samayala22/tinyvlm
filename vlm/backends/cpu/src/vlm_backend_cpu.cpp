@@ -330,6 +330,7 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device
 
     auto wake_influence = taskflow.for_each_index((i64)0, rhs.size(), [&] (i64 idx) {
         for (i32 i = 0; i < normals.size(); i++) {
+            if (i == 0) continue; // NOTE: TEMPORARY for 3dof (skip wing wake)
             const auto& normals_i = normals[i];
             const auto& colloc_i = colloc[i];
             const auto& gamma_wake_i = gamma_wake[i];
@@ -481,7 +482,6 @@ f32 BackendCPU::coeff_cl(
         }
     }
     return cl / (0.5f * rho * linalg::length2(freestream) * area);
-    // return cl / (0.5f * area);
 }
 
 linalg::float3 BackendCPU::coeff_cm(

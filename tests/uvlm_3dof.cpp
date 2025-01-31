@@ -37,7 +37,6 @@ using namespace linalg::ostream_overloads;
 // 1. Nonlinear term is defined twice (structural initialization and in the coupling loop)
 // 2. Initial position is defined twice (strucrual initialization and verts_init position)
 
-
 struct Vars {
     f32 a; // Dimensionless distance between mid-chord and EA (-0.5)
     f32 b; // Semi-chord (0.127 m)
@@ -142,7 +141,7 @@ class UVLM_3DOF final: public Simulation {
         f32 wing_h(f32 elastic_dst); // get wing elastic height at given dist
 };
 
-UVLM_3DOF::UVLM_3DOF(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes) {
+UVLM_3DOF::UVLM_3DOF(const std::string& backend_name, const std::vector<std::string>& meshes) : Simulation(backend_name, meshes, false) {
     ASSERT_EQ(meshes.size(), 2);
     solver = backend->create_lu_solver();
     accel_solver = backend->create_lu_solver();
@@ -157,7 +156,7 @@ inline i64 total_panels(const MultiDim<2>& assembly_wing) {
     return total;
 }
 
-f32 UVLM_3DOF::wing_alpha() {
+f32 UVLM_3DOF::wing_alpha() { // angle relative to the x axis
     const auto& wing_h = verts_wing_h.views()[0];
     const linalg::float3 chord_axis = linalg::normalize(linalg::float3{
         wing_h(0, 1, 0) - wing_h(0, 0, 0),
@@ -167,8 +166,14 @@ f32 UVLM_3DOF::wing_alpha() {
     return std::atan2(-chord_axis.z, chord_axis.x);
 }
 
-f32 UVLM_3DOF::flap_beta() {
-    return 0.0f; // TODO
+f32 UVLM_3DOF::flap_beta() { // angle relative to the wing chord axis
+    const auto& flap_h = verts_wing_h.views()[1];
+    const linalg::float3 chord_axis = linalg::normalize(linalg::float3{
+        flap_h(0, 1, 0) - flap_h(0, 0, 0),
+        flap_h(0, 1, 1) - flap_h(0, 0, 1),
+        flap_h(0, 1, 2) - flap_h(0, 0, 2)
+    });
+    return std::atan2(-chord_axis.z, chord_axis.x) - wing_alpha();
 }
 
 // elastic dst: distance from the leading edge
@@ -177,7 +182,7 @@ f32 UVLM_3DOF::wing_h(f32 elastic_dst) {
     const linalg::float3 pt0 = linalg::float3{wing_h(0, 0, 0), wing_h(0, 0, 1), wing_h(0, 0, 2)};
     const linalg::float3 pt1 = linalg::float3{wing_h(0, 1, 0), wing_h(0, 1, 1), wing_h(0, 1, 2)};
     const linalg::float3 chord_axis = linalg::normalize(pt1 - pt0);
-    const linalg::float3 elastic_pt = pt0 + elastic_dst * chord_axis - 0.25f * (pt1 - pt0);
+    const linalg::float3 elastic_pt = pt0 + elastic_dst * chord_axis;
     return elastic_pt.z;
 }
 
@@ -268,7 +273,9 @@ void UVLM_3DOF::update_wake_and_gamma(i64 iteration) {
         gamma_wing_i.to(gamma_wing_delta_i);
         
         // Shed wake
-        gamma_wing_i.slice(All, -1).to(gamma_wake_i.slice(All, -1-iteration));
+        if (m == 1) { // only shed for the flap
+            gamma_wing_i.slice(All, -1).to(gamma_wake_i.slice(All, -1-iteration));
+        }
         
         // Compute delta
         backend->blas->axpy(
@@ -314,7 +321,7 @@ void UVLM_3DOF::update_transforms(const Assembly& assembly, f32 t) {
 }
 
 void UVLM_3DOF::initialize_structure_data(const Vars& v, const i64 t_steps, const f32 dt_nd) {
-        // Initialize structural data
+    // Initialize structural data
     const auto& M_hv = M_h.view();
     const auto& C_hv = C_h.view();
     const auto& K_hv = K_h.view();
@@ -382,8 +389,9 @@ void UVLM_3DOF::initialize_structure_data(const Vars& v, const i64 t_steps, cons
     v_hv.slice(All, 0).to(v_dv.slice(All, 0));
     
     // Compute initial acceleration
-    const f32 gamma = 0.0f;
-    a_hv(0, 0) = - u_hv(0, 0) * pow(sigma, 2) * (1 + gamma * pow(u_hv(0,0), 2));
+    // const f32 gamma = 0.0f;
+    // a_hv(0, 0) = - u_hv(0, 0) * pow(sigma, 2) * (1 + gamma * pow(u_hv(0,0), 2));
+    a_hv(0, 0) = - u_hv(0, 0) * pow(sigma, 2);
     a_hv(2, 0) = - (pow(v.omega_beta / v.omega_alpha, 2) * pow(v.r_beta, 2)) * alpha_freeplay(u_hv(2, 0));
     
     a_hv.slice(All, 0).to(a_d.view().slice(All, 0));
@@ -425,7 +433,7 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
         {
             0.0f,
             0.0f,
-            0.01f / v.b
+            - 0.01f / v.b
         }
     );
 
@@ -474,15 +482,19 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
     backend->lhs_assemble(lhs.view(), colloc_d.views(), normals_d.views(), verts_wing.views(), verts_wake.views(), condition0 , 0);
     solver->factorize(lhs.view());
     backend->wake_shed(verts_wing.views(), verts_wake.views(), 0);
+    // Technically in the initial velocities calculation we should also take into account the IC of the eq of motion
+    // In our case, since the IC is an initial position, we can ignore it. 
     wing_velocities(assembly.surface_kinematics()[0]->transform_dual(0.0f), colloc_h.views()[0], velocities_h.views()[0], velocities.views()[0]);
+    wing_velocities(assembly.surface_kinematics()[0]->transform_dual(0.0f), colloc_h.views()[1], velocities_h.views()[1], velocities.views()[1]);
+
     rhs.view().fill(0.f);
     backend->rhs_assemble_velocities(rhs.view(), normals_d.views(), velocities.views());
     backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), 0);
     solver->solve(lhs.view(), rhs.view().reshape(rhs.size(), 1));
     update_wake_and_gamma(0);
 
-    std::ofstream data_2dof("2dof.txt");
-    data_2dof << 1.0f << "\n";
+    std::ofstream data_3dof("3dof.txt");
+    data_3dof << 1.0f << "\n";
 
     // Transient simulation loop
     // for (i32 i = 0; i < t_steps-2; i++) {
@@ -491,13 +503,16 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
         const f32 t_nd = (f32)i * dt_nd;
         t_h.view()(i) = t_nd;
 
-        data_2dof << t_nd 
-            << " " << u_h.view()(0,i)
-            << " " << u_h.view()(1,i)
-            << " " << v_h.view()(0,i)
-            << " " << v_h.view()(1,i)
+        data_3dof << t_nd 
+            << " " << u_h.view()(0,i) // h
+            << " " << u_h.view()(1,i) // alpha
+            << " " << u_h.view()(2,i) // beta
+            << " " << v_h.view()(0,i) // dh/dt
+            << " " << v_h.view()(1,i) // dalpha/dt
+            << " " << v_h.view()(2,i) // dbeta/dt
             << " " << F_h.view()(0,i)
             << " " << F_h.view()(1,i)
+            << " " << F_h.view()(2,i)
             << "\n";
 
         for (const auto& [gamma_wing_i, gamma_wing_prev_i] : zip(gamma_wing.views(), gamma_wing_prev.views())) {
@@ -524,6 +539,17 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
                 dt_nd // dimensionless dt
             );
 
+            verts_wing.views()[0].to(verts_wing_h.views()[0]);
+            verts_wing.views()[1].to(verts_wing_h.views()[1]);
+            
+            // Temporary Position correctness checks
+            const f32 real_alpha = wing_alpha();
+            const f32 real_beta = flap_beta();
+            const f32 real_h = wing_h(1 + v.a);
+            ASSERT_NEAR(real_h, -u_h.view()(0, i), 1e-5f);
+            ASSERT_NEAR(real_alpha, u_h.view()(1, i), 1e-5f);
+            ASSERT_NEAR(real_beta, u_h.view()(2, i), 1e-5f);
+
             du.view().to(du_h.view());
 
             u_d.view().slice(All, i).to(u_d.view().slice(All, i+1));
@@ -536,7 +562,6 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
             v_d.view().slice(All, i+1).to(v_h.view().slice(All, i+1));
             a_d.view().slice(All, i+1).to(a_h.view().slice(All, i+1));
 
-            // Returns dimensionalized values
             const KinematicNode heave([&](const fwd::Float& t) {
                 return translation_matrix<fwd::Float>({
                     0.0f,
@@ -544,7 +569,7 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
                     - u_h.view()(0, i+1) - v_h.view()(0, i+1) * t
                 });
             });
-            const KinematicNode pitch([&](const fwd::Float& t) {
+            const KinematicNode wing_pitch([&](const fwd::Float& t) {
                 return rotation_matrix<fwd::Float>(
                     {
                         1.f + v.a,
@@ -559,29 +584,50 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
                     u_h.view()(1, i+1) + v_h.view()(1, i+1) * t
                 );
             });
+            const KinematicNode flap_pitch([&](const fwd::Float& t) {
+                return rotation_matrix<fwd::Float>(
+                    {
+                        1.f + v.c,
+                        0.0f,
+                        0.0f
+                    },
+                    {
+                        0.0f,
+                        1.0f,
+                        0.0f
+                    }, 
+                    u_h.view()(2, i+1) + v_h.view()(2, i+1) * t
+                );
+            }); 
 
             // std::printf("iter: %d | h: %f | alpha: %f | h_dot: %f | alpha_dot: %f\n", iteration, u_h.view()(0, i+1), u_h.view()(1, i+1), v_h.view()(0, i+1), v_h.view()(1, i+1));
             
             // Manually compute the transform (update_transforms(assembly, t+dt))
             auto fs = assembly.kinematics()->transform_dual(t_nd+dt_nd);
-            auto transform_dual = linalg::mul(fs, linalg::mul(heave.transform_dual(0.0f), pitch.transform_dual(0.0f)));
-            auto transform = dual_to_float(transform_dual);
-            auto ref_pt_4 = linalg::mul(transform, {1 + v.a, 0.0f, 0.0f, 1.0f});
+            auto wing_transform_dual = linalg::mul(fs, linalg::mul(heave.transform_dual(0.0f), wing_pitch.transform_dual(0.0f)));
+            auto flap_transform_dual = linalg::mul(wing_transform_dual, flap_pitch.transform_dual(0.0f));
+            auto wing_transform = dual_to_float(wing_transform_dual);
+            auto flap_transform = dual_to_float(flap_transform_dual);
+            auto ref_pt_a = linalg::mul(wing_transform, {1 + v.a, 0.0f, 0.0f, 1.0f});
+            auto ref_pt_b = linalg::mul(flap_transform, {1 + v.c, 0.0f, 0.0f, 1.0f});
 
-            transform.store(transforms_h.views()[0].ptr(), transforms_h.views()[0].stride(1));
+            wing_transform.store(transforms_h.views()[0].ptr(), transforms_h.views()[0].stride(1));
+            flap_transform.store(transforms_h.views()[1].ptr(), transforms_h.views()[1].stride(1));
             transforms_h.views()[0].to(transforms.views()[0]);
+            transforms_h.views()[1].to(transforms.views()[1]);
 
             // Aero
             backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
             backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
             backend->wake_shed(verts_wing.views(), verts_wake.views(), i+1);
 
-            wing_velocities(transform_dual, colloc_h.views()[0], velocities_h.views()[0], velocities.views()[0]);
+            wing_velocities(wing_transform_dual, colloc_h.views()[0], velocities_h.views()[0], velocities.views()[0]);
+            wing_velocities(flap_transform_dual, colloc_h.views()[1], velocities_h.views()[1], velocities.views()[1]);
 
             rhs.view().fill(0.f);
             backend->rhs_assemble_velocities(rhs.view(), normals_d.views(), velocities.views());
             backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), i+1);
-            solver->solve(lhs.view(), rhs.view().reshape(rhs.size(), 1));
+            solver->solve(lhs.view(), rhs.view());
 
             {
                 i64 begin = 0;
@@ -612,43 +658,52 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
             }
 
             const linalg::float3 freestream = -assembly.kinematics()->linear_velocity(t_nd+dt_nd, {0.f, 0.f, 0.f});
-            backend->forces_unsteady(
-                verts_wing.views()[0],
-                gamma_wing_delta.views()[0],
-                gamma_wing.views()[0],
-                gamma_wing_prev.views()[0],
-                velocities.views()[0],
-                areas_d.views()[0],
-                normals_d.views()[0],
-                aero_forces.views()[0],
+            backend->forces_unsteady_multibody(
+                verts_wing.views(),
+                gamma_wing_delta.views(),
+                gamma_wing.views(),
+                gamma_wing_prev.views(),
+                velocities.views(),
+                areas_d.views(),
+                normals_d.views(),
+                aero_forces.views(),
                 dt_nd
             );
 
-            const f32 cl = backend->coeff_cl(
-                aero_forces.views()[0],
-                linalg::normalize(linalg::cross(freestream, {0.f, 1.f, 0.f})), // lift axis
+            const f32 cl = backend->coeff_cl_multibody(
+                aero_forces.views(),
+                areas_d.views(),
                 freestream,
-                1.0f, // rho_inf = 1
-                backend->sum(areas_d.views()[0])
+                1.0f // rho_inf = 1
             );
 
-            const linalg::float3 cm = backend->coeff_cm(
-                aero_forces.views()[0],
-                verts_wing.views()[0],
-                {ref_pt_4.x, ref_pt_4.y, ref_pt_4.z},
+            const linalg::float3 cm_a = backend->coeff_cm_multibody(
+                aero_forces.views(),
+                verts_wing.views(),
+                areas_d.views(),
+                {ref_pt_a.x, ref_pt_a.y, ref_pt_a.z},
                 freestream,
-                1.0f, // rho_inf = 1
-                backend->sum(areas_d.views()[0]),
-                backend->mesh_mac(verts_wing.views()[0], areas_d.views()[0])
+                1.0f // rho_inf = 1
+            );
+            const linalg::float3 cm_b = backend->coeff_cm_multibody(
+                aero_forces.views(),
+                verts_wing.views(),
+                areas_d.views(),
+                {ref_pt_b.x, ref_pt_b.y, ref_pt_b.z},
+                freestream,
+                1.0f // rho_inf = 1
             );
             
             // Aero forces
-            // F_h.view()(0, i+1) = - cl / (PI_f * mu);
-            // F_h.view()(1, i+1) = (2.f*cm.y) / (PI_f * mu * pow(vars.r_a, 2));
+            F_h.view()(0, i+1) = - V*V*cl / (PI_f*mu);
+            F_h.view()(1, i+1) = 2.f*V*V*cm_a.y / (PI_f*mu);
+            F_h.view()(2, i+1) = 2.f*V*V*cm_b.y / (PI_f*mu);
             
             // deltaF for rhs
-            // dF_h.view()(0) = F_h.view()(0, i+1) - F_h.view()(0, i) - pow(vars.omega / vars.U_a, 2) * du_h.view()(0);
-            // dF_h.view()(1) = F_h.view()(1, i+1) - F_h.view()(1, i) - 1/pow(vars.U_a, 2) * (alpha_freeplay(u_h.view()(1,i+1)) - alpha_freeplay(u_h.view()(1,i)));
+            const f32 sigma = v.omega_h / v.omega_alpha;
+            dF_h.view()(0) = F_h.view()(0, i+1) - F_h.view()(0, i) - pow(sigma, 2) * du_h.view()(0);
+            dF_h.view()(1) = F_h.view()(1, i+1) - F_h.view()(1, i);
+            dF_h.view()(2) = F_h.view()(1, i+1) - F_h.view()(1, i) - (pow(v.omega_beta / v.omega_alpha, 2) * pow(v.r_beta, 2)) * (alpha_freeplay(u_h.view()(2,i+1)) - alpha_freeplay(u_h.view()(2,i)));
 
             dF_h.view().to(dF.view());
 
@@ -664,14 +719,16 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
 
 int main() {
     // vlm::Executor::instance(1);
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x5.x"};
-    // const std::vector<std::string> meshes = {"../../../../mesh/rectangular_2x2.x"};
+    const std::vector<std::vector<std::string>> meshes = {{
+        "../../../../mesh/3dof_wing_9x5.x",
+        "../../../../mesh/3dof_flap_3x5.x"
+    }}; // vector of vector meh
     const std::vector<std::string> backends = {"cpu"};
 
     auto simulations = tiny::make_combination(meshes, backends);
 
-    const f32 flutter_speed = 23.9f;
-    const f32 flutter_ratio = 0.2f;
+    // const f32 flutter_speed = 23.9f;
+    // const f32 flutter_ratio = 0.2f;
 
     Vars v;
     v.a = -0.5f;
@@ -711,10 +768,10 @@ int main() {
         });
     });
 
-    for (const auto& [mesh_name, backend_name] : simulations) {
+    for (const auto& [mesh_names, backend_name] : simulations) {
         Assembly assembly(freestream);
-        assembly.add(mesh_name, freestream);
-        // UVLM_3DOF simulation{backend_name, {mesh_name}};
+        assembly.add(mesh_names.get()[0], freestream);
+        UVLM_3DOF simulation{backend_name, mesh_names};
         // simulation.run(assembly, v, t_final_nd);
     }
     

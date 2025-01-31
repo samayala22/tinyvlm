@@ -17,7 +17,7 @@
 
 using namespace vlm;
 
-Simulation::Simulation(const std::string& backend_name, const std::vector<std::string>& meshes) : backend(create_backend(backend_name)) {
+Simulation::Simulation(const std::string& backend_name, const std::vector<std::string>& meshes, bool qc) : backend(create_backend(backend_name)) {
     // Read the sizes of all the meshes
     for (const auto& m_name : meshes) {
         const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
@@ -38,7 +38,7 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     // Perform the actual read of the mesh files
     for (i64 i = 0; i < meshes.size(); i++) {
         const MeshIO mesh_io{"plot3d"};
-        mesh_io.read(meshes[i], verts_wing_init_h.views()[i]);
+        mesh_io.read(meshes[i], verts_wing_init_h.views()[i], qc);
     }
 
     for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {

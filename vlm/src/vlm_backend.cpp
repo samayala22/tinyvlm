@@ -121,6 +121,36 @@ f32 Backend::coeff_cl_multibody(const MultiTensorView3D<Location::Device>& aero_
     return cl;
 }
 
+linalg::float3 Backend::coeff_cm_multibody(
+    const MultiTensorView3D<Location::Device>& aero_forces,
+    const MultiTensorView3D<Location::Device>& verts_wing,
+    const MultiTensorView2D<Location::Device>& areas,
+    const linalg::float3& ref_pt,
+    const linalg::float3& freestream, 
+    f32 rho
+)
+{
+    linalg::float3 cm = {0.0f, 0.0f, 0.0f};
+    f32 total_area_mac = 0.0f;
+    for (i64 m = 0; m < aero_forces.size(); m++) {
+        const f32 area_local = sum(areas[m]);
+        const f32 mac_local = mesh_mac(verts_wing[m], areas[m]);
+        const auto local_cm = coeff_cm(
+            aero_forces[m],
+            verts_wing[m],
+            ref_pt,
+            freestream,
+            rho,
+            area_local,
+            mac_local
+        );
+        cm += local_cm * area_local * mac_local;
+        total_area_mac += area_local * mac_local;
+    }
+    cm /= total_area_mac;
+    return cm;
+}
+
 void Backend::forces_unsteady_multibody(
     const MultiTensorView3D<Location::Device>& verts_wing,
     const MultiTensorView2D<Location::Device>& gamma_delta,
