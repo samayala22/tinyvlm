@@ -33,6 +33,9 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
+#define COUPLED 1
+// #define FREEPLAY_JOINT
+
 // Notes:
 // 1. Nonlinear term is defined twice (structural initialization and in the coupling loop)
 // 2. Initial position is defined twice (strucrual initialization and verts_init position)
@@ -240,11 +243,8 @@ void UVLM_3DOF::alloc_buffers() {
     accel_solver->init(M_d.view());
 }
 
-// f32 alpha(f32 alpha) {
-//     return alpha;
-// }
-
-f32 alpha_freeplay(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(4.24f), f32 a_f = to_radians(-2.12f)) {
+#ifdef FREEPLAY_JOINT
+f32 joint_(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(4.24f), f32 a_f = to_radians(-2.12f)) {
     if (alpha < a_f) {
         return M0 + alpha - a_f;
     } else if (alpha >= a_f && alpha <= (a_f + delta)) {
@@ -253,6 +253,11 @@ f32 alpha_freeplay(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radia
         return M0 + alpha - a_f + delta * (Mf - 1);
     }
 }
+#else
+f32 joint(f32 alpha) {
+    return alpha;
+}
+#endif
 
 void UVLM_3DOF::update_wake_and_gamma(i64 iteration) {
     i64 begin = 0;
@@ -392,7 +397,7 @@ void UVLM_3DOF::initialize_structure_data(const Vars& v, const i64 t_steps, cons
     // const f32 gamma = 0.0f;
     // a_hv(0, 0) = - u_hv(0, 0) * pow(sigma, 2) * (1 + gamma * pow(u_hv(0,0), 2));
     a_hv(0, 0) = - u_hv(0, 0) * pow(sigma, 2);
-    a_hv(2, 0) = - (pow(v.omega_beta / v.omega_alpha, 2) * pow(v.r_beta, 2)) * alpha_freeplay(u_hv(2, 0));
+    a_hv(2, 0) = - (pow(v.omega_beta / v.omega_alpha, 2) * pow(v.r_beta, 2)) * joint(u_hv(2, 0));
     
     a_hv.slice(All, 0).to(a_d.view().slice(All, 0));
     backend->blas->gemv(-1.0f, C_d.view(), v_dv.slice(All, 0), 1.0f, a_dv.slice(All, 0));
@@ -494,7 +499,7 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
     update_wake_and_gamma(0);
 
     std::ofstream data_3dof("3dof.txt");
-    data_3dof << 1.0f << "\n";
+    data_3dof << t_steps-2 << "\n";
 
     // Transient simulation loop
     // for (i32 i = 0; i < t_steps-2; i++) {
@@ -510,10 +515,18 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
             << " " << v_h.view()(0,i) // dh/dt
             << " " << v_h.view()(1,i) // dalpha/dt
             << " " << v_h.view()(2,i) // dbeta/dt
-            << " " << F_h.view()(0,i)
-            << " " << F_h.view()(1,i)
-            << " " << F_h.view()(2,i)
             << "\n";
+
+        verts_wing.views()[0].to(verts_wing_h.views()[0]);
+        verts_wing.views()[1].to(verts_wing_h.views()[1]);
+        
+        // Temporary Position correctness checks
+        const f32 real_alpha = wing_alpha();
+        const f32 real_beta = flap_beta();
+        const f32 real_h = wing_h(1 + v.a);
+        ASSERT_NEAR(real_h, -u_h.view()(0, i), 5e-5f);
+        ASSERT_NEAR(real_alpha, u_h.view()(1, i), 5e-5f);
+        ASSERT_NEAR(real_beta, u_h.view()(2, i), 5e-5f);
 
         for (const auto& [gamma_wing_i, gamma_wing_prev_i] : zip(gamma_wing.views(), gamma_wing_prev.views())) {
             gamma_wing_i.to(gamma_wing_prev_i);
@@ -525,7 +538,7 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
         i32 iteration = 0;
         const i32 max_iter = 50;
 
-        while (backend->blas->norm(du_k.view()) > EPS_f) {
+        while (backend->blas->norm(du_k.view()) > 2.f * EPS_f) {
             du.view().to(du_k.view());
             integrator.step(
                 M_d.view(),
@@ -538,17 +551,6 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
                 dF.view(),
                 dt_nd // dimensionless dt
             );
-
-            verts_wing.views()[0].to(verts_wing_h.views()[0]);
-            verts_wing.views()[1].to(verts_wing_h.views()[1]);
-            
-            // Temporary Position correctness checks
-            const f32 real_alpha = wing_alpha();
-            const f32 real_beta = flap_beta();
-            const f32 real_h = wing_h(1 + v.a);
-            ASSERT_NEAR(real_h, -u_h.view()(0, i), 1e-5f);
-            ASSERT_NEAR(real_alpha, u_h.view()(1, i), 1e-5f);
-            ASSERT_NEAR(real_beta, u_h.view()(2, i), 1e-5f);
 
             du.view().to(du_h.view());
 
@@ -600,7 +602,7 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
                 );
             }); 
 
-            // std::printf("iter: %d | h: %f | alpha: %f | h_dot: %f | alpha_dot: %f\n", iteration, u_h.view()(0, i+1), u_h.view()(1, i+1), v_h.view()(0, i+1), v_h.view()(1, i+1));
+            std::printf("iter: %d | h: %f | alpha: %f | h_dot: %f | alpha_dot: %f\n", iteration, u_h.view()(0, i+1), u_h.view()(1, i+1), v_h.view()(0, i+1), v_h.view()(1, i+1));
             
             // Manually compute the transform (update_transforms(assembly, t+dt))
             auto fs = assembly.kinematics()->transform_dual(t_nd+dt_nd);
@@ -616,11 +618,12 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
             transforms_h.views()[0].to(transforms.views()[0]);
             transforms_h.views()[1].to(transforms.views()[1]);
 
-            // Aero
             backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
             backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
             backend->wake_shed(verts_wing.views(), verts_wake.views(), i+1);
 
+            // Aero
+            #ifdef COUPLED
             wing_velocities(wing_transform_dual, colloc_h.views()[0], velocities_h.views()[0], velocities.views()[0]);
             wing_velocities(flap_transform_dual, colloc_h.views()[1], velocities_h.views()[1], velocities.views()[1]);
 
@@ -695,15 +698,25 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
             );
             
             // Aero forces
-            F_h.view()(0, i+1) = - V*V*cl / (PI_f*mu);
-            F_h.view()(1, i+1) = 2.f*V*V*cm_a.y / (PI_f*mu);
-            F_h.view()(2, i+1) = 2.f*V*V*cm_b.y / (PI_f*mu);
+            // F_h.view()(0, i+1) = - V*V*cl / (PI_f*mu);
+            // F_h.view()(1, i+1) = 2.f*V*V*cm_a.y / (PI_f*mu);
+            // F_h.view()(2, i+1) = 2.f*V*V*cm_b.y / (PI_f*mu);
+            F_h.view()(0, i+1) = - cl / (PI_f*mu);
+            F_h.view()(1, i+1) = 2.f*cm_a.y / (PI_f*mu);
+            F_h.view()(2, i+1) = 2.f*cm_b.y / (PI_f*mu);
+            #endif
             
             // deltaF for rhs
             const f32 sigma = v.omega_h / v.omega_alpha;
+            #ifdef COUPLED
             dF_h.view()(0) = F_h.view()(0, i+1) - F_h.view()(0, i) - pow(sigma, 2) * du_h.view()(0);
             dF_h.view()(1) = F_h.view()(1, i+1) - F_h.view()(1, i);
-            dF_h.view()(2) = F_h.view()(1, i+1) - F_h.view()(1, i) - (pow(v.omega_beta / v.omega_alpha, 2) * pow(v.r_beta, 2)) * (alpha_freeplay(u_h.view()(2,i+1)) - alpha_freeplay(u_h.view()(2,i)));
+            dF_h.view()(2) = F_h.view()(2, i+1) - F_h.view()(2, i) - (pow(v.omega_beta / v.omega_alpha, 2) * pow(v.r_beta, 2)) * (joint(u_h.view()(2,i+1)) - joint(u_h.view()(2,i)));
+            #else
+            dF_h.view()(0) = - pow(sigma, 2) * du_h.view()(0);
+            dF_h.view()(1) = 0.0f;
+            dF_h.view()(2) = - (pow(v.omega_beta / v.omega_alpha, 2) * pow(v.r_beta, 2)) * (joint(u_h.view()(2,i+1)) - joint(u_h.view()(2,i)));
+            #endif
 
             dF_h.view().to(dF.view());
 
@@ -755,8 +768,9 @@ int main() {
     v.zeta_alpha = 0.01626f;
     v.zeta_beta = 0.0115f;
     v.U = 12.36842f; // m/s
+    // v.U = 5.0f; // m/s
 
-    const f32 t_final_nd = 10 * v.omega_alpha;
+    const f32 t_final_nd = 2.f * v.omega_alpha;
 
     KinematicsTree kinematics_tree;
 

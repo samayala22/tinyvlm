@@ -577,6 +577,7 @@ if __name__ == "__main__":
             du = np.zeros(2)
             du_k = np.zeros(2) + 1
             iteration = 0
+            # Newton-Raphson iterations
             while (np.linalg.norm(du_k - du) / len(du) > newton_err_thresh):
                 du_k = du[:]
                 du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import scipy as sp
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
+from pathlib import Path
 
 @dataclass
 class Vars:
@@ -44,273 +45,154 @@ def alpha_freeplay(alpha, M0 = 0.0, Mf = 0.0, delta = np.radians(4.24), a_f = np
 def alpha_linear(alpha):
     return alpha
 
-def create_monolithic_system(y0: np.ndarray, v: Vars):
-    # def monolithic_system(t, y: np.ndarray):
-    #     A = np.zeros((8,8))
+def create_monolithic_system(y0: np.ndarray, v: Vars, coupled: bool = True):
+    M_s = np.zeros((3,3)) # dimensionless structural intertia matrix
+    D_s = np.zeros((3,3)) # dimensionless structural damping matrix
+    K_s = np.zeros((3,3)) # dimensionless structural stiffness matrix
 
-    #     M_s = np.zeros((3,3)) # dimensionless structural intertia matrix
-    #     D_s = np.zeros((3,3)) # dimensionless structural damping matrix
-    #     K_s = np.zeros((3,3)) # dimensionless structural stiffness matrix
+    sigma = v.omega_h / v.omega_alpha
+    V = v.U / (v.b * v.omega_alpha)
+    mu = v.m / (np.pi * v.rho * v.b**2)
 
-    #     sigma = v.omega_h / v.omega_alpha
-    #     V = v.U / (v.b * v.omega_alpha)
-    #     mu = v.m / (np.pi * v.rho * v.b**2)
+    M_s[0, 0] = v.m_t / v.m
+    M_s[0, 1] = v.x_alpha
+    M_s[0, 2] = v.x_beta
+    M_s[1, 0] = v.x_alpha
+    M_s[1, 1] = v.r_alpha**2
+    M_s[1, 2] = (v.c - v.a) * v.x_beta + v.r_beta**2
+    M_s[2, 0] = v.x_beta
+    M_s[2, 1] = (v.c - v.a) * v.x_beta + v.r_beta**2
+    M_s[2, 2] = v.r_beta**2
+    M_s = mu * M_s
 
-    #     M_s[0, 0] = v.m_t / v.m
-    #     M_s[0, 1] = v.x_alpha
-    #     M_s[0, 2] = v.x_beta
-    #     M_s[1, 0] = v.x_alpha
-    #     M_s[1, 1] = v.r_alpha**2
-    #     M_s[1, 2] = (v.c - v.a) * v.x_beta + v.r_beta**2
-    #     M_s[2, 0] = v.x_beta
-    #     M_s[2, 1] = (v.c - v.a) * v.x_beta + v.r_beta**2
-    #     M_s[2, 2] = v.r_beta**2
-    #     M_s = mu * M_s
+    D_s[0, 0] = sigma * v.zeta_h
+    D_s[1, 1] = v.r_alpha**2 * v.zeta_alpha
+    D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
+    D_s = 2 * mu * D_s
 
-    #     D_s[0, 0] = sigma * v.zeta_h
-    #     D_s[1, 1] = v.r_alpha**2 * v.zeta_alpha
-    #     D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
-    #     D_s = 2 * mu * D_s
+    # K_s[0, 0] = sigma**2 * (1 + gamma * y[3]**2)
+    K_s[1, 1] = v.r_alpha**2
+    # K_s[2, 2] = (v.omega_beta / v.omega_alpha)**2 * v.r_beta**2
+    K_s = mu * K_s
 
-    #     gamma = 10 # Cubic factor (0 for linear spring)
-    #     K_s[0, 0] = sigma**2 * (1 + gamma * y[3]**2)
-    #     K_s[1, 1] = v.r_alpha**2
-    #     K_s[2, 2] = (v.omega_beta / v.omega_alpha)**2 * v.r_beta**2
-    #     K_s = mu * K_s
+    sqrt_1_minus_c2 = np.sqrt(1 - v.c**2)
+    acos_c = np.arccos(v.c)
 
-    #     sqrt_1_minus_c2 = np.sqrt(1 - v.c**2)
-    #     acos_c = np.arccos(v.c)
+    T1 = (-1/3) * sqrt_1_minus_c2 * (2 + v.c**2) + v.c * acos_c
+    T2 = v.c * (1 - v.c**2) - sqrt_1_minus_c2 * (1 + v.c**2) * acos_c + v.c * (acos_c)**2
+    T3 = -((1/8) + v.c**2) * (acos_c)**2 + (1/4) * v.c * sqrt_1_minus_c2 * acos_c * (7 + 2*v.c**2) - (1/8) * (1 - v.c**2) * (5 * v.c**2 + 4)
+    T4 = -acos_c + v.c * sqrt_1_minus_c2
+    T5 = -(1 - v.c**2) - (acos_c)**2 + 2 * v.c * sqrt_1_minus_c2 * acos_c
+    T6 = T2
+    T7 = -((1/8) + v.c**2) * acos_c + (1/8) * v.c * sqrt_1_minus_c2 * (7 + 2 * v.c**2)
+    T8 = (-1/3) * sqrt_1_minus_c2 * (2 * v.c**2 + 1) + v.c * acos_c
+    T9 = (1/2) * ((1/3) * (sqrt_1_minus_c2)**3 + v.a * T4)
+    T10 = sqrt_1_minus_c2 + acos_c
+    T11 = acos_c * (1 - 2 * v.c) + sqrt_1_minus_c2 * (2 - v.c)
+    T12 = sqrt_1_minus_c2 * (2 + v.c) - acos_c * (2 * v.c + 1)
+    T13 = (1/2) * (-T7 - (v.c - v.a) * T1)
+    T14 = (1/16) + (1/2) * v.a * v.c
 
-    #     T1 = (-1/3) * sqrt_1_minus_c2 * (2 + v.c**2) + v.c * acos_c
-    #     T2 = v.c * (1 - v.c**2) - sqrt_1_minus_c2 * (1 + v.c**2) * acos_c + v.c * (acos_c)**2
-    #     T3 = -((1/8) + v.c**2) * (acos_c)**2 + (1/4) * v.c * sqrt_1_minus_c2 * acos_c * (7 + 2*v.c**2) - (1/8) * (1 - v.c**2) * (5 * v.c**2 + 4)
-    #     T4 = -acos_c + v.c * sqrt_1_minus_c2
-    #     T5 = -(1 - v.c**2) - (acos_c)**2 + 2 * v.c * sqrt_1_minus_c2 * acos_c
-    #     T6 = T2
-    #     T7 = -((1/8) + v.c**2) * acos_c + (1/8) * v.c * sqrt_1_minus_c2 * (7 + 2 * v.c**2)
-    #     T8 = (-1/3) * sqrt_1_minus_c2 * (2 * v.c**2 + 1) + v.c * acos_c
-    #     T9 = (1/2) * ((1/3) * (sqrt_1_minus_c2)**3 + v.a * T4)
-    #     T10 = sqrt_1_minus_c2 + acos_c
-    #     T11 = acos_c * (1 - 2 * v.c) + sqrt_1_minus_c2 * (2 - v.c)
-    #     T12 = sqrt_1_minus_c2 * (2 + v.c) - acos_c * (2 * v.c + 1)
-    #     T13 = (1/2) * (-T7 - (v.c - v.a) * T1)
-    #     T14 = (1/16) + (1/2) * v.a * v.c
+    M_a = np.zeros((3,3)) # dimensionless aerodynamic inertia matrix
+    D_a = np.zeros((3,3)) # dimensionless aerodynamic damping matrix
+    K_a = np.zeros((3,3)) # dimensionless aerodynamic stiffness matrix
+    L_delta = np.zeros((3, 2)) # dimensionless aero lagging matrix
+    Q_a = np.zeros((2, 3)) # matrix of terms multiplied by the modal accelerations
+    Q_v = np.zeros((2, 3)) # matrix of terms multiplied by the modal velocities
+    L_lambda = np.zeros((2, 2))
 
-    #     M_a = np.zeros((3,3)) # dimensionless aerodynamic inertia matrix
-    #     D_a = np.zeros((3,3)) # dimensionless aerodynamic damping matrix
-    #     K_a = np.zeros((3,3)) # dimensionless aerodynamic stiffness matrix
-    #     L_delta = np.zeros((3, 2)) # dimensionless aero lagging matrix
-    #     Q_a = np.zeros((2, 3)) # matrix of terms multiplied by the modal accelerations
-    #     Q_v = np.zeros((2, 3)) # matrix of terms multiplied by the modal velocities
-    #     L_lambda = np.zeros((2, 2))
+    M_a[0, 0] = -1
+    M_a[0, 1] = v.a
+    M_a[0, 2] = T1 / np.pi
+    M_a[1, 0] = v.a
+    M_a[1, 1] = -(1/8 + v.a**2)
+    M_a[1, 2] = -2 * T13 / np.pi
+    M_a[2, 0] = T1 / np.pi
+    M_a[2, 1] = -2 * T13 / np.pi
+    M_a[2, 2] = T3 / (np.pi**2)
 
-    #     M_a[0, 0] = -1
-    #     M_a[0, 1] = v.a
-    #     M_a[0, 2] = T1 / np.pi
-    #     M_a[1, 0] = v.a
-    #     M_a[1, 1] = -(1/8 + v.a**2)
-    #     M_a[1, 2] = -2 * T13 / np.pi
-    #     M_a[2, 0] = T1 / np.pi
-    #     M_a[2, 1] = -2 * T13 / np.pi
-    #     M_a[2, 2] = T3 / (np.pi**2)
+    D_a[0, 0] = (-2)
+    D_a[0, 1] = (-2 * (1 - v.a))
+    D_a[0, 2] = (T4 - T11) / np.pi
+    D_a[1, 0] = (1 + 2 * v.a)
+    D_a[1, 1] = (v.a * (1 - 2 * v.a))
+    D_a[1, 2] = (T8 - T1 + (v.c - v.a) * T4 + v.a * T11) / np.pi
+    D_a[2, 0] = (-T12 / np.pi)
+    D_a[2, 1] = (2 * T9 + T1 + (T12 - T4) * (v.a - 0.5)) / np.pi
+    D_a[2, 2] = (T11 * (T4 - T12)) / (2 * np.pi**2)
+    D_a = V * D_a
 
-    #     D_a[0, 0] = (-2)
-    #     D_a[0, 1] = (-2 * (1 - v.a))
-    #     D_a[0, 2] = (T4 - T11) / np.pi
-    #     D_a[1, 0] = (1 + 2 * v.a)
-    #     D_a[1, 1] = (v.a * (1 - 2 * v.a))
-    #     D_a[1, 2] = (T8 - T1 + (v.c - v.a) * T4 + v.a * T11) / np.pi
-    #     D_a[2, 0] = (-T12 / np.pi)
-    #     D_a[2, 1] = (2 * T9 + T1 + (T12 - T4) * (v.a - 0.5)) / np.pi
-    #     D_a[2, 2] = (T11 * (T4 - T12)) / (2 * np.pi**2)
-    #     D_a = V * D_a
+    K_a[0, 0] = 0
+    K_a[0, 1] = (-2)
+    K_a[0, 2] = (-2 * T10) / np.pi
+    K_a[1, 0] = 0
+    K_a[1, 1] = (1 + 2 * v.a)
+    K_a[1, 2] = (2 * v.a * T10 - T4) / np.pi
+    K_a[2, 0] = 0
+    K_a[2, 1] = (-T12) / np.pi
+    K_a[2, 2] = (-1 / np.pi**2) * (T5 - T10 * (T4 - T12))
+    K_a = V**2 * K_a
+    
+    # Difference lies between coeffs of R.T Jones and W.P Jones
+    # Yung p220
+    d1 = 0.165
+    d2 = 0.335
+    # l1 = 0.041
+    # l2 = 0.320
+    l1 = 0.0455
+    l2 = 0.300
 
-    #     K_a[0, 0] = 0
-    #     K_a[0, 1] = (-2)
-    #     K_a[0, 2] = (-2 * T10) / np.pi
-    #     K_a[1, 0] = 0
-    #     K_a[1, 1] = (1 + 2 * v.a)
-    #     K_a[1, 2] = (2 * v.a * T10 - T4) / np.pi
-    #     K_a[2, 0] = 0
-    #     K_a[2, 1] = (-T12) / np.pi
-    #     K_a[2, 2] = (-1 / np.pi**2) * (T5 - T10 * (T4 - T12))
-    #     K_a = V**2 * K_a
-        
-    #     # Difference lies between coeffs of R.T Jones and W.P Jones
-    #     # Yung p220
-    #     d1 = 0.165
-    #     d2 = 0.335
-    #     # l1 = 0.041
-    #     # l2 = 0.320
-    #     l1 = 0.0455
-    #     l2 = 0.300
+    L_delta[0, 0] = d1
+    L_delta[0, 1] = d2
+    L_delta[1, 0] = - (0.5 + v.a) * d1
+    L_delta[1, 1] = - (0.5 + v.a) * d2
+    L_delta[2, 0] = T12 * d1 / (2 * np.pi)
+    L_delta[2, 1] = T12 * d2 / (2 * np.pi)
+    L_delta = 2 * V * L_delta
 
-    #     L_delta[0, 0] = d1
-    #     L_delta[0, 1] = d2
-    #     L_delta[1, 0] = - (0.5 + v.a) * d1
-    #     L_delta[1, 1] = - (0.5 + v.a) * d2
-    #     L_delta[2, 0] = T12 * d1 / (2 * np.pi)
-    #     L_delta[2, 1] = T12 * d2 / (2 * np.pi)
-    #     L_delta = 2 * V * L_delta
+    Q_a[0, 0] = 1
+    Q_a[0, 1] = 0.5 - v.a
+    Q_a[0, 2] = T11 / (2 * np.pi)
+    Q_a[1, 0] = 1
+    Q_a[1, 1] = 0.5 - v.a
+    Q_a[1, 2] = T11 / (2 * np.pi)
 
-    #     Q_a[0, 0] = 1
-    #     Q_a[0, 1] = 0.5 - v.a
-    #     Q_a[0, 2] = T11 / (2 * np.pi)
-    #     Q_a[1, 0] = 1
-    #     Q_a[1, 1] = 0.5 - v.a
-    #     Q_a[1, 2] = T11 / (2 * np.pi)
+    Q_v[0, 1] = 1
+    Q_v[0, 2] = T10 / np.pi
+    Q_v[1, 1] = 1
+    Q_v[1, 2] = T10 / np.pi
+    Q_v = V * Q_v
 
-    #     Q_v[0, 1] = 1
-    #     Q_v[0, 2] = T10 / np.pi
-    #     Q_v[1, 1] = 1
-    #     Q_v[1, 2] = T10 / np.pi
-    #     Q_v = V * Q_v
+    L_lambda[0, 0] = - l1
+    L_lambda[1, 1] = - l2
+    L_lambda = V * L_lambda
+    
+    def uncoupled_system(t, y: np.ndarray):
+        M1 = np.zeros((6, 6))
+        M2 = np.zeros((6, 6))
+        yn = np.zeros(6) # nonlinear terms
 
-    #     L_lambda[0, 0] = - l1
-    #     L_lambda[1, 1] = - l2
-    #     L_lambda = V * L_lambda
+        M2[0:3, 0:3] = M_s
+        M2[3:6, 3:6] = np.eye(3)
 
-    #     inv_inert_mat = np.linalg.inv(M_s - M_a)
-    #     A[0:3, 0:3] = - inv_inert_mat @ (D_s - D_a)
-    #     A[0:3, 3:6] = - inv_inert_mat @ (K_s - K_a)
-    #     A[0:3, 6:8] = inv_inert_mat @ L_delta
-    #     A[3:6, 0:3] = np.eye(3)
-    #     A[6:8, 0:3] = Q_a @ A[0:3, 0:3]+ Q_v
-    #     A[6:8, 3:6] = Q_a @ A[0:3, 3:6]
-    #     A[6:8, 6:8] = Q_a @ A[0:3, 6:8] + L_lambda
+        M1[0:3, 0:3] = - D_s
+        M1[0:3, 3:6] = - K_s
+        M1[3:6, 0:3] = np.eye(3)
 
-    #     return A @ y
+        gamma = 0 # Cubic factor (0 for linear spring)
+        yn[0] = - mu * y[3] * sigma**2 * (1 + gamma * y[3]**2)
+        yn[2] = - mu * ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * alpha_linear(y[5])
+        return np.linalg.solve(M2, M1 @ y + yn)
 
-    def monolithic_system(t, y: np.ndarray):
+    def coupled_system(t, y: np.ndarray):
+        # M2 @ dy/dt = M1 @ y + yn
         M1 = np.zeros((8, 8))
         M2 = np.zeros((8, 8))
         yn = np.zeros(8) # nonlinear terms
 
-        M_s = np.zeros((3,3)) # dimensionless structural intertia matrix
-        D_s = np.zeros((3,3)) # dimensionless structural damping matrix
-        K_s = np.zeros((3,3)) # dimensionless structural stiffness matrix
-
-        sigma = v.omega_h / v.omega_alpha
-        V = v.U / (v.b * v.omega_alpha)
-        mu = v.m / (np.pi * v.rho * v.b**2)
-
-        M_s[0, 0] = v.m_t / v.m
-        M_s[0, 1] = v.x_alpha
-        M_s[0, 2] = v.x_beta
-        M_s[1, 0] = v.x_alpha
-        M_s[1, 1] = v.r_alpha**2
-        M_s[1, 2] = (v.c - v.a) * v.x_beta + v.r_beta**2
-        M_s[2, 0] = v.x_beta
-        M_s[2, 1] = (v.c - v.a) * v.x_beta + v.r_beta**2
-        M_s[2, 2] = v.r_beta**2
-        M_s = mu * M_s
-
-        D_s[0, 0] = sigma * v.zeta_h
-        D_s[1, 1] = v.r_alpha**2 * v.zeta_alpha
-        D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
-        D_s = 2 * mu * D_s
-
-        # K_s[0, 0] = sigma**2 * (1 + gamma * y[3]**2)
-        K_s[1, 1] = v.r_alpha**2
-        # K_s[2, 2] = (v.omega_beta / v.omega_alpha)**2 * v.r_beta**2
-        K_s = mu * K_s
-
-        sqrt_1_minus_c2 = np.sqrt(1 - v.c**2)
-        acos_c = np.arccos(v.c)
-
-        T1 = (-1/3) * sqrt_1_minus_c2 * (2 + v.c**2) + v.c * acos_c
-        T2 = v.c * (1 - v.c**2) - sqrt_1_minus_c2 * (1 + v.c**2) * acos_c + v.c * (acos_c)**2
-        T3 = -((1/8) + v.c**2) * (acos_c)**2 + (1/4) * v.c * sqrt_1_minus_c2 * acos_c * (7 + 2*v.c**2) - (1/8) * (1 - v.c**2) * (5 * v.c**2 + 4)
-        T4 = -acos_c + v.c * sqrt_1_minus_c2
-        T5 = -(1 - v.c**2) - (acos_c)**2 + 2 * v.c * sqrt_1_minus_c2 * acos_c
-        T6 = T2
-        T7 = -((1/8) + v.c**2) * acos_c + (1/8) * v.c * sqrt_1_minus_c2 * (7 + 2 * v.c**2)
-        T8 = (-1/3) * sqrt_1_minus_c2 * (2 * v.c**2 + 1) + v.c * acos_c
-        T9 = (1/2) * ((1/3) * (sqrt_1_minus_c2)**3 + v.a * T4)
-        T10 = sqrt_1_minus_c2 + acos_c
-        T11 = acos_c * (1 - 2 * v.c) + sqrt_1_minus_c2 * (2 - v.c)
-        T12 = sqrt_1_minus_c2 * (2 + v.c) - acos_c * (2 * v.c + 1)
-        T13 = (1/2) * (-T7 - (v.c - v.a) * T1)
-        T14 = (1/16) + (1/2) * v.a * v.c
-
-        M_a = np.zeros((3,3)) # dimensionless aerodynamic inertia matrix
-        D_a = np.zeros((3,3)) # dimensionless aerodynamic damping matrix
-        K_a = np.zeros((3,3)) # dimensionless aerodynamic stiffness matrix
-        L_delta = np.zeros((3, 2)) # dimensionless aero lagging matrix
-        Q_a = np.zeros((2, 3)) # matrix of terms multiplied by the modal accelerations
-        Q_v = np.zeros((2, 3)) # matrix of terms multiplied by the modal velocities
-        L_lambda = np.zeros((2, 2))
-
-        M_a[0, 0] = -1
-        M_a[0, 1] = v.a
-        M_a[0, 2] = T1 / np.pi
-        M_a[1, 0] = v.a
-        M_a[1, 1] = -(1/8 + v.a**2)
-        M_a[1, 2] = -2 * T13 / np.pi
-        M_a[2, 0] = T1 / np.pi
-        M_a[2, 1] = -2 * T13 / np.pi
-        M_a[2, 2] = T3 / (np.pi**2)
-
-        D_a[0, 0] = (-2)
-        D_a[0, 1] = (-2 * (1 - v.a))
-        D_a[0, 2] = (T4 - T11) / np.pi
-        D_a[1, 0] = (1 + 2 * v.a)
-        D_a[1, 1] = (v.a * (1 - 2 * v.a))
-        D_a[1, 2] = (T8 - T1 + (v.c - v.a) * T4 + v.a * T11) / np.pi
-        D_a[2, 0] = (-T12 / np.pi)
-        D_a[2, 1] = (2 * T9 + T1 + (T12 - T4) * (v.a - 0.5)) / np.pi
-        D_a[2, 2] = (T11 * (T4 - T12)) / (2 * np.pi**2)
-        D_a = V * D_a
-
-        K_a[0, 0] = 0
-        K_a[0, 1] = (-2)
-        K_a[0, 2] = (-2 * T10) / np.pi
-        K_a[1, 0] = 0
-        K_a[1, 1] = (1 + 2 * v.a)
-        K_a[1, 2] = (2 * v.a * T10 - T4) / np.pi
-        K_a[2, 0] = 0
-        K_a[2, 1] = (-T12) / np.pi
-        K_a[2, 2] = (-1 / np.pi**2) * (T5 - T10 * (T4 - T12))
-        K_a = V**2 * K_a
-        
-        # Difference lies between coeffs of R.T Jones and W.P Jones
-        # Yung p220
-        d1 = 0.165
-        d2 = 0.335
-        # l1 = 0.041
-        # l2 = 0.320
-        l1 = 0.0455
-        l2 = 0.300
-
-        L_delta[0, 0] = d1
-        L_delta[0, 1] = d2
-        L_delta[1, 0] = - (0.5 + v.a) * d1
-        L_delta[1, 1] = - (0.5 + v.a) * d2
-        L_delta[2, 0] = T12 * d1 / (2 * np.pi)
-        L_delta[2, 1] = T12 * d2 / (2 * np.pi)
-        L_delta = 2 * V * L_delta
-
-        Q_a[0, 0] = 1
-        Q_a[0, 1] = 0.5 - v.a
-        Q_a[0, 2] = T11 / (2 * np.pi)
-        Q_a[1, 0] = 1
-        Q_a[1, 1] = 0.5 - v.a
-        Q_a[1, 2] = T11 / (2 * np.pi)
-
-        Q_v[0, 1] = 1
-        Q_v[0, 2] = T10 / np.pi
-        Q_v[1, 1] = 1
-        Q_v[1, 2] = T10 / np.pi
-        Q_v = V * Q_v
-
-        L_lambda[0, 0] = - l1
-        L_lambda[1, 1] = - l2
-        L_lambda = V * L_lambda
-
         M2[0:3, 0:3] = M_s - M_a
         M2[3:6, 3:6] = np.eye(3)
         M2[6:8, 6:8] = np.eye(2)
-        # M2[3:8, 3:8] = np.eye(5)
         M2[6:8, 0:3] = - Q_a
 
         M1[0:3, 0:3] = D_a - D_s
@@ -323,10 +205,23 @@ def create_monolithic_system(y0: np.ndarray, v: Vars):
         # Nonlinear term
         gamma = 0 # Cubic factor (0 for linear spring)
         yn[0] = - mu * y[3] * sigma**2 * (1 + gamma * y[3]**2)
-        yn[2] = - mu * ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * alpha_freeplay(y[5])
+        yn[2] = - mu * ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * alpha_linear(y[5])
         return np.linalg.solve(M2, M1 @ y + yn)
 
-    return monolithic_system
+        # dy/dt = A @ y
+        # A = np.zeros((8,8))
+        # inv_inert_mat = np.linalg.inv(M_s - M_a)
+        # A[0:3, 0:3] = - inv_inert_mat @ (D_s - D_a)
+        # A[0:3, 3:6] = - inv_inert_mat @ (K_s - K_a)
+        # A[0:3, 6:8] = inv_inert_mat @ L_delta
+        # A[3:6, 0:3] = np.eye(3)
+        # A[6:8, 0:3] = Q_a @ A[0:3, 0:3]+ Q_v
+        # A[6:8, 3:6] = Q_a @ A[0:3, 3:6]
+        # A[6:8, 6:8] = Q_a @ A[0:3, 6:8] + L_lambda
+
+        # return A @ y
+
+    return coupled_system if coupled else uncoupled_system
 
 def compute_psd(t, data):
     """Compute PSD with consistent parameters"""
@@ -359,18 +254,18 @@ def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', ma
     )
 
     # Plot peaks and valleys
-    peaks_idx0, _ = sp.signal.find_peaks(data) # peaks
-    peaks_idx1, _ = sp.signal.find_peaks(-data) # valleys
-    peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
-    fig.add_trace(
-        go.Scattergl(
-            x=time[peaks_idx], 
-            y=data[peaks_idx],
-            mode='markers',
-        ),
-        row=row_data, 
-        col=col_data
-    )
+    # peaks_idx0, _ = sp.signal.find_peaks(data) # peaks
+    # peaks_idx1, _ = sp.signal.find_peaks(-data) # valleys
+    # peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
+    # fig.add_trace(
+    #     go.Scattergl(
+    #         x=time[peaks_idx], 
+    #         y=data[peaks_idx],
+    #         mode='markers',
+    #     ),
+    #     row=row_data, 
+    #     col=col_data
+    # )
     
     # Add PSD data
     frequencies, psd = compute_psd(time, data)
@@ -440,10 +335,12 @@ if __name__ == "__main__":
     # U_vec = [12.7778] # LCO transition
     # U_vec = [12.63158]
     U_vec = [12.36842]
+    # U_vec = [5.0]
     # U_vec = np.linspace(2, 20, 150)
 
     beta_peaks = []
     beta_vel = []
+    coupled_sim = True
 
     for U in tqdm(U_vec): 
         # Conner
@@ -474,35 +371,16 @@ if __name__ == "__main__":
             U = U # m/s
         )
 
-        dt = 0.02
-        t_final = 15 * v.omega_alpha
+        dt = 0.09
+        t_final = 2 * v.omega_alpha
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
         # hd, ad, bd, h, a, b, x1, x2
-        y0 = np.array([
-            0, # dh / dt
-            0, # dalpha / dt
-            0, # dbeta / dt
-            0.01 / v.b, # h
-            0, # alpha
-            0, # beta
-            0, # x1
-            0  # x2
-        ], dtype=np.float64)
+        y0 = np.zeros(8, dtype=np.float64) if coupled_sim else np.zeros(6, dtype=np.float64)
+        y0[3] = 0.01 / v.b # h
 
-        # y0 = np.array([
-        #     0, # dh / dt
-        #     0, # dalpha / dt
-        #     0, # dbeta / dt
-        #     0, # h
-        #     0, # alpha
-        #     np.radians(-2.12), # beta
-        #     0, # x1
-        #     0  # x2
-        # ], dtype=np.float64)
-
-        system = create_monolithic_system(y0, v)
+        system = create_monolithic_system(y0, v, coupled_sim)
         mono = solve_ivp(system, (0, t_final), y0, t_eval=vec_t, method='RK45')
         
         if (not mono.success):
@@ -545,6 +423,24 @@ if __name__ == "__main__":
             add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1) # beta
             add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
 
+            uvlm_file = Path("build/windows/x64/debug/3dof.txt")
+            if uvlm_file.exists():
+                with open(uvlm_file, "r") as f:
+                    uvlm_tsteps = int(f.readline())
+                    uvlm = np.zeros((7, uvlm_tsteps))
+                    i = 0
+                    for line in f:
+                        uvlm[:, i] = np.array(list(map(float, line.split())))
+                        i += 1
+                    uvlm = uvlm[:, :i] # shrink in case the number of steps is not equal (stopped simulation)
+
+                    add_data_and_psd(fig, uvlm[0, :], uvlm[1, :], "UVLM", 1, 1)
+                    add_data_and_psd(fig, uvlm[0, :], uvlm[4, :], "UVLM", 1, 2)
+                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[2, :]), "UVLM", 3, 1)
+                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[5, :]), "UVLM", 3, 2)
+                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[3, :]), "UVLM", 5, 1)
+                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[6, :]), "UVLM", 5, 2)
+                
             format_subplot(fig, 1, 1, "t", r"y")
             format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
             format_subplot(fig, 2, 1, "f", "Amplitude (dB)")
