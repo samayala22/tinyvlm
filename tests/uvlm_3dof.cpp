@@ -33,7 +33,7 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
-#define COUPLED 1
+// #define COUPLED 1
 // #define FREEPLAY_JOINT
 
 // Notes:
@@ -515,6 +515,9 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
             << " " << v_h.view()(0,i) // dh/dt
             << " " << v_h.view()(1,i) // dalpha/dt
             << " " << v_h.view()(2,i) // dbeta/dt
+            << " " << F_h.view()(0,i) // lift
+            << " " << F_h.view()(1,i) // alpha moment
+            << " " << F_h.view()(2,i) // beta moment
             << "\n";
 
         verts_wing.views()[0].to(verts_wing_h.views()[0]);
@@ -602,7 +605,7 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
                 );
             }); 
 
-            std::printf("iter: %d | h: %f | alpha: %f | h_dot: %f | alpha_dot: %f\n", iteration, u_h.view()(0, i+1), u_h.view()(1, i+1), v_h.view()(0, i+1), v_h.view()(1, i+1));
+            // std::printf("iter: %d | h: %f | alpha: %f | h_dot: %f | alpha_dot: %f\n", iteration, u_h.view()(0, i+1), u_h.view()(1, i+1), v_h.view()(0, i+1), v_h.view()(1, i+1));
             
             // Manually compute the transform (update_transforms(assembly, t+dt))
             auto fs = assembly.kinematics()->transform_dual(t_nd+dt_nd);
@@ -623,7 +626,6 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
             backend->wake_shed(verts_wing.views(), verts_wake.views(), i+1);
 
             // Aero
-            #ifdef COUPLED
             wing_velocities(wing_transform_dual, colloc_h.views()[0], velocities_h.views()[0], velocities.views()[0]);
             wing_velocities(flap_transform_dual, colloc_h.views()[1], velocities_h.views()[1], velocities.views()[1]);
 
@@ -688,23 +690,23 @@ void UVLM_3DOF::run(const Assembly& assembly, const Vars& v, f32 t_final_nd) {
                 freestream,
                 1.0f // rho_inf = 1
             );
-            const linalg::float3 cm_b = backend->coeff_cm_multibody(
-                aero_forces.views(),
-                verts_wing.views(),
-                areas_d.views(),
+            const linalg::float3 cm_b = backend->coeff_cm(
+                aero_forces.views()[1],
+                verts_wing.views()[1],
                 {ref_pt_b.x, ref_pt_b.y, ref_pt_b.z},
                 freestream,
-                1.0f // rho_inf = 1
+                1.0f, // rho_inf = 1
+                backend->sum(areas_d.views()[1]),
+                backend->mesh_mac(verts_wing.views()[1], areas_d.views()[1])
             );
             
             // Aero forces
             // F_h.view()(0, i+1) = - V*V*cl / (PI_f*mu);
             // F_h.view()(1, i+1) = 2.f*V*V*cm_a.y / (PI_f*mu);
             // F_h.view()(2, i+1) = 2.f*V*V*cm_b.y / (PI_f*mu);
-            F_h.view()(0, i+1) = - cl / (PI_f*mu);
-            F_h.view()(1, i+1) = 2.f*cm_a.y / (PI_f*mu);
-            F_h.view()(2, i+1) = 2.f*cm_b.y / (PI_f*mu);
-            #endif
+            F_h.view()(0, i+1) = - 5.f * cl / (PI_f*mu);
+            F_h.view()(1, i+1) = 2.f*V*V*cm_a.y / (PI_f*mu);
+            F_h.view()(2, i+1) = 2.f*V*V*cm_b.y / (PI_f*mu);
             
             // deltaF for rhs
             const f32 sigma = v.omega_h / v.omega_alpha;
@@ -770,7 +772,7 @@ int main() {
     v.U = 12.36842f; // m/s
     // v.U = 5.0f; // m/s
 
-    const f32 t_final_nd = 2.f * v.omega_alpha;
+    const f32 t_final_nd = 3.f * v.omega_alpha;
 
     KinematicsTree kinematics_tree;
 
@@ -786,7 +788,7 @@ int main() {
         Assembly assembly(freestream);
         assembly.add(mesh_names.get()[0], freestream);
         UVLM_3DOF simulation{backend_name, mesh_names};
-        // simulation.run(assembly, v, t_final_nd);
+        simulation.run(assembly, v, t_final_nd);
     }
     
     return 0;

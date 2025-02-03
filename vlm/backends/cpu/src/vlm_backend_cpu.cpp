@@ -329,6 +329,7 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device
     auto end = taskflow.placeholder();
 
     auto wake_influence = taskflow.for_each_index((i64)0, rhs.size(), [&] (i64 idx) {
+        // Loop over the wakes
         for (i32 i = 0; i < normals.size(); i++) {
             if (i == 0) continue; // NOTE: TEMPORARY for 3dof (skip wing wake)
             const auto& normals_i = normals[i];
