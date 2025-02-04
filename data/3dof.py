@@ -186,7 +186,7 @@ class AeroelasticSystem:
         yn = np.zeros_like(y)
         gamma = 0 # Cubic factor (0 for linear spring)
         yn[0, :] = self.v.mu * y[3, :] * self.v.sigma**2 * (1 + gamma * y[3, :]**2)
-        yn[2, :] = self.v.mu * ((self.v.omega_beta / self.v.omega_alpha)**2 * self.v.r_beta**2) * alpha_linear(y[5, :])      
+        yn[2, :] = self.v.mu * ((self.v.omega_beta / self.v.omega_alpha)**2 * self.v.r_beta**2) * alpha_freeplay(y[5, :])      
         return yn.reshape(y_.shape)
 
     def uncoupled_system(self, t, y: np.ndarray):
@@ -368,7 +368,7 @@ if __name__ == "__main__":
 
     beta_peaks = []
     beta_vel = []
-    coupled_sim = False
+    coupled_sim = True
 
     for U in tqdm(U_vec): 
         # Conner
@@ -402,7 +402,7 @@ if __name__ == "__main__":
         v.mu = v.m / (np.pi * v.rho * v.b**2)
 
         dt = 0.09
-        t_final = 3 * v.omega_alpha
+        t_final = 10 * v.omega_alpha
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
@@ -459,7 +459,7 @@ if __name__ == "__main__":
             add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
             add_data_and_psd(fig, vec_t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
 
-            uvlm_file = Path("build/windows/x64/debug/3dof.txt")
+            uvlm_file = Path("build/windows/x64/release/3dof.txt")
             if uvlm_file.exists():
                 with open(uvlm_file, "r") as f:
                     uvlm_tsteps = int(f.readline())

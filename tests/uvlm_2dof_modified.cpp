@@ -141,7 +141,6 @@ class UVLM_2DOF final: public Simulation {
 };
 
 UVLM_2DOF::UVLM_2DOF(const std::string& backend_name,const Assembly& assembly) : Simulation(backend_name, assembly.mesh_filenames()), m_assembly(assembly) {
-    assert(meshes.size() == 1); // single body only
     solver = backend->create_lu_solver();
     accel_solver = backend->create_lu_solver();
     alloc_buffers();
@@ -306,6 +305,13 @@ void UVLM_2DOF::update_wake_and_gamma(i64 iteration) {
         gamma_wing_i.slice(All, -1).to(gamma_wake_i.slice(All, -1-iteration));
         
         // Compute delta
+        if (m == 1) { // gross hack for missing connectivity on the flap trailing edge
+            backend->blas->axpy(
+                -1.0f,
+                gamma_wing.views()[0].slice(All, -1),
+                gamma_wing_delta_i.slice(All, 0)
+            );
+        }
         backend->blas->axpy(
             -1.0f,
             gamma_wing_i.slice(All, Range{0, -2}),
@@ -712,14 +718,24 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
 
             rhs.view().fill(0.f);
             backend->rhs_assemble_velocities(rhs.view(), normals_d.views(), velocities.views());
-            // backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), i+1);
+            // DEBUG
+            if (i == 0 || i == 1) {
+                std::cout << "After velocities\n";
+                std::cout << rhs.view() << "\n";
+
+                // for (i64 i = 0; i < m_assembly.num_surfaces(); i++) {
+                //     std::cout << velocities.views()[i] << "\n";
+                // }
+            }
+            backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), i+1);
             
             // DEBUG
             if (i == 0 || i == 1) {
-                for (i64 i = 0; i < m_assembly.num_surfaces(); i++) {
-                    // std::cout << gamma_wing.views()[i] << "\n";
-                    std::cout << velocities.views()[i] << "\n";
-                    // std::cout << rhs.view() << "\n";
+                std::cout << "After wake\n";
+                std::cout << rhs.view() << "\n";
+
+                for (i64 m = 0; m < m_assembly.num_surfaces(); m++) {
+                    std::cout << gamma_wake.views()[m].slice(All, Range{-2-i, -1}) << "\n";
                 }
             }
             
@@ -743,6 +759,13 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
                     gamma_wing_i.slice(All, -1).to(gamma_wake_i.slice(All, -1-(i+1)));
                     
                     // Compute delta
+                    if (m == 1) { // gross hack for missing connectivity on the flap trailing edge
+                        backend->blas->axpy(
+                            -1.0f,
+                            gamma_wing.views()[0].slice(All, -1),
+                            gamma_wing_delta_i.slice(All, 0)
+                        );
+                    }
                     backend->blas->axpy(
                         -1.0f,
                         gamma_wing_i.slice(All, Range{0, -2}),

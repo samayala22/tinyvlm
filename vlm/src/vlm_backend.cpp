@@ -131,7 +131,8 @@ linalg::float3 Backend::coeff_cm_multibody(
 )
 {
     linalg::float3 cm = {0.0f, 0.0f, 0.0f};
-    f32 total_area_mac = 0.0f;
+    f32 total_area = 0.0f;
+    f32 total_mac = 0.0f;
     for (i64 m = 0; m < aero_forces.size(); m++) {
         const f32 area_local = sum(areas[m]);
         const f32 mac_local = mesh_mac(verts_wing[m], areas[m]);
@@ -145,9 +146,10 @@ linalg::float3 Backend::coeff_cm_multibody(
             mac_local
         );
         cm += local_cm * area_local * mac_local;
-        total_area_mac += area_local * mac_local;
+        total_area += area_local;
+        total_mac += mac_local;
     }
-    cm /= total_area_mac;
+    cm /= total_area * total_mac;
     return cm;
 }
 
