@@ -460,7 +460,7 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
 
         rhs.view().fill(0.f);
         backend->rhs_assemble_velocities(rhs.view(), normals_d.views(), velocities.views());
-        backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), i);
+        backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), assembly.lifting(), i);
         solver->solve(lhs.view(), rhs.view().reshape(rhs.size(), 1));
         
         i64 begin = 0;

@@ -562,7 +562,7 @@ if __name__ == "__main__":
             wagner_init = (u[1, 0] + u[0, 0] + (0.5 - ndv.a_h)*v[1,0])*(1 - psi1*np.exp(-eps1*t) - psi2*np.exp(-eps2*t))
             cl = np.pi*(a[0, i] - ndv.a_h * a[1, i] + v[1, i]) + 2*np.pi*(wagner_init + duhamel)
             cm = np.pi*(0.5 + ndv.a_h)*(wagner_init + duhamel) + 0.5*np.pi*ndv.a_h*(a[0, i] - ndv.a_h*a[1, i]) - 0.5*np.pi*(0.5 - ndv.a_h)*v[1, i] - (np.pi/16) * a[1, i]
-            print(f"i: {i} | cl: {cl} | cm: {cm}")
+            # print(f"i: {i} | cl: {cl} | cm: {cm}")
 
             return np.array([
                 - cl / (np.pi*ndv.mu),
@@ -709,7 +709,7 @@ if __name__ == "__main__":
                 )
             )
 
-            fig.write_html("build/freeplay.html", include_mathjax='cdn')
+            fig.write_html("build/2dof.html", include_mathjax='cdn')
 
 
         # X = fft(u, axis=1)

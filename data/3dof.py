@@ -401,8 +401,6 @@ if __name__ == "__main__":
         v.V = v.U / (v.b * v.omega_alpha)
         v.mu = v.m / (np.pi * v.rho * v.b**2)
 
-        print(v.V)
-
         dt = 0.09
         t_final = 3 * v.omega_alpha
         vec_t = np.arange(0, t_final, dt)

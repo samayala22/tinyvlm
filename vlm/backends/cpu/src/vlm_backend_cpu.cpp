@@ -320,7 +320,7 @@ void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& r
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, i32 iteration) {
+void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
 
     tf::Taskflow taskflow;
@@ -331,7 +331,7 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device
     auto wake_influence = taskflow.for_each_index((i64)0, rhs.size(), [&] (i64 idx) {
         // Loop over the wakes
         for (i32 i = 0; i < normals.size(); i++) {
-            if (i == 0) continue; // NOTE: TEMPORARY for 3dof (skip wing wake)
+            if (!lifting[i]) continue;
             const auto& normals_i = normals[i];
             const auto& colloc_i = colloc[i];
             const auto& gamma_wake_i = gamma_wake[i];
