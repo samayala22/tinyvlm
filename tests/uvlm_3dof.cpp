@@ -783,10 +783,10 @@ int main() {
     v.zeta_h = 0.0113f;
     v.zeta_alpha = 0.01626f;
     v.zeta_beta = 0.0115f;
-    v.U = 12.36842f; // m/s
-    // v.U = 5.0f; // m/s
+    // v.U = 12.36842f; // m/s
+    v.U = 7.0f; // m/s
 
-    const f32 t_final_nd = 10.f * v.omega_alpha;
+    const f32 t_final_nd = 5.f * v.omega_alpha;
 
     KinematicsTree kinematics_tree;
 

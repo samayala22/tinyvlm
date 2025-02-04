@@ -362,8 +362,9 @@ if __name__ == "__main__":
     # Interesting velocities:
     # U_vec = [12.7778] # LCO transition
     # U_vec = [12.63158]
-    U_vec = [12.36842]
-    # U_vec = [5.0]
+    # U_vec = [12.36842] # Non symmetric 2 period LCO
+    # U_vec = [12.75168] # Bifuracation reports many points ?
+    U_vec = [7.0]
     # U_vec = np.linspace(2, 20, 150)
 
     beta_peaks = []
@@ -401,8 +402,8 @@ if __name__ == "__main__":
         v.V = v.U / (v.b * v.omega_alpha)
         v.mu = v.m / (np.pi * v.rho * v.b**2)
 
-        dt = 0.09
-        t_final = 10 * v.omega_alpha
+        dt = 0.02
+        t_final = 5 * v.omega_alpha
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
