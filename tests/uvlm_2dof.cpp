@@ -881,7 +881,7 @@ int main(int argc, char **argv) {
         {"../../../../mesh/infinite_rectangular_2x2_c1.x", true}
     });
     
-    const std::vector<std::string> backends = {"cpu", "cuda"};
+    const std::vector<std::string> backends = get_available_backends();
 
     auto simulations = tiny::make_combination(meshes, backends);
 
