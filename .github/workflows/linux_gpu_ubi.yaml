@@ -49,7 +49,7 @@ jobs:
         uses: xmake-io/github-action-setup-xmake@v1
         with:
           xmake-version: branch@master
-          actions-cache-folder: .xmake-cache
+          # actions-cache-folder: .xmake-cache
 
       # Update xmake repository
       - name: Update xmake repository
