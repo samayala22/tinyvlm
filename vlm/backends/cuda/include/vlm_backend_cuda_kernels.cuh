@@ -375,7 +375,7 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(i64 wake_m, i64 w
     const i32 lane = block.thread_rank() % warpSize;
     
     float induced_vel = 0.0f;
-    if (i < wake_m * wake_n || j < wing_mn) { // TODO: this might be an AND instead of OR
+    if (i < wake_m * wake_n && j < wing_mn) {
         const i64 v0 = i + i / wake_n;
         const i64 v1 = v0 + 1;
         const i64 v3 = v0 + wake_n+1;
@@ -402,7 +402,7 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_wake_influence(i64 wake_m, i64 w
     // atomicAdd(rhs + j, -induced_vel); // naive reduction
     induced_vel = warp_reduce_sum(induced_vel); // Y warp reductions
 
-    if (threadIdx.x == 0) {
+    if (lane == 0) {
         atomicAdd(rhs + j, -induced_vel);
     }
 }

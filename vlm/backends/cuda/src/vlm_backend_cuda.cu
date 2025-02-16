@@ -296,37 +296,43 @@ void BackendCUDA::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& 
             normals_i.ptr(),
             normals_i.stride(2)
         );
-        offset += normals_i.stride(2);
+        offset += normals_i.stride(2); // Note: using stride here is not technically correct
     }
 }
 
-void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, i32 iteration) {
+void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
     if (iteration == 0) return; // cuda doesnt support 0 sized domain
-    constexpr Dim3<i32> block{32, 16};
+    constexpr Dim3<i32> block{32, 16}; // TODO: do not modify this 
 
-    for (i32 i = 0; i < normals.size(); i++) {
-        const auto& colloc_i = colloc[i];
-        const auto& normals_i = normals[i];
-        const auto& gamma_wake_i = gamma_wake[i];
-        const auto& verts_wake_i = verts_wake[i];
-        const i64 wake_m  = iteration;
-        const i64 wake_n  = verts_wake_i.shape(0) - 1;
-        const Dim3<i64> n{wake_m * wake_n, rhs.size()};
-        kernel_wake_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
-            wake_m, 
-            wake_n,
-            rhs.size(),
-            colloc_i.ptr(),
-            colloc_i.stride(2),
-            normals_i.ptr(),
-            normals_i.stride(2),
-            verts_wake_i.ptr() + verts_wake_i.offset({0, -1-iteration, 0}),
-            verts_wake_i.stride(2),
-            gamma_wake_i.ptr() + gamma_wake_i.offset({0, gamma_wake_i.shape(1) - iteration}),
-            rhs.ptr(),
-            sigma_vatistas
-        );
-        CHECK_CUDA(cudaGetLastError());
+    i64 offset = 0;
+    for (i32 m_i = 0; m_i < normals.size(); m_i++) {
+        const i64 m_i_num_panels = normals[m_i].shape(0) * normals[m_i].shape(1);
+        for (i32 m_j = 0; m_j < normals.size(); m_j++) {
+            if (!lifting[m_j]) continue;
+            const auto& colloc_i = colloc[m_i];
+            const auto& normals_i = normals[m_i];
+            const auto& gamma_wake_j = gamma_wake[m_j];
+            const auto& verts_wake_j = verts_wake[m_j];
+            const i64 wake_m  = iteration; 
+            const i64 wake_n  = verts_wake_j.shape(0) - 1; // spanwise number of wake panels
+            const Dim3<i64> n{wake_m * wake_n, m_i_num_panels};
+            kernel_wake_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
+                wake_m, 
+                wake_n,
+                m_i_num_panels,
+                colloc_i.ptr(),
+                colloc_i.stride(2),
+                normals_i.ptr(),
+                normals_i.stride(2),
+                verts_wake_j.ptr() + verts_wake_j.offset({0, -1-iteration, 0}),
+                verts_wake_j.stride(2),
+                gamma_wake_j.ptr() + gamma_wake_j.offset({0, gamma_wake_j.shape(1) - iteration}),
+                rhs.ptr() + offset,
+                sigma_vatistas
+            );
+            CHECK_CUDA(cudaGetLastError());
+        }
+        offset += m_i_num_panels;
     }
 }
 
