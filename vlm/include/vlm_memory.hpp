@@ -253,7 +253,7 @@ class TensorView {
 namespace detail {
     template<typename T, i64 Dim, Location L>
     void print_tensor_recursive(std::ostream& os, const TensorView<T, Dim, L>& view, 
-                              std::array<i64, Dim>& indices, i64 current_dim = Dim - 1) {
+                              std::array<i64, static_cast<size_t>(Dim)>& indices, i64 current_dim) {
         if (current_dim < 0) {
             os << "(";
             for (i64 i = 0; i < Dim; ++i) {
@@ -273,8 +273,8 @@ namespace detail {
 
 template<typename T, i64 Dim, Location L>
 std::ostream& operator<<(std::ostream& os, const TensorView<T, Dim, L>& view) {
-    std::array<i64, Dim> indices{};
-    detail::print_tensor_recursive(os, view, indices);
+    std::array<i64, static_cast<size_t>(Dim)> indices{};
+    detail::print_tensor_recursive(os, view, indices, Dim - 1);
     return os;
 }
  

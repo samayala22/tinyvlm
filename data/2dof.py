@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-import mpld3
 import scipy as sp
 from scipy.fft import fft, ifft, fftfreq
 from scipy.integrate import solve_ivp
@@ -268,6 +267,11 @@ def alpha_linear(alpha):
 
 def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
     def monolithic_system(t, y: np.ndarray):
+        # Yung p212
+        """
+        system unknowns:
+        q = [h, a, hd, ad, x1, x2]
+        """
         M1 = np.zeros((6,6))
         M2 = np.zeros((6,6))
         V = np.zeros(6)
@@ -317,7 +321,8 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
         V[2] += - (ndv.omega/ndv.U)**2 * y[0]
         V[3] += - 1/(ndv.U**2) * M(y[1])
 
-        y_d = np.linalg.inv(M2) @ (M1 @ y + V)
+        y_d = np.linalg.solve(M2, M1 @ y + V)
+        # y_d = np.linalg.inv(M2) @ (M1 @ y + V)
 
         return y_d
     
@@ -557,7 +562,7 @@ if __name__ == "__main__":
             wagner_init = (u[1, 0] + u[0, 0] + (0.5 - ndv.a_h)*v[1,0])*(1 - psi1*np.exp(-eps1*t) - psi2*np.exp(-eps2*t))
             cl = np.pi*(a[0, i] - ndv.a_h * a[1, i] + v[1, i]) + 2*np.pi*(wagner_init + duhamel)
             cm = np.pi*(0.5 + ndv.a_h)*(wagner_init + duhamel) + 0.5*np.pi*ndv.a_h*(a[0, i] - ndv.a_h*a[1, i]) - 0.5*np.pi*(0.5 - ndv.a_h)*v[1, i] - (np.pi/16) * a[1, i]
-            print(f"i: {i} | cl: {cl} | cm: {cm}")
+            # print(f"i: {i} | cl: {cl} | cm: {cm}")
 
             return np.array([
                 - cl / (np.pi*ndv.mu),
@@ -572,6 +577,7 @@ if __name__ == "__main__":
             du = np.zeros(2)
             du_k = np.zeros(2) + 1
             iteration = 0
+            # Newton-Raphson iterations
             while (np.linalg.norm(du_k - du) / len(du) > newton_err_thresh):
                 du_k = du[:]
                 du, dv, da = newmark_beta_step(M, C, zeros, u[:,i], v[:,i], a[:,i], delta_F, dt_nd)
@@ -703,7 +709,7 @@ if __name__ == "__main__":
                 )
             )
 
-            fig.write_html("build/freeplay.html", include_mathjax='cdn')
+            fig.write_html("build/2dof.html", include_mathjax='cdn')
 
 
         # X = fft(u, axis=1)

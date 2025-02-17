@@ -25,7 +25,7 @@ class Backend {
         // Kernels that run for all the meshes
         virtual void lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView3D<Location::Device>&  verts_wake, std::vector<i32>& condition, i32 iteration) = 0;
         virtual void rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& velocities) = 0;
-        virtual void rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>&  verts_wake, i32 iteration) = 0;
+        virtual void rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>&  verts_wake, const std::vector<bool>& lifting, i32 iteration) = 0;
         virtual void displace_wake_rollup(MultiTensorView3D<Location::Device>& wake_rollup, const MultiTensorView3D<Location::Device>&  verts_wake, const MultiTensorView3D<Location::Device>&  verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wake, f32 dt, i32 iteration) = 0;
         void displace_wing(const MultiTensorView2D<Location::Device>& transforms, MultiTensorView3D<Location::Device>&  verts_wing, MultiTensorView3D<Location::Device>& verts_wing_init);
         void wake_shed(const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wake, i32 iteration);
@@ -84,11 +84,10 @@ class Backend {
         linalg::float3 coeff_cm_multibody(
             const MultiTensorView3D<Location::Device>& aero_forces,
             const MultiTensorView3D<Location::Device>& verts_wing,
+            const MultiTensorView2D<Location::Device>& areas,
             const linalg::float3& ref_pt,
             const linalg::float3& freestream, 
-            f32 rho,
-            f32 area,
-            f32 mac
+            f32 rho
         );
 
         virtual void mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>&  verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) = 0;

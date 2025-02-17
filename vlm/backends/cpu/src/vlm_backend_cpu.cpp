@@ -320,39 +320,47 @@ void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& r
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, i32 iteration) {
+void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
+    assert(lifting.size() == normals.size());
 
     tf::Taskflow taskflow;
 
     auto begin = taskflow.placeholder();
     auto end = taskflow.placeholder();
 
-    auto wake_influence = taskflow.for_each_index((i64)0, rhs.size(), [&] (i64 idx) {
-        for (i32 i = 0; i < normals.size(); i++) {
-            const auto& normals_i = normals[i];
-            const auto& colloc_i = colloc[i];
-            const auto& gamma_wake_i = gamma_wake[i];
-            const auto& verts_wake_i = verts_wake[i];
-            ispc::kernel_wake_influence(
-                colloc_i.ptr() + idx,
-                colloc_i.stride(2),
-                normals_i.ptr() + idx,
-                normals_i.stride(2),
-                verts_wake_i.ptr(),
-                verts_wake_i.stride(2),
-                verts_wake_i.shape(1),
-                verts_wake_i.shape(0),
-                gamma_wake_i.ptr(), 
-                rhs.ptr() + idx,
-                sigma_vatistas,
-                iteration
-            );
-        }
-    });
+    i64 offset = 0;
+    for (i32 m_i = 0; m_i < normals.size(); m_i++) {
+        const i64 m_i_num_panels = normals[m_i].shape(0) * normals[m_i].shape(1);
+        auto wake_influence = taskflow.for_each_index((i64)0, m_i_num_panels, [=, &lifting] (i64 idx) {
+            // Loop over the wakes
+            for (i32 m_j = 0; m_j < normals.size(); m_j++) {
+                if (!lifting[m_j]) continue;
+                const auto& normals_i = normals[m_i];
+                const auto& colloc_i = colloc[m_i];
+                const auto& gamma_wake_j = gamma_wake[m_j];
+                const auto& verts_wake_j = verts_wake[m_j];
+                ispc::kernel_wake_influence(
+                    colloc_i.ptr() + idx, // technically incorrect as it doesnt consider the edge case of non-contiguous buffer
+                    colloc_i.stride(2),
+                    normals_i.ptr() + idx, // identical as colloc_i
+                    normals_i.stride(2),
+                    verts_wake_j.ptr(),
+                    verts_wake_j.stride(2),
+                    verts_wake_j.shape(1),
+                    verts_wake_j.shape(0),
+                    gamma_wake_j.ptr(), 
+                    rhs.ptr() + offset + idx,
+                    sigma_vatistas,
+                    iteration
+                );
+            }
+        });
 
-    begin.precede(wake_influence);
-    wake_influence.precede(end);
+        begin.precede(wake_influence);
+        wake_influence.precede(end);
+        offset += m_i_num_panels;
+    }
 
     Executor::get().run(taskflow).wait();
 }
@@ -481,7 +489,6 @@ f32 BackendCPU::coeff_cl(
         }
     }
     return cl / (0.5f * rho * linalg::length2(freestream) * area);
-    // return cl / (0.5f * area);
 }
 
 linalg::float3 BackendCPU::coeff_cm(

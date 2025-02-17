@@ -16,6 +16,7 @@ private:
     std::vector<KinematicNode*> m_nodes;
     std::vector<bool> m_lifting;
     KinematicNode* m_assembly_node;
+    i64 m_num_surfaces = 0;
 
 public:
     Assembly(KinematicNode* assembly_node) : m_assembly_node(assembly_node) {}
@@ -24,12 +25,14 @@ public:
         m_filenames.push_back(filename);
         m_nodes.push_back(node);
         m_lifting.push_back(lifting);
+        m_num_surfaces++;
     }
 
     const std::vector<std::string>& mesh_filenames() const { return m_filenames; }
     const std::vector<KinematicNode*>& surface_kinematics() const { return m_nodes; }
     const std::vector<bool>& lifting() const { return m_lifting; }
     const KinematicNode* kinematics() const { return m_assembly_node; }
+    i64 num_surfaces() const { return m_num_surfaces; }
 };
 
 class Simulation {
@@ -47,7 +50,7 @@ class Simulation {
 
         MultiDim<2> assembly_wings;
 
-        Simulation(const std::string& backend_name, const std::vector<std::string>& meshes);
+        Simulation(const std::string& backend_name, const std::vector<std::string>& meshes, bool qc = true);
         virtual ~Simulation() = default;
 };
 

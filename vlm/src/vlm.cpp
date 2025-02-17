@@ -17,7 +17,7 @@
 
 using namespace vlm;
 
-Simulation::Simulation(const std::string& backend_name, const std::vector<std::string>& meshes) : backend(create_backend(backend_name)) {
+Simulation::Simulation(const std::string& backend_name, const std::vector<std::string>& meshes, bool qc) : backend(create_backend(backend_name)) {
     // Read the sizes of all the meshes
     for (const auto& m_name : meshes) {
         const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
@@ -38,7 +38,7 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     // Perform the actual read of the mesh files
     for (i64 i = 0; i < meshes.size(); i++) {
         const MeshIO mesh_io{"plot3d"};
-        mesh_io.read(meshes[i], verts_wing_init_h.views()[i]);
+        mesh_io.read(meshes[i], verts_wing_init_h.views()[i], qc);
     }
 
     for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
@@ -460,7 +460,7 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
 
         rhs.view().fill(0.f);
         backend->rhs_assemble_velocities(rhs.view(), normals_d.views(), velocities.views());
-        backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), i);
+        backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), assembly.lifting(), i);
         solver->solve(lhs.view(), rhs.view().reshape(rhs.size(), 1));
         
         i64 begin = 0;
