@@ -13,8 +13,10 @@
 - [X] VLM
 - [X] NL-VLM
 - [X] UVLM
+- [X] 2DOF UVLM
+- [X] 3DOF UVLM
+- [ ] HB-VLM
 - [ ] NL-UVLM
-- [ ] Panel Method
 
 # Correctors
 
