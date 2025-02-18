@@ -151,7 +151,6 @@ class UVLM final: public Simulation {
         std::vector<i32> condition0;
     private:
         void alloc_buffers();
-        void multibody_forces_unsteady(f32 dt);
 };
 
 } // namespace vlm
