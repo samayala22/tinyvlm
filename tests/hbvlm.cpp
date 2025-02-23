@@ -57,7 +57,7 @@ HBVLM::HBVLM(
     const std::string& backend_name,
     const Assembly& assembly,
     const i32 harmonics) : 
-    Simulation(backend_name, assembly.mesh_filenames(), false),
+    Simulation(backend_name, assembly.mesh_filenames(), true),
     m_assembly(assembly),
     m_harmonics(harmonics)
 {
@@ -118,10 +118,11 @@ void HBVLM::run(f32 t_start, f32 omega) {
     const f32 period = 2.0f * PI_f / omega;
     const f32 rho = 1.0f; // TODO: take this as input
 
+    for (const auto& [wing_init, wing] : zip(verts_wing_init.views(), verts_wing.views())) wing_init.to(wing);
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
     for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
 
-    // 1.  Compute the fixed time step
+    // Compute the fixed time step
     const auto& verts_first_wing = verts_wing_init_h.views()[0];
     const f32 dx = verts_first_wing(0, -1, 0) - verts_first_wing(0, -2, 0);
     const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
@@ -130,7 +131,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
     const f32 dt = last_panel_chord / linalg::length(m_assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f}));
     const i64 max_t_steps = static_cast<i64>((t_start+period+dt) / dt);
 
-    // 2. Allocate the wake geometry
+    // Allocate the wake geometry
     {
         MultiDim<2> wake_panels_2D;
         MultiDim<3> verts_wake_3D;
@@ -141,7 +142,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
         verts_wake.init(verts_wake_3D);
     }
 
-    // 3. Precompute constant values for the transient simulation
+    // Precompute constant lhs since we have a rigid wing
     lhs.view().fill(0.f);
     backend->lhs_assemble(lhs.view(), colloc_d.views(), normals_d.views(), verts_wing.views(), verts_wake.views(), condition0 , 0);
     solver->factorize(lhs.view());
@@ -160,7 +161,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
         backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
         backend->wake_shed(verts_wing.views(), verts_wake.views(), i);
 
-        if (i == 0) {
+        if (i == 0) { // todo: check if this is necessary for the velocity computation
             backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
             for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
         }
@@ -187,6 +188,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
         dft_hv.to(dft_dv);
     }
 
+    // Iterative process for solving the blocked harmonic balance equation
     auto& residual_v = residual.view();
     residual_v.fill(1.f);
     const f32 tol = 1e-5f;
@@ -195,6 +197,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
     while (backend->blas->norm(residual_v.reshape(residual_v.shape(0)*residual_v.shape(1))) > tol) {
         
         rhs.view().fill(0.f);
+        // For each unknown we fill their respective rhs column in a matrix free fashion
         for (i32 s = 0; s < 2*m_harmonics+1; s++) {
             const f32 t_final = t_start + period * (f32)s / (f32)(2*m_harmonics+1);
             const i64 t_steps = static_cast<i64>(std::round(t_final / dt));
@@ -234,9 +237,12 @@ void HBVLM::run(f32 t_start, f32 omega) {
             // backend->rhs_assemble_wake_influence(rhs_s, gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), t_steps);
         } // unknowns for loop
 
+        // Apply the the dft matrix to the rhs
+        // A @ G @ D^T = R <=> A @ G = R @ D (since D^-1 = D^T)
         backend->blas->gemm(1.0f, rhs.view(), dft_d.view(), 0.0f, q_mat.view());
+        // Solve to obtain the fourier coefficients for each panel
         solver->solve(lhs.view(), q_mat.view());
-        break; // TEMPORARY
+        break; // TEMPORARY (only for no wake influence debugging)
 
         iter++;
         if (iter > max_iter) {
@@ -276,7 +282,7 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 5.0f;
+    const f32 cycles = 4.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 k = 0.5; // reduced frequency
     const f32 omega = k * u_inf / b;

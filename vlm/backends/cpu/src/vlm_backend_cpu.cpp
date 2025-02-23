@@ -19,6 +19,16 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
+#define CHECK_LAPACK(call) \
+    do { \
+        const lapack_int err = (call); \
+        if (err != 0) { \
+            fprintf(stderr, "LAPACKE Error in %s at line %d: %d\n", \
+                    __FILE__, __LINE__, err); \
+            exit(EXIT_FAILURE); \
+        } \
+    } while (0)
+
 class CPU_Kernels;
 
 /// @brief Memory manager implementation for the CPU backend
@@ -88,11 +98,18 @@ void CPU_LU::init(const TensorView<f32, 2, Location::Device>& A) {
 
 void CPU_LU::factorize(const TensorView<f32, 2, Location::Device>& A) {
     assert(ipiv.view().shape(0) == A.shape(0));
-    LAPACKE_sgetrf(LAPACK_COL_MAJOR, A.shape(0), A.shape(1), A.ptr(), A.stride(1), ipiv.ptr());
+    CHECK_LAPACK(LAPACKE_sgetrf(
+        LAPACK_COL_MAJOR,
+        A.shape(0),
+        A.shape(1),
+        A.ptr(),
+        A.stride(1),
+        ipiv.ptr()
+    ));
 }
 
 void CPU_LU::solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) {
-    LAPACKE_sgetrs(
+    CHECK_LAPACK(LAPACKE_sgetrs(
         LAPACK_COL_MAJOR,
         'N',
         A.shape(1),
@@ -102,7 +119,7 @@ void CPU_LU::solve(const TensorView<f32, 2, Location::Device>& A, const TensorVi
         ipiv.ptr(),
         x.ptr(),
         x.stride(1)
-    );
+    ));
 }
 
 class CPU_BLAS final : public BLAS {
