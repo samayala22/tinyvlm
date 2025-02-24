@@ -1,3 +1,26 @@
+typedef float f32;
+typedef double f64;
+typedef int32 i32;
+typedef int64 i64;
+typedef uint32 u32;
+typedef uint64 u64;
+
+// Bio-savart Kernel
+#define RCUT 1e-10f
+#define RCUT2 1e-5f
+#define PI_f 3.141593f
+
+export struct DataDims {
+    i64 panel_shape_0;
+    i64 panel_shape_1;
+    i64 panel_stride_1;
+    i64 panel_stride_2;
+    i64 vertex_shape_0;
+    i64 vertex_shape_1;
+    i64 vertex_stride_1;
+    i64 vertex_stride_2;
+};
+
 typedef float<3> float3;
 
 #define DOT(v0, v1) (v0.x*v1.x + v0.y*v1.y + v0.z*v1.z)
@@ -43,18 +66,6 @@ template<typename F3>
 inline F3 quad_normal(const F3& v0, const F3& v1, const F3& v2, const F3& v3) {
     return normalize(cross(v3-v1, v2-v0));
 }
-
-typedef float f32;
-typedef double f64;
-typedef int32 i32;
-typedef int64 i64;
-typedef uint32 u32;
-typedef uint64 u64;
-
-// Bio-savart Kernel
-#define RCUT 1e-10f
-#define RCUT2 1e-5f
-#define PI_f 3.141593f
 
 template<typename C, typename V>
 inline float3 kernel_biosavart(C& colloc, const V& vertex1, const V& vertex2, const uniform float& sigma) {
@@ -174,6 +185,83 @@ export void kernel_wake_influence(uniform f32* uniform colloc, uniform i64 collo
     }
 
     const uniform float3 normal = {normals[0*normals_ld], normals[1*normals_ld], normals[2*normals_ld]};
+    const float induced_vel_dot_normal = dot(induced_vel, normal); // vertical 2 fma + mul
+    *rhs -= reduce_add(induced_vel_dot_normal);
+}
+
+export void kernel_wake_influence_hb(
+    uniform DataDims* uniform dims_wing,
+    uniform DataDims* uniform dims_wake,
+    uniform f32* uniform colloc, // point that is influenced
+    uniform f32* uniform normals, // normal at the influenced point
+    uniform f32* uniform v, // wake vertices
+    uniform f32* uniform gamma_coeffs, // fourier coefficients for TE
+    uniform i64 gamma_coeffs_ld, // ld between each sample
+    uniform f32* uniform rhs, // rhs already offset to the correct row
+    uniform i32 harmonics,
+    uniform f32 tn,
+    uniform f32 omega,
+    uniform f32 dt,
+    uniform f32 sigma,
+    uniform i32 iteration
+)
+{
+    // colloc pt broadcasted on all lanes
+    const uniform float3 colloc_influenced = {
+        colloc[0*dims_wing->panel_stride_2],
+        colloc[1*dims_wing->panel_stride_2],
+        colloc[2*dims_wing->panel_stride_2]
+    };
+    // Maybe move this into a dedicated coeff scaling step
+    const uniform i32 unknowns = 2 * harmonics + 1;
+    const uniform f32 sqrt_unknowns = 1.f / sqrt((uniform f32)(unknowns));
+    const uniform f32 sqrt_unknowns_2 = sqrt(2.f / (uniform f32)(unknowns));
+
+    // wide accumulator
+    float3 induced_vel = {0.0f, 0.0f, 0.0f};
+
+    // Wake influence on wing
+    const uniform i64 wake_row_start = dims_wake->vertex_shape_1 - iteration - 1;
+    for (uniform i64 i = wake_row_start; i <  dims_wake->vertex_shape_1-1; i++) { // wake row 
+        foreach(j = 0 ...  dims_wake->vertex_shape_0 - 1) {
+            const i64 v0 = (i+0) * dims_wake->vertex_stride_1 + j;
+            const i64 v1 = (i+0) * dims_wake->vertex_stride_1 + j + 1;
+            const i64 v2 = (i+1) * dims_wake->vertex_stride_1 + j + 1;
+            const i64 v3 = (i+1) * dims_wake->vertex_stride_1 + j;
+
+            // Loads
+            const float3 vertex0 = {v[0*dims_wake->vertex_stride_2 + v0], v[1*dims_wake->vertex_stride_2 + v0], v[2*dims_wake->vertex_stride_2 + v0]};
+            const float3 vertex1 = {v[0*dims_wake->vertex_stride_2 + v1], v[1*dims_wake->vertex_stride_2 + v1], v[2*dims_wake->vertex_stride_2 + v1]};
+            const float3 vertex2 = {v[0*dims_wake->vertex_stride_2 + v2], v[1*dims_wake->vertex_stride_2 + v2], v[2*dims_wake->vertex_stride_2 + v2]};
+            const float3 vertex3 = {v[0*dims_wake->vertex_stride_2 + v3], v[1*dims_wake->vertex_stride_2 + v3], v[2*dims_wake->vertex_stride_2 + v3]};
+
+            // print("Vertex 0: % % %\n", vertex0.x, vertex0.y, vertex0.z);
+            // print("Vertex 1: % % %\n", vertex1.x, vertex1.y, vertex1.z);
+            // print("Vertex 2: % % %\n", vertex2.x, vertex2.y, vertex2.z);
+            // print("Vertex 3: % % %\n", vertex3.x, vertex3.y, vertex3.z);
+
+            float3 ind = {0.0f, 0.0f, 0.0f};
+            kernel_symmetry(ind, colloc_influenced, vertex0, vertex1, sigma);
+            kernel_symmetry(ind, colloc_influenced, vertex1, vertex2, sigma);
+            kernel_symmetry(ind, colloc_influenced, vertex2, vertex3, sigma);
+            kernel_symmetry(ind, colloc_influenced, vertex3, vertex0, sigma);
+
+            varying f32 gamma_w = sqrt_unknowns * gamma_coeffs[j + 0*gamma_coeffs_ld];
+            for (uniform i64 h = 0; h < harmonics; h++) {
+                const uniform f32 omega_k = omega * (f32)(h+1);
+                gamma_w += gamma_coeffs[j + (2*h+1)*gamma_coeffs_ld] * cos(omega_k * (tn - (uniform f32)(i - wake_row_start + 1)*dt)) * sqrt_unknowns_2;
+                gamma_w += gamma_coeffs[j + (2*h+2)*gamma_coeffs_ld] * sin(omega_k * (tn - (uniform f32)(i - wake_row_start + 1)*dt)) * sqrt_unknowns_2;
+            }
+
+            induced_vel += ind * gamma_w;
+        }
+    }
+
+    const uniform float3 normal = {
+        normals[0*dims_wing->panel_stride_2],
+        normals[1*dims_wing->panel_stride_2],
+        normals[2*dims_wing->panel_stride_2]
+    };
     const float induced_vel_dot_normal = dot(induced_vel, normal); // vertical 2 fma + mul
     *rhs -= reduce_add(induced_vel_dot_normal);
 }

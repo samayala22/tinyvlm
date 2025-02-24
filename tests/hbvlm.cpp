@@ -29,13 +29,13 @@ class HBVLM final: public Simulation {
         // Data
         Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
         Tensor2D<Location::Device> rhs{backend->memory.get()}; // (ns*nc) x harmonics
-        Tensor2D<Location::Device> q_mat{backend->memory.get()}; // (ns*nc) x harmonics
-        Tensor2D<Location::Host> q_mat_h{backend->memory.get()}; // (ns*nc) x harmonics
+        Tensor2D<Location::Device> gamma_coeffs{backend->memory.get()}; // (ns*nc) x harmonics
+        Tensor2D<Location::Host> gamma_coeffs_h{backend->memory.get()}; // (ns*nc) x harmonics
 
         Tensor2D<Location::Device> residual{backend->memory.get()}; // (ns*nc) x harmonics
         Tensor2D<Location::Host> dft_h{backend->memory.get()}; // harmonics x harmonics
         Tensor2D<Location::Device> dft_d{backend->memory.get()};
-        MultiTensor3D<Location::Device> gamma_wing{backend->memory.get()}; // ns x nc x harmonics
+        std::vector<MultiTensor2D<Location::Device>> gamma_wake;
         MultiTensor3D<Location::Device> aero_forces{backend->memory.get()}; // ns*nc*3
         
         MultiTensor3D<Location::Device> velocities{backend->memory.get()}; // ns*nc*3
@@ -77,14 +77,15 @@ inline i64 total_panels(const MultiDim<2>& assembly_wing) {
 void HBVLM::alloc_buffers() {
     const i64 n = total_panels(assembly_wings);
     const i64 unknowns = 2 * m_harmonics + 1;
+    for (i64 i = 0; i < unknowns; i++) {
+        gamma_wake.emplace_back(backend->memory.get());
+    }
     // Mesh
-    MultiDim<3> gamma;
     MultiDim<3> panels_3D;  
     MultiDim<2> panels_2D;
     MultiDim<3> verts_wing_3D;
     MultiDim<2> transforms_2D;
     for (const auto& [ns, nc] : assembly_wings) {
-        gamma.push_back({ns, nc, unknowns});
         panels_3D.push_back({ns, nc, 3});
         panels_2D.push_back({ns, nc});
         verts_wing_3D.push_back({ns+1, nc+1, 4});
@@ -98,12 +99,11 @@ void HBVLM::alloc_buffers() {
     // Data
     lhs.init({n, n});
     rhs.init({n, unknowns});
-    q_mat.init({n, unknowns});
-    q_mat_h.init({n, unknowns});
+    gamma_coeffs.init({n, unknowns});
+    gamma_coeffs_h.init({n, unknowns});
     residual.init({n, unknowns});
     dft_d.init({unknowns, unknowns});
     dft_h.init({unknowns, unknowns});
-    gamma_wing.init(gamma);
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
     aero_forces.init(panels_3D);
@@ -112,6 +112,34 @@ void HBVLM::alloc_buffers() {
     solver->init(lhs.view());
 
     condition0.resize(assembly_wings.size()*assembly_wings.size());
+}
+
+void gamma_wake_from_coeffs(
+    const TensorView2D<Location::Device>& gamma_wake,
+    const TensorView2D<Location::Device>& gamma_coeffs,
+    i32 harmonics,
+    f32 tn,
+    f32 omega,
+    f32 dt,
+    i64 iteration
+)
+{
+    assert(gamma_coeffs.shape(0) == gamma_wake.shape(0));
+    const i32 unknowns = 2 * harmonics + 1;
+    const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));
+    const f32 sqrt_unknowns_2 = std::sqrt(2.f / static_cast<f32>(unknowns));
+    i64 wake_start = gamma_wake.shape(1) - iteration;
+    for (i64 j = wake_start; j < gamma_wake.shape(1); j++) { // row
+        for (i64 i = 0; i < gamma_wake.shape(0); i++) { // col
+            f32 gamma_w = sqrt_unknowns * gamma_coeffs(i, 0);
+            for (i64 h = 0; h < harmonics; h++) {
+                const f32 omega_k = omega * (f32)(h+1);
+                gamma_w += gamma_coeffs(i, 2*h+1) * std::cos(omega_k * (tn - (f32)(j - wake_start + 1)*dt)) * sqrt_unknowns_2;
+                gamma_w += gamma_coeffs(i, 2*h+2) * std::sin(omega_k * (tn - (f32)(j - wake_start + 1)*dt)) * sqrt_unknowns_2;
+            }
+            gamma_wake(i, j) = gamma_w;
+        }
+    }
 }
 
 void HBVLM::run(f32 t_start, f32 omega) {
@@ -140,6 +168,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
             verts_wake_3D.push_back({ns+1, max_t_steps, 4});
         }
         verts_wake.init(verts_wake_3D);
+        for (auto& gw : gamma_wake) gw.init(wake_panels_2D);
     }
 
     // Precompute constant lhs since we have a rigid wing
@@ -160,7 +189,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
 
         backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
         backend->wake_shed(verts_wing.views(), verts_wake.views(), i);
-
+ 
         if (i == 0) { // todo: check if this is necessary for the velocity computation
             backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
             for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
@@ -191,12 +220,18 @@ void HBVLM::run(f32 t_start, f32 omega) {
     // Iterative process for solving the blocked harmonic balance equation
     auto& residual_v = residual.view();
     residual_v.fill(1.f);
-    const f32 tol = 1e-5f;
-    const i32 max_iter = 50;
+    gamma_coeffs.view().fill(0.f);
+    const f32 tol = 1e-6f;
+    const i32 max_iter = 100;
     i32 iter = 0;
     while (backend->blas->norm(residual_v.reshape(residual_v.shape(0)*residual_v.shape(1))) > tol) {
         
         rhs.view().fill(0.f);
+        // Note this only work on a single wing
+        auto te_gamma = gamma_coeffs.view()
+            .reshape(colloc_d.views()[0].shape(0), colloc_d.views()[0].shape(1), gamma_coeffs.view().shape(1))
+            .slice(All, -1, All);
+            
         // For each unknown we fill their respective rhs column in a matrix free fashion
         for (i32 s = 0; s < 2*m_harmonics+1; s++) {
             const f32 t_final = t_start + period * (f32)s / (f32)(2*m_harmonics+1);
@@ -233,39 +268,43 @@ void HBVLM::run(f32 t_start, f32 omega) {
 
             auto rhs_s = rhs.view().slice(All, s);
             backend->rhs_assemble_velocities(rhs_s, normals_d.views(), velocities.views());
-            // TODO: compute wake gammas from gamma_wing fourier coefficients
-            // backend->rhs_assemble_wake_influence(rhs_s, gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), t_steps);
+            gamma_wake_from_coeffs(gamma_wake[s].views()[0], te_gamma, m_harmonics, t, omega, dt, t_steps);
+            backend->rhs_assemble_wake_influence(rhs_s, gamma_wake[s].views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), (i32)t_steps);
         } // unknowns for loop
-
+ 
         // Apply the the dft matrix to the rhs
         // A @ G @ D^T = R <=> A @ G = R @ D (since D^-1 = D^T)
-        backend->blas->gemm(1.0f, rhs.view(), dft_d.view(), 0.0f, q_mat.view());
+        gamma_coeffs.view().to(residual_v);
+        backend->blas->gemm(1.0f, rhs.view(), dft_d.view(), 0.0f, gamma_coeffs.view());
         // Solve to obtain the fourier coefficients for each panel
-        solver->solve(lhs.view(), q_mat.view());
-        break; // TEMPORARY (only for no wake influence debugging)
+        solver->solve(lhs.view(), gamma_coeffs.view());
+        backend->blas->axpy(-1.0f, gamma_coeffs.view(), residual_v);
 
         iter++;
         if (iter > max_iter) {
-            std::printf("Newton-Raphson process did not converge\n");
+            std::printf("Fixed iteration process did not converge\n");
+            exit(1);
             break;
         }
     } // while loop
 
+    std::printf("Fixed iteration process converged in %d iterations\n", iter);
+
     // Compute time domain solution from the obtained fourier coeffs
     {
-        auto& q_mat_hv = q_mat_h.view();
-        q_mat.view().to(q_mat_hv);
+        auto& gamma_coeffs_hv = gamma_coeffs_h.view();
+        gamma_coeffs.view().to(gamma_coeffs_hv);
         const i32 unknowns = 2 * m_harmonics + 1;
         const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));
         const f32 sqrt_unknowns_2 = std::sqrt(2.f / static_cast<f32>(unknowns));
         std::ofstream gamma_data("hbvlm_gamma_" + backend->name + ".txt");
         for (i64 i = 0; i < max_t_steps; i++) {
             const f32 t = (f32)i * dt;
-            f32 gamma = sqrt_unknowns * q_mat_hv(0,0);
-            for (i64 j = 1; j < unknowns; j += 2) {
-                const f32 k = ((f32)j + 1.f) / 2.f;
-                gamma += q_mat_hv(0, j) * std::cos(omega * t * k) * sqrt_unknowns_2;
-                gamma += q_mat_hv(0, j+1) * std::sin(omega * t * k) * sqrt_unknowns_2;
+            f32 gamma = sqrt_unknowns * gamma_coeffs_hv(0,0);
+            for (i64 j = 0; j < m_harmonics; j++) {
+                const f32 k = (f32)(j+1);
+                gamma += gamma_coeffs_hv(0, 2*j+1) * std::cos(omega * t * k) * sqrt_unknowns_2;
+                gamma += gamma_coeffs_hv(0, 2*j+2) * std::sin(omega * t * k) * sqrt_unknowns_2;
             }
             gamma_data << t << " " << gamma << "\n";
         }
@@ -273,7 +312,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
 }
 
 int main() {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x5.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_20x5.x"};
     const std::vector<std::string> backends = {"cpu"};
 
     auto solvers = tiny::make_combination(meshes, backends);
@@ -282,14 +321,15 @@ int main() {
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 4.0f;
+    const f32 cycles = 9.0f;
     const f32 u_inf = 1.0f; // freestream velocity
-    const f32 k = 0.5; // reduced frequency
+    const f32 k = 0.25f; // reduced frequency
     const f32 omega = k * u_inf / b;
     const f32 t_final = cycles * 2.0f * PI_f / omega;
     const i32 harmonics = 3;
 
     std::printf("t_final: %f\n", t_final);
+    std::printf("omega: %f\n", omega);
 
     KinematicsTree kinematics_tree;
 
@@ -299,7 +339,10 @@ int main() {
         return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
     });
     auto pitch = kinematics_tree.add([=](const fwd::Float& t) {
-        return rotation_matrix<fwd::Float>({0.25f, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_radians(amplitude) * fwd::sin(omega * t));
+        return rotation_matrix<fwd::Float>(
+            {0.25f, 0.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f},
+            to_radians(amplitude) * fwd::sin(omega * t) + to_radians(2.f) * fwd::sin(3.f * omega * t));
     })->after(fs);
 
     for (const auto& [mesh_name, backend_name] : solvers) {
