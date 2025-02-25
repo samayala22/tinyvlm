@@ -1,11 +1,8 @@
 import numpy as np
 from scipy.optimize import newton_krylov
-import numba as nb
 import time
+import plotly.express as px
 
-nb.config.CACHE = True
-
-@nb.njit
 def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
     """
     Compute a fixed point of f using Anderson Acceleration with fixed-allocated buffers.
@@ -45,6 +42,7 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
     g_curr = np.zeros(n)
     g_new = np.zeros(n)
     gamma = np.zeros(m)
+    residual_history = []
 
     # Initialization
     # Let x_prev = x0 and compute one fixed–point step.
@@ -65,11 +63,11 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
         m_k = min(m, k)
         # Solve the least–squares problem:
         #     gamma = argmin || g_curr - Gbuf[:, :m_k]*gamma ||
-        gamma, _, _, _ = np.linalg.lstsq(Gbuf[:, :m_k], g_curr)
+        gamma, _, _, _ = np.linalg.lstsq(Gbuf[:, :m_k], g_curr, rcond=None)
         # Compute the update correction:
         # The acceleration step uses all stored differences (from both x and g):
         #    x_new = x_curr + g_curr - (Xbuf + Gbuf) * gamma.
-        x_new = x_curr + g_curr - (Xbuf[:, :m_k] + Gbuf[:, :m_k]) @ gamma
+        x_new = x_curr + g_curr - (Xbuf[:, :m_k] + Gbuf[:, :m_k]) @ gamma[:m_k]
 
         # Shift
         if (m_k == m):
@@ -77,17 +75,23 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
             Gbuf[:, :-1] = Gbuf[:, 1:]
 
         Xbuf[:, min(m_k, m-1)] = x_new - x_curr
-        Xbuf[:, m_k-1] = x_new - x_curr
         x_curr = x_new.copy()
         x_new = f(x_curr)
         g_new = x_new - x_curr
         Gbuf[:, min(m_k, m-1)] = g_new - g_curr
         g_curr = g_new.copy()
         k += 1
+        residual_history.append(np.linalg.norm(g_curr))
+
+    fig = px.line(x=range(k-1), y=residual_history, log_y=True)
+    fig.update_yaxes(
+        tickformat='.2e',  # Format as exponential with 2 decimal places
+        exponentformat='e'  # Use 'e' notation (alternatives: 'E', 'power', 'SI', 'B')
+    )
+    fig.show()
 
     return x_curr, k
 
-@nb.njit
 def picard(f, x0, k_max=100, tol_res=1e-6):
     """Picard iteration for fixed-point problems.
        f: function mapping R^n to R^n
@@ -124,13 +128,11 @@ def nonlinear_fixed_point(n=100, scale=0.9, bias_scale=0.1, seed=42):
     spectral_norm = np.linalg.norm(A_temp, 2)
     A = (scale / spectral_norm) * A_temp
     b = bias_scale * np.random.randn(n)
-    delta=0.05
+    delta=0.2
     
-    @nb.jit
     def h(x):
         return np.tanh(A @ x + b) + 0.1 * np.sin(A @ x + b)
     
-    @nb.jit
     def f(x):
         return x + delta * (h(x) - x)
 
@@ -164,7 +166,7 @@ def main():
     # x0 = np.array([1.0])
     np.random.seed(42)  # For reproducibility
 
-    n = 1000
+    n = 50
     x0 = np.random.rand(n)
     func = nonlinear_fixed_point(n)
 
@@ -172,17 +174,20 @@ def main():
     tol_res = 1e-6
     m = 3
 
-    fixed_point, iterations = anderson_acceleration_fast(func, x0, k_max, tol_res, m)
-    print(f"Anderson computed fixed point after {iterations} iterations")
-    assert np.allclose(func(fixed_point), fixed_point, atol=tol_res)
+    def F(x): return func(x)-x
+    ff = FunctionCounter(F)
+    fff = FunctionCounter(func)
+    fixed_point, iterations = anderson_acceleration_fast(fff, x0, k_max, tol_res, m)
+    print("Anderson Function evaluations:", fff.eval_count)
+    # print(f"Anderson computed fixed point after {iterations} iterations")
+    # assert np.allclose(func(fixed_point), fixed_point, atol=tol_res)
 
     # fixed_point, iterations = picard(func, x0, k_max, tol_res)
     # print(f"Picard computed fixed point after {iterations} iterations")
     # assert np.allclose(func(fixed_point), fixed_point, atol=tol_res)
-    def F(x): return func(x)-x
-    ff = FunctionCounter(F)
-    krylov_solution = newton_krylov(ff, x0, method='lgmres', verbose=1, maxiter=5000, f_tol=1e-6)
-    print("Function evaluations:", ff.eval_count)
+
+    krylov_solution = newton_krylov(ff, x0, method='lgmres', verbose=0, maxiter=5000, f_tol=1e-6)
+    print("Newto-Krylov Function evaluations:", ff.eval_count)
     # assert np.allclose(func(krylov_solution), krylov_solution, atol=1e-6)
     # print("Newton-Krylov satisfies the fixed point condition.")
     # bench(lambda: picard(func, x0, k_max, tol_res), func)
