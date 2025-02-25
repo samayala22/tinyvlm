@@ -4,7 +4,6 @@
 
 #include "vlm_fwd.hpp"
 #include "vlm_types.hpp"
-#include "vlm_mesh.hpp"
 #include "vlm_data.hpp"
 #include "vlm_memory.hpp"
 
@@ -100,6 +99,7 @@ class Backend {
         // virtual std::unique_ptr<Kernels> create_kernels() = 0;
         virtual std::unique_ptr<LU> create_lu_solver() = 0;
         virtual std::unique_ptr<BLAS> create_blas() = 0; // todo: deprecate
+        virtual std::unique_ptr<LSQ> create_lsq() = 0;
 };
 
 class BLAS {
@@ -126,6 +126,20 @@ class LU {
         void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x) {
             return solve(A, x.reshape(x.shape(0), 1));
         }
+    protected:
+        std::unique_ptr<Memory> m_memory;
+};
+
+class LSQ {
+    public:
+        explicit LSQ(std::unique_ptr<Memory> memory) : m_memory(std::move(memory)) {}
+        virtual ~LSQ() = default;
+        
+        virtual void solve(
+            const TensorView<f32, 2, Location::Device>& A,
+            const TensorView<f32, 2, Location::Device>& B
+        ) = 0;
+
     protected:
         std::unique_ptr<Memory> m_memory;
 };

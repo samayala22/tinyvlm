@@ -13,6 +13,8 @@
 #include "vlm_kinematics.hpp"
 #include "vlm_utils.hpp"
 
+// #define PICARD 1
+
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
@@ -50,6 +52,7 @@ class HBVLM final: public Simulation {
         std::vector<i32> condition0;
         Assembly m_assembly;
         i32 m_harmonics;
+
     private:
         void alloc_buffers();
 };
@@ -143,6 +146,102 @@ void gamma_wake_from_coeffs(
     }
 }
 
+void anderson_acceleration(
+    Backend* backend,
+    const TensorView1D<Location::Device>& x0,
+    std::function<void(const TensorView1D<Location::Device>& x, const TensorView1D<Location::Device>& y)> f,
+    i32 max_iter = 100,
+    f32 tol_res = 1e-6,
+    i32 m = 3
+)
+{
+    i64 n = x0.shape(0);
+    Tensor2D<Location::Device> _X_buf{backend->memory.get()};
+    Tensor2D<Location::Device> _G_buf{backend->memory.get()};
+    Tensor2D<Location::Device> _G_buf_k{backend->memory.get()}; // copy because lsq overwrites
+    Tensor1D<Location::Device> _x_curr{backend->memory.get()};
+    Tensor1D<Location::Device> _x_new{backend->memory.get()};
+    Tensor1D<Location::Device> _g_curr{backend->memory.get()};
+    Tensor1D<Location::Device> _g_new{backend->memory.get()};
+    Tensor1D<Location::Device> _gamma{backend->memory.get()};
+    auto lsq_solver = backend->create_lsq();
+
+    _X_buf.init({n, m});
+    _G_buf.init({n, m});
+    _G_buf_k.init({n, m});
+    _x_curr.init({n});
+    _x_new.init({n});
+    _g_curr.init({n});
+    _g_new.init({n});
+    _gamma.init({n});
+
+    auto& X_buf = _X_buf.view();
+    auto& G_buf = _G_buf.view();
+    auto& G_buf_k = _G_buf_k.view();
+    auto& x_curr = _x_curr.view();
+    auto& x_new = _x_new.view();
+    auto& g_curr = _g_curr.view();
+    auto& g_new = _g_new.view();
+    auto& gamma = _gamma.view();
+
+    X_buf.fill(0.f); // not necessary
+    G_buf.fill(0.f); // not necessary
+    G_buf_k.fill(0.f); // not necessary
+
+    x0.to(x_curr);
+    f(x_curr, x_new);
+    x_new.to(g_curr);
+    backend->blas->axpy(-1.0f, x_curr, g_curr);
+    g_curr.to(X_buf.slice(All, 0));
+    
+    x_new.to(x_curr);
+    f(x_curr, x_new);
+    x_new.to(g_new);
+    backend->blas->axpy(-1.0f, x_curr, g_new);
+    g_new.to(G_buf.slice(All, 0));
+    backend->blas->axpy(-1.0f, g_curr, G_buf.slice(All, 0));
+    g_new.to(g_curr);
+
+    i32 k = 1;
+    while (k < max_iter && backend->blas->norm(g_curr) > tol_res) {
+        i32 m_k = std::min(m, k);
+        i32 m_bk = std::min(m_k, m-1);
+        g_curr.to(gamma);
+        auto G_bufk = G_buf.slice(All, Range{0, m_k});
+        auto G_bufk_k = G_buf_k.slice(All, Range{0, m_k});
+        auto X_bufk = X_buf.slice(All, Range{0, m_k});
+        auto gammak = gamma.slice(Range{0, m_k});
+
+        G_bufk.to(G_bufk_k);
+        lsq_solver->solve(G_bufk_k, gamma.reshape(gamma.shape(0), 1));
+        x_curr.to(x_new); // i think not necessary
+        backend->blas->axpy(1.0f, g_curr, x_new);
+        backend->blas->gemv(-1.0f, X_bufk, gammak, 1.0f, x_new);
+        backend->blas->gemv(-1.0f, G_bufk, gammak, 1.0f, x_new);
+
+        if (m_k == m) {
+            for (i32 i = 0; i < m-1; i++) {
+                X_bufk.slice(All, i+1).to(X_bufk.slice(All, i));
+                G_bufk.slice(All, i+1).to(G_bufk.slice(All, i));
+            }
+        }
+
+        x_new.to(X_buf.slice(All, m_bk));
+        backend->blas->axpy(-1.0f, x_curr, X_buf.slice(All, m_bk));
+        x_new.to(x_curr);
+        f(x_curr, x_new);
+        x_new.to(g_new);
+        backend->blas->axpy(-1.0f, x_curr, g_new);
+        g_new.to(G_buf.slice(All, m_bk));
+        backend->blas->axpy(-1.0f, g_curr, G_buf.slice(All, m_bk));
+        g_new.to(g_curr);
+        k += 1;
+    }
+    x_curr.to(x0);
+
+    std::printf("Anderson fixed point converged in %d iterations\n", k);
+}
+
 void HBVLM::run(f32 t_start, f32 omega) {
     const tiny::ScopedTimer timer("HBVLM::run");
     const f32 period = 2.0f * PI_f / omega;
@@ -219,10 +318,90 @@ void HBVLM::run(f32 t_start, f32 omega) {
         dft_hv.to(dft_dv);
     }
 
+    auto hb_vlm_iter = [&](
+        const TensorView1D<Location::Device>& _gamma_in, 
+        const TensorView1D<Location::Device>& _gamma_out
+    ){
+        auto gamma_in  = _gamma_in.reshape(lhs.view().shape(0), 2*m_harmonics+1);
+        auto gamma_out = _gamma_out.reshape(lhs.view().shape(0), 2*m_harmonics+1);
+
+        rhs.view().fill(0.f);
+        // Note this only work on a single wing
+        auto te_gamma = gamma_in
+            .reshape(colloc_d.views()[0].shape(0), colloc_d.views()[0].shape(1), gamma_in.shape(1))
+            .slice(All, -1, All);
+            
+        // For each unknown we fill their respective rhs column in a matrix free fashion
+        for (i32 s = 0; s < 2*m_harmonics+1; s++) {
+            const f32 t_final = t_start + period * (f32)s / (f32)(2*m_harmonics+1);
+            const i64 t_steps = static_cast<i64>(std::round(t_final / dt));
+            const f32 t = (f32)t_steps * dt; // t_final rounded to nearest dt
+
+            for (i64 m = 0; m < assembly_wings.size(); m++) {
+                auto transform = m_assembly.surface_kinematics()[m]->transform(t);
+                transform.store(transforms_h.views()[m].ptr(), transforms_h.views()[m].stride(1));
+                transforms_h.views()[m].to(transforms.views()[m]);
+            }
+
+            backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
+            backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
+
+            // parallel for
+            for (i64 m = 0; m < assembly_wings.size(); m++) {
+                const auto transform_node = m_assembly.surface_kinematics()[m];
+                const auto& colloc_h_m = colloc_h.views()[m];
+                const auto& velocities_h_m = velocities_h.views()[m];
+                const auto& velocities_m = velocities.views()[m];
+                const auto mat_transform_dual = transform_node->transform_dual(t);
+
+                for (i64 j = 0; j < colloc_h_m.shape(1); j++) {
+                    for (i64 i = 0; i < colloc_h_m.shape(0); i++) {
+                        auto local_velocity = -transform_node->linear_velocity(mat_transform_dual, {colloc_h_m(i, j, 0), colloc_h_m(i, j, 1), colloc_h_m(i, j, 2)});
+                        velocities_h_m(i, j, 0) = local_velocity.x;
+                        velocities_h_m(i, j, 1) = local_velocity.y;
+                        velocities_h_m(i, j, 2) = local_velocity.z;
+                    }
+                }
+                velocities_h_m.to(velocities_m);
+            }
+
+            auto rhs_s = rhs.view().slice(All, s);
+            backend->rhs_assemble_velocities(rhs_s, normals_d.views(), velocities.views());
+            gamma_wake_from_coeffs(gamma_wake[s].views()[0], te_gamma, m_harmonics, t, omega, dt, t_steps);
+            backend->rhs_assemble_wake_influence(rhs_s, gamma_wake[s].views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), (i32)t_steps);
+        } // unknowns for loop
+
+        // Apply the the dft matrix to the rhs
+        // A @ G @ D^T = R <=> A @ G = R @ D (since D^-1 = D^T)
+        backend->blas->gemm(1.0f, rhs.view(), dft_d.view(), 0.0f, gamma_out);
+        // Solve to obtain the fourier coefficients for each panel
+        solver->solve(lhs.view(), gamma_out);
+    };
+    
+    auto& gamma_coeffs_v = gamma_coeffs.view();
+    gamma_coeffs_v.fill(0.f);
+
+    #ifndef PICARD
+    anderson_acceleration(backend.get(), gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)), hb_vlm_iter, 100, 1e-3, 3);
+    #endif
+
+    // Tensor1D<Location::Device> test_tensor{backend->memory.get()};
+    // test_tensor.init({2});
+    // test_tensor.view()(0) = 1.f;
+    // test_tensor.view()(1) = 1.f;
+
+    // auto mapping_2d = [](const TensorView1D<Location::Device>& x_in, const TensorView1D<Location::Device>& x_out) {
+    //     x_out(0) = 2.f * std::sin(x_in(0)) + std::atan(x_in(1));
+    //     x_out(1) = std::sin(x_in(1)) + 2.f * std::atan(x_in(0));
+    // };
+
+    // anderson_acceleration(backend.get(), test_tensor.view(), mapping_2d, 10, 1e-6, 2);
+    // std::cout << test_tensor.view()(0) << " " << test_tensor.view()(1) << "\n";
+
     // Iterative process for solving the blocked harmonic balance equation
+    #ifdef PICARD
     auto& residual_v = residual.view();
     residual_v.fill(1.f);
-    gamma_coeffs.view().fill(0.f);
     const f32 tol = 1e-3f;
     const i32 max_iter = 1000;
     i32 iter = 0;
@@ -290,7 +469,8 @@ void HBVLM::run(f32 t_start, f32 omega) {
         }
     } // while loop
 
-    std::printf("Fixed iteration process converged in %d iterations\n", iter);
+    std::printf("Picard iterative process converged in %d iterations\n", iter);
+    #endif
 
     // Compute time domain solution from the obtained fourier coeffs
     {
@@ -314,7 +494,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
 }
 
 int main() {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_40x10.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_20x5.x"};
     const std::vector<std::string> backends = {"cpu"};
 
     auto solvers = tiny::make_combination(meshes, backends);

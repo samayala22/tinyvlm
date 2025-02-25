@@ -216,6 +216,39 @@ void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>&
     }
 }
 
+class CPU_LSQ final : public LSQ {
+    public:
+        explicit CPU_LSQ(std::unique_ptr<Memory> memory) : LSQ(std::move(memory)) {}
+        virtual ~CPU_LSQ() = default;
+        
+        void solve(
+            const TensorView<f32, 2, Location::Device>& A,
+            const TensorView<f32, 2, Location::Device>& B
+        ) override;
+
+    protected:
+        std::unique_ptr<Memory> m_memory;
+};
+
+void CPU_LSQ::solve(
+    const TensorView<f32, 2, Location::Device>& A,
+    const TensorView<f32, 2, Location::Device>& B
+) {
+    CHECK_LAPACK(
+        LAPACKE_sgels(
+            LAPACK_COL_MAJOR,
+            'N',
+            A.shape(0),
+            A.shape(1),
+            B.shape(1),
+            A.ptr(),
+            A.stride(1),
+            B.ptr(),
+            B.stride(1)
+        )
+    );
+}
+
 BackendCPU::BackendCPU() : Backend(create_memory_manager(), create_blas()) {
     name = "CPU";
     print_cpu_info();
@@ -227,7 +260,7 @@ std::unique_ptr<Memory> BackendCPU::create_memory_manager() { return std::make_u
 // std::unique_ptr<Kernels> create_kernels() { return std::make_unique<CPU_Kernels>(); }
 std::unique_ptr<LU> BackendCPU::create_lu_solver() { return std::make_unique<CPU_LU>(create_memory_manager()); }
 std::unique_ptr<BLAS> BackendCPU::create_blas() { return std::make_unique<CPU_BLAS>(); }
-
+std::unique_ptr<LSQ> BackendCPU::create_lsq() { return std::make_unique<CPU_LSQ>(create_memory_manager()); }
 
 /// @brief Assemble the left hand side matrix
 /// @details

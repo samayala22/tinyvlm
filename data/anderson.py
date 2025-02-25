@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.optimize import newton_krylov
+import scipy.linalg.lapack as lapack
 import time
 import plotly.express as px
 
@@ -41,7 +42,7 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
     x_new = np.zeros(n)
     g_curr = np.zeros(n)
     g_new = np.zeros(n)
-    gamma = np.zeros(m)
+    gamma = np.zeros(n)
     residual_history = []
 
     # Initialization
@@ -63,12 +64,12 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
         m_k = min(m, k)
         # Solve the least–squares problem:
         #     gamma = argmin || g_curr - Gbuf[:, :m_k]*gamma ||
-        gamma, _, _, _ = np.linalg.lstsq(Gbuf[:, :m_k], g_curr, rcond=None)
+        # gamma, _, _, _ = np.linalg.lstsq(Gbuf[:, :m_k], g_curr, rcond=None)
+        _, gamma, _ = lapack.dgels(Gbuf[:, :m_k], g_curr)
         # Compute the update correction:
         # The acceleration step uses all stored differences (from both x and g):
         #    x_new = x_curr + g_curr - (Xbuf + Gbuf) * gamma.
         x_new = x_curr + g_curr - (Xbuf[:, :m_k] + Gbuf[:, :m_k]) @ gamma[:m_k]
-
         # Shift
         if (m_k == m):
             Xbuf[:, :-1] = Xbuf[:, 1:]
@@ -88,7 +89,7 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
         tickformat='.2e',  # Format as exponential with 2 decimal places
         exponentformat='e'  # Use 'e' notation (alternatives: 'E', 'power', 'SI', 'B')
     )
-    fig.show()
+    # fig.show()
 
     return x_curr, k
 
@@ -108,16 +109,9 @@ def picard(f, x0, k_max=100, tol_res=1e-6):
             print("Warning: Picard iteration did not converge.")
     return x_curr, k
 
-# def f(x):
-#     """Fixed-point function mapping R^2 to R^2.
-#     In this example, we define:
-#     f₁(x,y) = sin(x) + arctan(y)
-#     f₂(x,y) = sin(y) + arctan(x)
-#     so that a fixed point solves:
-#     x = sin(x) + arctan(y),  y = sin(y) + arctan(x)
-#     """
-#     return np.array([2.0 * np.sin(x[0]) + np.arctan(x[1]),
-#                      np.sin(x[1]) + 2.0 * np.arctan(x[0])])
+def mapping_2d(x):
+    return np.array([2.0 * np.sin(x[0]) + np.arctan(x[1]),
+                     np.sin(x[1]) + 2.0 * np.arctan(x[0])])
 
 # def f(x):
 #     return np.array([np.sin(x[0]) + np.arctan(x[0])])
@@ -136,7 +130,7 @@ def nonlinear_fixed_point(n=100, scale=0.9, bias_scale=0.1, seed=42):
     def f(x):
         return x + delta * (h(x) - x)
 
-    return f
+    return h
 
 def bench(f: callable, func: callable, warmup=10, tries=50):
     for i in range(warmup):
@@ -166,23 +160,30 @@ def main():
     # x0 = np.array([1.0])
     np.random.seed(42)  # For reproducibility
 
-    n = 50
-    x0 = np.random.rand(n)
-    func = nonlinear_fixed_point(n)
+    # n = 5
+    # x0 = np.random.rand(n)
+    # func = nonlinear_fixed_point(n)
+
+    x0 = np.array([1.0, 1.0])
+    func = mapping_2d
 
     k_max = 1000
     tol_res = 1e-6
-    m = 3
+    m = 2
 
     def F(x): return func(x)-x
     ff = FunctionCounter(F)
     fff = FunctionCounter(func)
     fixed_point, iterations = anderson_acceleration_fast(fff, x0, k_max, tol_res, m)
     print("Anderson Function evaluations:", fff.eval_count)
+    print(fixed_point)
     # print(f"Anderson computed fixed point after {iterations} iterations")
-    # assert np.allclose(func(fixed_point), fixed_point, atol=tol_res)
+    assert np.allclose(func(fixed_point), fixed_point, atol=tol_res)
 
-    # fixed_point, iterations = picard(func, x0, k_max, tol_res)
+    fff.reset()
+    fixed_point, iterations = picard(fff, x0, k_max, tol_res)
+    print("Picard Function evaluations:", fff.eval_count)
+
     # print(f"Picard computed fixed point after {iterations} iterations")
     # assert np.allclose(func(fixed_point), fixed_point, atol=tol_res)
 

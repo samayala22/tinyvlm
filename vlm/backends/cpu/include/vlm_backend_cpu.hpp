@@ -56,6 +56,7 @@ class BackendCPU final : public Backend {
         // std::unique_ptr<Kernels> create_kernels() override;
         std::unique_ptr<LU> create_lu_solver() override;
         std::unique_ptr<BLAS> create_blas() override;
+        std::unique_ptr<LSQ> create_lsq() override;
 };
 
 } // namespace vlm
