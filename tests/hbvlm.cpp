@@ -6,6 +6,7 @@
 #include "tinycombination.hpp"
 #include "tinyad.hpp"
 #include "tinypbar.hpp"
+#include "tinytimer.hpp"
 
 #include "vlm.hpp"
 #include "vlm_types.hpp"
@@ -143,6 +144,7 @@ void gamma_wake_from_coeffs(
 }
 
 void HBVLM::run(f32 t_start, f32 omega) {
+    const tiny::ScopedTimer timer("HBVLM::run");
     const f32 period = 2.0f * PI_f / omega;
     const f32 rho = 1.0f; // TODO: take this as input
 
@@ -221,8 +223,8 @@ void HBVLM::run(f32 t_start, f32 omega) {
     auto& residual_v = residual.view();
     residual_v.fill(1.f);
     gamma_coeffs.view().fill(0.f);
-    const f32 tol = 1e-6f;
-    const i32 max_iter = 100;
+    const f32 tol = 1e-3f;
+    const i32 max_iter = 1000;
     i32 iter = 0;
     while (backend->blas->norm(residual_v.reshape(residual_v.shape(0)*residual_v.shape(1))) > tol) {
         
@@ -312,7 +314,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
 }
 
 int main() {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_20x5.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_40x10.x"};
     const std::vector<std::string> backends = {"cpu"};
 
     auto solvers = tiny::make_combination(meshes, backends);
