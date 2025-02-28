@@ -1,8 +1,20 @@
 import numpy as np
-from scipy.optimize import newton_krylov
+import scipy as sp
+import scipy.optimize as opt
 import scipy.linalg.lapack as lapack
-import time
 import plotly.express as px
+
+class FunctionCounter:
+    def __init__(self, func):
+        self.func = func
+        self.eval_count = 0
+
+    def __call__(self, x):
+        self.eval_count += 1
+        return self.func(x)
+    
+    def reset(self):
+        self.eval_count = 0
 
 def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
     """
@@ -65,7 +77,9 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
         # Solve the least–squares problem:
         #     gamma = argmin || g_curr - Gbuf[:, :m_k]*gamma ||
         # gamma, _, _, _ = np.linalg.lstsq(Gbuf[:, :m_k], g_curr, rcond=None)
-        _, gamma, _ = lapack.dgels(Gbuf[:, :m_k], g_curr)
+        # _, gamma, _ = lapack.dgels(Gbuf[:, :m_k], g_curr)
+        gamma = sp.linalg.lstsq(Gbuf[:, :m_k], g_curr)[0]
+
         # Compute the update correction:
         # The acceleration step uses all stored differences (from both x and g):
         #    x_new = x_curr + g_curr - (Xbuf + Gbuf) * gamma.
@@ -91,7 +105,7 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
     )
     # fig.show()
 
-    return x_curr, k
+    return x_curr
 
 def picard(f, x0, k_max=100, tol_res=1e-6):
     """Picard iteration for fixed-point problems.
@@ -105,9 +119,7 @@ def picard(f, x0, k_max=100, tol_res=1e-6):
     while k < k_max and np.linalg.norm(f(x_curr) - x_curr) > tol_res:
         x_curr = f(x_curr)
         k += 1
-        if (k == k_max):
-            print("Warning: Picard iteration did not converge.")
-    return x_curr, k
+    return x_curr
 
 def mapping_2d(x):
     return np.array([2.0 * np.sin(x[0]) + np.arctan(x[1]),
@@ -125,75 +137,68 @@ def nonlinear_fixed_point(n=100, scale=0.9, bias_scale=0.1, seed=42):
     delta=0.2
     
     def h(x):
-        return np.tanh(A @ x + b) + 0.1 * np.sin(A @ x + b)
+        return np.tanh(A @ x + b) + 0.1 * np.sin(A @ x + b) + x
     
     def f(x):
         return x + delta * (h(x) - x)
 
     return h
 
-def bench(f: callable, func: callable, warmup=10, tries=50):
-    for i in range(warmup):
-        sol = f()[0]
-    start = time.time()
-    for i in range(tries):
-        sol = f()[0]
-    end = time.time()
-    print("Avg time: ", (end - start) / tries)
-    # assert np.allclose(func(sol), sol, atol=1e-6)
+def linear_system(n):
+    np.random.seed(5)
+    A = np.random.rand(n, n)
+    b = np.random.rand(n)
+    alpha = 0.5
 
-class FunctionCounter:
-    def __init__(self, func):
-        self.func = func
-        self.eval_count = 0
+    # Check spectral properties
+    max_eig = np.max(np.abs(np.linalg.eigvals(A)))
+    if max_eig >= 1 - alpha:
+        print(f"Warning: Max eigenvalue of A ({max_eig}) is >= (1-alpha) ({1-alpha}).")
+        print("Fixed-point iterations will likely diverge.")
 
-    def __call__(self, x):
-        self.eval_count += 1
-        return self.func(x)
+    return lambda x: A @ x - b - x + alpha*x
+
+def create_fixed_point(func):
+    def f(x):
+        return func(x) + x
     
-    def reset(self):
-        self.eval_count = 0
+    return f
+
+def validate(func, sol, tol=1e-5):
+    return "SUCCESS" if (np.all(np.abs(func(sol)) < tol)) else "FAILURE"
 
 def main():
-    # Initial guess for the 2D fixed point.
-    # x0 = np.array([1.5, 1.5])
-    # x0 = np.array([1.0])
-    np.random.seed(42)  # For reproducibility
-
-    # n = 5
-    # x0 = np.random.rand(n)
-    # func = nonlinear_fixed_point(n)
-
-    x0 = np.array([1.0, 1.0])
-    func = mapping_2d
-
-    k_max = 1000
+    k_max = 500
     tol_res = 1e-6
-    m = 2
+    m = 3
 
-    def F(x): return func(x)-x
-    ff = FunctionCounter(F)
-    fff = FunctionCounter(func)
-    fixed_point, iterations = anderson_acceleration_fast(fff, x0, k_max, tol_res, m)
-    print("Anderson Function evaluations:", fff.eval_count)
-    print(fixed_point)
-    # print(f"Anderson computed fixed point after {iterations} iterations")
-    assert np.allclose(func(fixed_point), fixed_point, atol=tol_res)
+    func = linear_system(10)
+    x0 = np.random.rand(10)
 
-    fff.reset()
-    fixed_point, iterations = picard(fff, x0, k_max, tol_res)
-    print("Picard Function evaluations:", fff.eval_count)
+    rf = FunctionCounter(func)
+    fp = FunctionCounter(create_fixed_point(func))
 
-    # print(f"Picard computed fixed point after {iterations} iterations")
-    # assert np.allclose(func(fixed_point), fixed_point, atol=tol_res)
+    ok = validate(func, anderson_acceleration_fast(fp, x0, k_max, tol_res, m))
+    print(f"[{ok}] Anderson Function evaluations: {fp.eval_count}")
+    fp.reset()
 
-    krylov_solution = newton_krylov(ff, x0, method='lgmres', verbose=0, maxiter=5000, f_tol=1e-6)
-    print("Newto-Krylov Function evaluations:", ff.eval_count)
-    # assert np.allclose(func(krylov_solution), krylov_solution, atol=1e-6)
-    # print("Newton-Krylov satisfies the fixed point condition.")
-    # bench(lambda: picard(func, x0, k_max, tol_res), func)
-    # bench(lambda: anderson_acceleration_fast(func, x0, k_max, tol_res, m), func)
-    # bench(lambda: newton_krylov(lambda x: func(x)-x, x0, method='lgmres', verbose=0, maxiter=5000, f_tol=1e-6), func)
+    # ok = validate(func, picard(fp, x0, k_max, tol_res))
+    # print(f"[{ok}] Picard Function evaluations: {fp.eval_count}")
+    # fp.reset()
+
+    ok = validate(func, opt.newton_krylov(rf, x0, method='lgmres', verbose=0, maxiter=k_max, f_tol=tol_res))
+    print(f"[{ok}] Newton-Krylov Function evaluations: {rf.eval_count}")
+    rf.reset()
+
+    ROOT_METHODS = ['hybr', 'lm', 'broyden1', 'broyden2', 'anderson']
+    for method in ROOT_METHODS:
+        try:
+            ok = validate(func, opt.root(rf, x0, method=method, tol=tol_res).x)
+            print(f"[{ok}] Scipy {method} Function evaluations: {rf.eval_count}")
+            rf.reset()
+        except Exception as e:
+            print(f"[{False}] Scipy {method} failed: {e}")
+
 
 if __name__ == '__main__':
     main()
