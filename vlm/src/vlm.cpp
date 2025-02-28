@@ -192,7 +192,7 @@ void NLVLM::alloc_buffers() {
     for (const auto& wake : verts_wake.views()) wake.slice(All, All, 3).fill(1.f);
 }
 
-void strip_alpha_to_vel(const FlowData& flow, MultiTensorView3D<Location::Device>& local_velocities, const MultiTensorView1D<Location::Host>& strip_alphas) {
+void strip_alpha_to_vel(const FlowData& flow, MultiTensorView3fD& local_velocities, const MultiTensorView1fH& strip_alphas) {
     for (const auto& [strip, vel] : zip(strip_alphas, local_velocities)) {
         // Note: this is not the most efficient way
         // we can set the first row and then copy each contiguous spanwise slice instead

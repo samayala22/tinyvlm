@@ -273,7 +273,7 @@ std::unique_ptr<LSQ> BackendCPU::create_lsq() { return std::make_unique<CPU_LSQ>
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView3D<Location::Device>& verts_wake, std::vector<i32>& condition, i32 iteration) {
+void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wing, const MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) {
     // tiny::ScopedTimer timer("LHS");
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
 
@@ -345,7 +345,7 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const M
 /// @param rhs right hand side vector
 /// @param normals normals of all surfaces
 /// @param velocities displacement velocities of all surfaces
-void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& velocities) {
+void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) {
     // const tiny::ScopedTimer timer("RHS");
 
     tf::Taskflow taskflow;
@@ -370,7 +370,7 @@ void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& r
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
+void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
     assert(lifting.size() == normals.size());
 
@@ -417,7 +417,7 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device
 
 // TODO: reactivate this function taking care to take into account the multibody interactions
 // We should be passing two different pointers of the influenced wake vertex and the start of the influencing wake vertices
-void BackendCPU::displace_wake_rollup(MultiTensorView3D<Location::Device>& wake_rollup, const MultiTensorView3D<Location::Device>& verts_wake, const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wake, f32 dt, i32 iteration) {
+void BackendCPU::displace_wake_rollup(MultiTensorView3fD& wake_rollup, const MultiTensorView3fD& verts_wake, const MultiTensorView3fD& verts_wing, const MultiTensorView2fD& gamma_wing, const MultiTensorView2fD& gamma_wake, f32 dt, i32 iteration) {
     // // const tiny::ScopedTimer timer("Wake Rollup");
     // tf::Taskflow taskflow;
 
@@ -465,7 +465,7 @@ void BackendCPU::displace_wake_rollup(MultiTensorView3D<Location::Device>& wake_
     // Executor::get().run(taskflow).wait();
 }
 
-f32 BackendCPU::coeff_steady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) {
+f32 BackendCPU::coeff_steady_cl_single(const TensorView3fD& verts_wing, const TensorView2fD& gamma_delta, const FlowData& flow, f32 area) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cl = 0.0f;
 
@@ -490,14 +490,14 @@ f32 BackendCPU::coeff_steady_cl_single(const TensorView3D<Location::Device>& ver
 }
 
 void BackendCPU::forces_unsteady(
-    const TensorView3D<Location::Device>& verts_wing,
-    const TensorView2D<Location::Device>& gamma_delta,
-    const TensorView2D<Location::Device>& gamma,
-    const TensorView2D<Location::Device>& gamma_prev,
-    const TensorView3D<Location::Device>& velocities,
-    const TensorView2D<Location::Device>& areas,
-    const TensorView3D<Location::Device>& normals,
-    const TensorView3D<Location::Device>& forces,
+    const TensorView3fD& verts_wing,
+    const TensorView2fD& gamma_delta,
+    const TensorView2fD& gamma,
+    const TensorView2fD& gamma_prev,
+    const TensorView3fD& velocities,
+    const TensorView2fD& areas,
+    const TensorView3fD& normals,
+    const TensorView3fD& forces,
     f32 dt
     ) {
     const f32 rho = 1.0f; // TODO: remove hardcoded rho
@@ -525,7 +525,7 @@ void BackendCPU::forces_unsteady(
 }
 
 f32 BackendCPU::coeff_cl(
-    const TensorView3D<Location::Device>& forces,
+    const TensorView3fD& forces,
     const linalg::float3& lift_axis,
     const linalg::float3& freestream,
     const f32 rho,
@@ -542,8 +542,8 @@ f32 BackendCPU::coeff_cl(
 }
 
 linalg::float3 BackendCPU::coeff_cm(
-    const TensorView3D<Location::Device>& forces,
-    const TensorView3D<Location::Device>& verts_wing,
+    const TensorView3fD& forces,
+    const TensorView3fD& verts_wing,
     const linalg::float3& ref_pt,
     const linalg::float3& freestream,
     const f32 rho,
@@ -565,7 +565,7 @@ linalg::float3 BackendCPU::coeff_cm(
     return cm / (0.5f * rho * linalg::length2(freestream) * area * mac);
 }
 
-f32 BackendCPU::coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
+f32 BackendCPU::coeff_steady_cd_single(const TensorView3fD& verts_wake, const TensorView2fD& gamma_wake, const FlowData& flow, f32 area) {
     // tiny::ScopedTimer timer("Compute CD");
     f32 cd = ispc::kernel_trefftz_cd(verts_wake.ptr(), verts_wake.stride(2), verts_wake.shape(1), verts_wake.shape(0), gamma_wake.ptr(), sigma_vatistas);
     cd /= linalg::length2(flow.freestream) * area;
@@ -592,7 +592,7 @@ f32 BackendCPU::coeff_steady_cd_single(const TensorView3D<Location::Device>& ver
 // }
 
 // TODO: change this to use the per panel local alpha (in global frame)
-void BackendCPU::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) {
+void BackendCPU::mesh_metrics(const f32 alpha_rad, const MultiTensorView3fD& verts_wing, MultiTensorView3fD& colloc, MultiTensorView3fD& normals, MultiTensorView2fD& areas) {
     // parallel for
     for (int m = 0; m < colloc.size(); m++) {
         auto& colloc_m = colloc[m];
@@ -644,7 +644,7 @@ void BackendCPU::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Locat
 /// @param j first panel index spanwise
 /// @param n number of panels spanwise
 /// @return mean chord of the set of panels
-f32 BackendCPU::mesh_mac(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& areas) {
+f32 BackendCPU::mesh_mac(const TensorView3fD& verts_wing, const TensorView2fD& areas) {
     f32 mac = 0.0f;
     // loop over panel chordwise sections in spanwise direction
     // Note: can be done optimally with vertical fused simd
@@ -672,7 +672,7 @@ f32 BackendCPU::mesh_mac(const TensorView3D<Location::Device>& verts_wing, const
 }
 
 // TODO: parallelize
-f32 BackendCPU::sum(const TensorView1D<Location::Device>& tensor) {
+f32 BackendCPU::sum(const TensorView1fD& tensor) {
     f32 sum = 0.0f;
     for (i64 i = 0; i < tensor.shape(0); i++) {
         sum += tensor(i);
@@ -681,7 +681,7 @@ f32 BackendCPU::sum(const TensorView1D<Location::Device>& tensor) {
 }
 
 // TODO: parallelize
-f32 BackendCPU::sum(const TensorView2D<Location::Device>& tensor) {
+f32 BackendCPU::sum(const TensorView2fD& tensor) {
     f32 sum = 0.0f;
     for (i64 j = 0; j < tensor.shape(1); j++) {
         for (i64 i = 0; i < tensor.shape(0); i++) {

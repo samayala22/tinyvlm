@@ -37,7 +37,7 @@ std::vector<std::string> vlm::get_available_backends() {
     return backends;
 }
 
-f32 Backend::coeff_steady_cl_multi(const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_delta, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas) {
+f32 Backend::coeff_steady_cl_multi(const MultiTensorView3fD& verts_wing, const MultiTensorView2fD& gamma_delta, const FlowData& flow, const MultiTensorView2fD& areas) {
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
     for (i64 i = 0; i < verts_wing.size(); i++) {
@@ -55,7 +55,7 @@ f32 Backend::coeff_steady_cl_multi(const MultiTensorView3D<Location::Device>& ve
     return cl;
 }
 
-f32 Backend::coeff_steady_cd_multi(const MultiTensorView3D<Location::Device>& verts_wake, const MultiTensorView2D<Location::Device>& gamma_wake, const FlowData& flow, const MultiTensorView2D<Location::Device>& areas) {
+f32 Backend::coeff_steady_cd_multi(const MultiTensorView3fD& verts_wake, const MultiTensorView2fD& gamma_wake, const FlowData& flow, const MultiTensorView2fD& areas) {
     // const tiny::ScopedTimer timer("Compute CL");
     f32 cd = 0.0f;
     f32 total_area = 0.0f;
@@ -74,13 +74,13 @@ f32 Backend::coeff_steady_cd_multi(const MultiTensorView3D<Location::Device>& ve
     return cd;
 }
 
-void Backend::wake_shed(const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wake, i32 iteration) {
+void Backend::wake_shed(const MultiTensorView3fD& verts_wing, MultiTensorView3fD& verts_wake, i32 iteration) {
     for (const auto& [wing, wake] : zip(verts_wing, verts_wake)) {
         wing.slice(All, -1, All).to(wake.slice(All, -1-iteration, All));
     }
 }
 
-void Backend::displace_wing(const MultiTensorView2D<Location::Device>& transforms, MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& verts_wing_init) {
+void Backend::displace_wing(const MultiTensorView2fD& transforms, MultiTensorView3fD& verts_wing, MultiTensorView3fD& verts_wing_init) {
     // const tiny::ScopedTimer t("Mesh::move");
 
     // TODO: parallel for
@@ -101,7 +101,7 @@ void Backend::displace_wing(const MultiTensorView2D<Location::Device>& transform
     }
 }
 
-f32 Backend::coeff_cl_multibody(const MultiTensorView3D<Location::Device>& aero_forces, const MultiTensorView2D<Location::Device>& areas, const linalg::float3& freestream, f32 rho) {
+f32 Backend::coeff_cl_multibody(const MultiTensorView3fD& aero_forces, const MultiTensorView2fD& areas, const linalg::float3& freestream, f32 rho) {
     // parallel reduce
     f32 cl = 0.0f;
     f32 total_area = 0.0f;
@@ -122,9 +122,9 @@ f32 Backend::coeff_cl_multibody(const MultiTensorView3D<Location::Device>& aero_
 }
 
 linalg::float3 Backend::coeff_cm_multibody(
-    const MultiTensorView3D<Location::Device>& aero_forces,
-    const MultiTensorView3D<Location::Device>& verts_wing,
-    const MultiTensorView2D<Location::Device>& areas,
+    const MultiTensorView3fD& aero_forces,
+    const MultiTensorView3fD& verts_wing,
+    const MultiTensorView2fD& areas,
     const linalg::float3& ref_pt,
     const linalg::float3& freestream, 
     f32 rho
@@ -154,14 +154,14 @@ linalg::float3 Backend::coeff_cm_multibody(
 }
 
 void Backend::forces_unsteady_multibody(
-    const MultiTensorView3D<Location::Device>& verts_wing,
-    const MultiTensorView2D<Location::Device>& gamma_delta,
-    const MultiTensorView2D<Location::Device>& gamma,
-    const MultiTensorView2D<Location::Device>& gamma_prev,
-    const MultiTensorView3D<Location::Device>& velocities,
-    const MultiTensorView2D<Location::Device>& areas,
-    const MultiTensorView3D<Location::Device>& normals,
-    const MultiTensorView3D<Location::Device>& forces,
+    const MultiTensorView3fD& verts_wing,
+    const MultiTensorView2fD& gamma_delta,
+    const MultiTensorView2fD& gamma,
+    const MultiTensorView2fD& gamma_prev,
+    const MultiTensorView3fD& velocities,
+    const MultiTensorView2fD& areas,
+    const MultiTensorView3fD& normals,
+    const MultiTensorView3fD& forces,
     f32 dt
 ) {
     // parallel tasks

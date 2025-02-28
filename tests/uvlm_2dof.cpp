@@ -74,10 +74,10 @@ class UVLM_2DOF final: public Simulation {
         ~UVLM_2DOF() = default;
         void run(const UVLM_2DOF_Vars& vars, f32 t_final);
 
-        MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
-        MultiTensor3D<Location::Host> colloc_h{backend->memory.get()};
-        MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
-        MultiTensor2D<Location::Device> areas_d{backend->memory.get()};
+        MultiTensor3fD colloc_d{backend->memory.get()};
+        MultiTensor3fH colloc_h{backend->memory.get()};
+        MultiTensor3fD normals_d{backend->memory.get()};
+        MultiTensor2fD areas_d{backend->memory.get()};
  
         MultiTensor<i8, 2, Location::Host> wing_cell_type{backend->memory.get()}; // ns*nc
         MultiTensor<i64, 2, Location::Host> wing_cell_offset{backend->memory.get()}; // ns*nc
@@ -88,49 +88,49 @@ class UVLM_2DOF final: public Simulation {
         MultiTensor<i64, 3, Location::Host> wake_cell_connectivity{backend->memory.get()}; // 4x(ns*nc)
 
         // Data
-        Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
-        Tensor1D<Location::Device> rhs{backend->memory.get()}; // ns*nc
-        MultiTensor2D<Location::Device> gamma_wing{backend->memory.get()}; // nc*ns
-        MultiTensor2D<Location::Device> gamma_wake{backend->memory.get()}; // nw*ns
-        MultiTensor2D<Location::Device> gamma_wing_prev{backend->memory.get()}; // nc*ns
-        MultiTensor2D<Location::Device> gamma_wing_delta{backend->memory.get()}; // nc*ns
-        MultiTensor3D<Location::Device> aero_forces{backend->memory.get()}; // ns*nc*3
+        Tensor2fD lhs{backend->memory.get()}; // (ns*nc)^2
+        Tensor1fD rhs{backend->memory.get()}; // ns*nc
+        MultiTensor2fD gamma_wing{backend->memory.get()}; // nc*ns
+        MultiTensor2fD gamma_wake{backend->memory.get()}; // nw*ns
+        MultiTensor2fD gamma_wing_prev{backend->memory.get()}; // nc*ns
+        MultiTensor2fD gamma_wing_delta{backend->memory.get()}; // nc*ns
+        MultiTensor3fD aero_forces{backend->memory.get()}; // ns*nc*3
 
-        MultiTensor3D<Location::Device> velocities{backend->memory.get()}; // ns*nc*3
-        MultiTensor3D<Location::Host> velocities_h{backend->memory.get()}; // ns*nc*3
+        MultiTensor3fD velocities{backend->memory.get()}; // ns*nc*3
+        MultiTensor3fH velocities_h{backend->memory.get()}; // ns*nc*3
 
-        MultiTensor2D<Location::Host> transforms_h{backend->memory.get()};
-        MultiTensor2D<Location::Device> transforms{backend->memory.get()};
+        MultiTensor2fH transforms_h{backend->memory.get()};
+        MultiTensor2fD transforms{backend->memory.get()};
         
-        Tensor1D<Location::Host> t_h{backend->memory.get()};
+        Tensor1fH t_h{backend->memory.get()};
         std::unique_ptr<LU> solver;
         std::unique_ptr<LU> accel_solver;
 
         std::vector<i32> condition0;
     
         // Structure
-        Tensor2D<Location::Host> M_h{backend->memory.get()};
-        Tensor2D<Location::Host> C_h{backend->memory.get()};
-        Tensor2D<Location::Host> K_h{backend->memory.get()};
-        Tensor2D<Location::Host> u_h{backend->memory.get()};
-        Tensor2D<Location::Host> v_h{backend->memory.get()};
-        Tensor2D<Location::Host> a_h{backend->memory.get()};
-        Tensor2D<Location::Host> F_h{backend->memory.get()};
-        Tensor1D<Location::Host> du_h{backend->memory.get()};
+        Tensor2fH M_h{backend->memory.get()};
+        Tensor2fH C_h{backend->memory.get()};
+        Tensor2fH K_h{backend->memory.get()};
+        Tensor2fH u_h{backend->memory.get()};
+        Tensor2fH v_h{backend->memory.get()};
+        Tensor2fH a_h{backend->memory.get()};
+        Tensor2fH F_h{backend->memory.get()};
+        Tensor1fH du_h{backend->memory.get()};
 
-        Tensor2D<Location::Device> M_d{backend->memory.get()};
-        Tensor2D<Location::Device> M_factorized_d{backend->memory.get()};
-        Tensor2D<Location::Device> C_d{backend->memory.get()};
-        Tensor2D<Location::Device> K_d{backend->memory.get()};
-        Tensor2D<Location::Device> u_d{backend->memory.get()}; // dof x tsteps
-        Tensor2D<Location::Device> v_d{backend->memory.get()}; // dof x tsteps
-        Tensor2D<Location::Device> a_d{backend->memory.get()}; // dof x tsteps
-        Tensor1D<Location::Device> du{backend->memory.get()}; // dof
-        Tensor1D<Location::Device> du_k{backend->memory.get()}; // dof
-        Tensor1D<Location::Device> dv{backend->memory.get()}; // dof
-        Tensor1D<Location::Device> da{backend->memory.get()}; // dof
-        Tensor1D<Location::Device> dF{backend->memory.get()}; // dof
-        Tensor1D<Location::Host> dF_h{backend->memory.get()}; // dof
+        Tensor2fD M_d{backend->memory.get()};
+        Tensor2fD M_factorized_d{backend->memory.get()};
+        Tensor2fD C_d{backend->memory.get()};
+        Tensor2fD K_d{backend->memory.get()};
+        Tensor2fD u_d{backend->memory.get()}; // dof x tsteps
+        Tensor2fD v_d{backend->memory.get()}; // dof x tsteps
+        Tensor2fD a_d{backend->memory.get()}; // dof x tsteps
+        Tensor1fD du{backend->memory.get()}; // dof
+        Tensor1fD du_k{backend->memory.get()}; // dof
+        Tensor1fD dv{backend->memory.get()}; // dof
+        Tensor1fD da{backend->memory.get()}; // dof
+        Tensor1fD dF{backend->memory.get()}; // dof
+        Tensor1fH dF_h{backend->memory.get()}; // dof
 
         NewmarkBeta integrator{backend.get()};
         Assembly m_assembly;
@@ -334,9 +334,9 @@ inline linalg::float3 linear_velocity(const KinematicMatrixDual& transform_dual,
 
 inline void wing_velocities(
     const KinematicMatrixDual& transform_dual,
-    const TensorView3D<Location::Host>& colloc_h,
-    const TensorView3D<Location::Host>& velocities_h,
-    const TensorView3D<Location::Device>& velocities_d
+    const TensorView3fH& colloc_h,
+    const TensorView3fH& velocities_h,
+    const TensorView3fD& velocities_d
 ) {
     for (i64 j = 0; j < colloc_h.shape(1); j++) {
         for (i64 i = 0; i < colloc_h.shape(0); i++) {
@@ -438,7 +438,7 @@ void UVLM_2DOF::initialize_structure_data(const UVLM_2DOF_Vars& vars, const i64 
     // std::cout << a_hv.slice(All, 0) << "\n";
 }
 
-void nondimensionalize_verts(TensorView3D<Location::Host>& verts, const f32 b) {
+void nondimensionalize_verts(TensorView3fH& verts, const f32 b) {
     for (i64 j = 0; j < verts.shape(1); j++) {
         for (i64 i = 0; i < verts.shape(0); i++) {
             verts(i, j, 0) /= b;

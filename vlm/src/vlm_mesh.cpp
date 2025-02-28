@@ -12,7 +12,7 @@
 
 using namespace vlm;
 
-void mesh_quarterchord(const TensorView3D<Location::Host>& v) {
+void mesh_quarterchord(const TensorView3fH& v) {
     for (i64 j = 0; j < v.shape(1) - 1; j++) {
         for (i64 i = 0; i < v.shape(0); i++) {
             v(i, j, 0) = 0.75f * v(i, j, 0) + 0.25f * v(i, j+1, 0);
@@ -48,7 +48,7 @@ public:
         return {ni-1, nj-1};
     }
 
-    void read(std::ifstream& f, const TensorView3D<Location::Host>& vertices) const override {
+    void read(std::ifstream& f, const TensorView3fH& vertices) const override {
         i64 ni, nj, nk;
         i64 blocks;
         f32 x, y, z;
@@ -111,7 +111,7 @@ SurfDims MeshIO::get_dims(const std::string& filename) const {
     return dims;
 }
 
-void MeshIO::read(const std::string& filename, const TensorView3D<Location::Host>& vertices, bool qc) const {
+void MeshIO::read(const std::string& filename, const TensorView3fH& vertices, bool qc) const {
     std::ifstream file_stream(filename);
     if (!file_stream.is_open()) {
         throw std::runtime_error("Failed to open mesh file");

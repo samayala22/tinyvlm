@@ -22,28 +22,28 @@ class HBVLM final: public Simulation {
         ~HBVLM() = default;
         void run(f32 t_final, f32 omega);
 
-        MultiTensor3D<Location::Device> colloc_d{backend->memory.get()};
-        MultiTensor3D<Location::Host> colloc_h{backend->memory.get()};
-        MultiTensor3D<Location::Device> normals_d{backend->memory.get()};
-        MultiTensor2D<Location::Device> areas_d{backend->memory.get()};
+        MultiTensor3fD colloc_d{backend->memory.get()};
+        MultiTensor3fH colloc_h{backend->memory.get()};
+        MultiTensor3fD normals_d{backend->memory.get()};
+        MultiTensor2fD areas_d{backend->memory.get()};
 
         // Data
-        Tensor2D<Location::Device> lhs{backend->memory.get()}; // (ns*nc)^2
-        Tensor2D<Location::Device> rhs{backend->memory.get()}; // (ns*nc) x harmonics
-        Tensor2D<Location::Device> gamma_coeffs{backend->memory.get()}; // (ns*nc) x harmonics
-        Tensor2D<Location::Host> gamma_coeffs_h{backend->memory.get()}; // (ns*nc) x harmonics
+        Tensor2fD lhs{backend->memory.get()}; // (ns*nc)^2
+        Tensor2fD rhs{backend->memory.get()}; // (ns*nc) x harmonics
+        Tensor2fD gamma_coeffs{backend->memory.get()}; // (ns*nc) x harmonics
+        Tensor2fH gamma_coeffs_h{backend->memory.get()}; // (ns*nc) x harmonics
 
-        Tensor2D<Location::Device> residual{backend->memory.get()}; // (ns*nc) x harmonics
-        Tensor2D<Location::Host> dft_h{backend->memory.get()}; // harmonics x harmonics
-        Tensor2D<Location::Device> dft_d{backend->memory.get()};
-        std::vector<MultiTensor2D<Location::Device>> gamma_wake;
-        MultiTensor3D<Location::Device> aero_forces{backend->memory.get()}; // ns*nc*3
+        Tensor2fD residual{backend->memory.get()}; // (ns*nc) x harmonics
+        Tensor2fH dft_h{backend->memory.get()}; // harmonics x harmonics
+        Tensor2fD dft_d{backend->memory.get()};
+        std::vector<MultiTensor2fD> gamma_wake;
+        MultiTensor3fD aero_forces{backend->memory.get()}; // ns*nc*3
         
-        MultiTensor3D<Location::Device> velocities{backend->memory.get()}; // ns*nc*3
-        MultiTensor3D<Location::Host> velocities_h{backend->memory.get()}; // ns*nc*3
+        MultiTensor3fD velocities{backend->memory.get()}; // ns*nc*3
+        MultiTensor3fH velocities_h{backend->memory.get()}; // ns*nc*3
 
-        MultiTensor2D<Location::Host> transforms_h{backend->memory.get()};
-        MultiTensor2D<Location::Device> transforms{backend->memory.get()};
+        MultiTensor2fH transforms_h{backend->memory.get()};
+        MultiTensor2fD transforms{backend->memory.get()};
         
         std::unique_ptr<LU> solver;
 
@@ -117,8 +117,8 @@ void HBVLM::alloc_buffers() {
 }
 
 void gamma_wake_from_coeffs(
-    const TensorView2D<Location::Device>& gamma_wake,
-    const TensorView2D<Location::Device>& gamma_coeffs,
+    const TensorView2fD& gamma_wake,
+    const TensorView2fD& gamma_coeffs,
     i32 harmonics,
     f32 tn,
     f32 omega,
@@ -146,22 +146,22 @@ void gamma_wake_from_coeffs(
 
 void anderson_acceleration(
     Backend* backend,
-    const TensorView1D<Location::Device>& x0,
-    std::function<void(const TensorView1D<Location::Device>& x, const TensorView1D<Location::Device>& y)> f,
+    const TensorView1fD& x0,
+    std::function<void(const TensorView1fD& x, const TensorView1fD& y)> f,
     i32 max_iter = 100,
     f32 tol_res = 1e-6,
     i32 m = 3
 )
 {
     i64 n = x0.shape(0);
-    Tensor2D<Location::Device> _X_buf{backend->memory.get()};
-    Tensor2D<Location::Device> _G_buf{backend->memory.get()};
-    Tensor2D<Location::Device> _G_buf_k{backend->memory.get()}; // copy because lsq overwrites
-    Tensor1D<Location::Device> _x_curr{backend->memory.get()};
-    Tensor1D<Location::Device> _x_new{backend->memory.get()};
-    Tensor1D<Location::Device> _g_curr{backend->memory.get()};
-    Tensor1D<Location::Device> _g_new{backend->memory.get()};
-    Tensor1D<Location::Device> _gamma{backend->memory.get()};
+    Tensor2fD _X_buf{backend->memory.get()};
+    Tensor2fD _G_buf{backend->memory.get()};
+    Tensor2fD _G_buf_k{backend->memory.get()}; // copy because lsq overwrites
+    Tensor1fD _x_curr{backend->memory.get()};
+    Tensor1fD _x_new{backend->memory.get()};
+    Tensor1fD _g_curr{backend->memory.get()};
+    Tensor1fD _g_new{backend->memory.get()};
+    Tensor1fD _gamma{backend->memory.get()};
     auto lsq_solver = backend->create_lsq();
 
     _X_buf.init({n, m});
@@ -317,8 +317,8 @@ void HBVLM::run(f32 t_start, f32 omega) {
     }
 
     auto hb_vlm_iter = [&](
-        const TensorView1D<Location::Device>& _gamma_in, 
-        const TensorView1D<Location::Device>& _gamma_out
+        const TensorView1fD& _gamma_in, 
+        const TensorView1fD& _gamma_out
     ){
         auto gamma_in  = _gamma_in.reshape(lhs.view().shape(0), 2*m_harmonics+1);
         auto gamma_out = _gamma_out.reshape(lhs.view().shape(0), 2*m_harmonics+1);
