@@ -13,8 +13,6 @@
 #include "vlm_kinematics.hpp"
 #include "vlm_utils.hpp"
 
-// #define PICARD 1
-
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
@@ -381,96 +379,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
     auto& gamma_coeffs_v = gamma_coeffs.view();
     gamma_coeffs_v.fill(0.f);
 
-    #ifndef PICARD
     anderson_acceleration(backend.get(), gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)), hb_vlm_iter, 100, 1e-3, 3);
-    #endif
-
-    // Tensor1D<Location::Device> test_tensor{backend->memory.get()};
-    // test_tensor.init({2});
-    // test_tensor.view()(0) = 1.f;
-    // test_tensor.view()(1) = 1.f;
-
-    // auto mapping_2d = [](const TensorView1D<Location::Device>& x_in, const TensorView1D<Location::Device>& x_out) {
-    //     x_out(0) = 2.f * std::sin(x_in(0)) + std::atan(x_in(1));
-    //     x_out(1) = std::sin(x_in(1)) + 2.f * std::atan(x_in(0));
-    // };
-
-    // anderson_acceleration(backend.get(), test_tensor.view(), mapping_2d, 10, 1e-6, 2);
-    // std::cout << test_tensor.view()(0) << " " << test_tensor.view()(1) << "\n";
-
-    // Iterative process for solving the blocked harmonic balance equation
-    #ifdef PICARD
-    auto& residual_v = residual.view();
-    residual_v.fill(1.f);
-    const f32 tol = 1e-3f;
-    const i32 max_iter = 1000;
-    i32 iter = 0;
-    while (backend->blas->norm(residual_v.reshape(residual_v.shape(0)*residual_v.shape(1))) > tol) {
-        
-        rhs.view().fill(0.f);
-        // Note this only work on a single wing
-        auto te_gamma = gamma_coeffs.view()
-            .reshape(colloc_d.views()[0].shape(0), colloc_d.views()[0].shape(1), gamma_coeffs.view().shape(1))
-            .slice(All, -1, All);
-            
-        // For each unknown we fill their respective rhs column in a matrix free fashion
-        for (i32 s = 0; s < 2*m_harmonics+1; s++) {
-            const f32 t_final = t_start + period * (f32)s / (f32)(2*m_harmonics+1);
-            const i64 t_steps = static_cast<i64>(std::round(t_final / dt));
-            const f32 t = (f32)t_steps * dt; // t_final rounded to nearest dt
-
-            for (i64 m = 0; m < assembly_wings.size(); m++) {
-                auto transform = m_assembly.surface_kinematics()[m]->transform(t);
-                transform.store(transforms_h.views()[m].ptr(), transforms_h.views()[m].stride(1));
-                transforms_h.views()[m].to(transforms.views()[m]);
-            }
-
-            backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
-            backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
-
-            // parallel for
-            for (i64 m = 0; m < assembly_wings.size(); m++) {
-                const auto transform_node = m_assembly.surface_kinematics()[m];
-                const auto& colloc_h_m = colloc_h.views()[m];
-                const auto& velocities_h_m = velocities_h.views()[m];
-                const auto& velocities_m = velocities.views()[m];
-                const auto mat_transform_dual = transform_node->transform_dual(t);
-
-                for (i64 j = 0; j < colloc_h_m.shape(1); j++) {
-                    for (i64 i = 0; i < colloc_h_m.shape(0); i++) {
-                        auto local_velocity = -transform_node->linear_velocity(mat_transform_dual, {colloc_h_m(i, j, 0), colloc_h_m(i, j, 1), colloc_h_m(i, j, 2)});
-                        velocities_h_m(i, j, 0) = local_velocity.x;
-                        velocities_h_m(i, j, 1) = local_velocity.y;
-                        velocities_h_m(i, j, 2) = local_velocity.z;
-                    }
-                }
-                velocities_h_m.to(velocities_m);
-            }
-
-            auto rhs_s = rhs.view().slice(All, s);
-            backend->rhs_assemble_velocities(rhs_s, normals_d.views(), velocities.views());
-            gamma_wake_from_coeffs(gamma_wake[s].views()[0], te_gamma, m_harmonics, t, omega, dt, t_steps);
-            backend->rhs_assemble_wake_influence(rhs_s, gamma_wake[s].views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), (i32)t_steps);
-        } // unknowns for loop
- 
-        // Apply the the dft matrix to the rhs
-        // A @ G @ D^T = R <=> A @ G = R @ D (since D^-1 = D^T)
-        gamma_coeffs.view().to(residual_v);
-        backend->blas->gemm(1.0f, rhs.view(), dft_d.view(), 0.0f, gamma_coeffs.view());
-        // Solve to obtain the fourier coefficients for each panel
-        solver->solve(lhs.view(), gamma_coeffs.view());
-        backend->blas->axpy(-1.0f, gamma_coeffs.view(), residual_v);
-
-        iter++;
-        if (iter > max_iter) {
-            std::printf("Fixed iteration process did not converge\n");
-            exit(1);
-            break;
-        }
-    } // while loop
-
-    std::printf("Picard iterative process converged in %d iterations\n", iter);
-    #endif
 
     // Compute time domain solution from the obtained fourier coeffs
     {
