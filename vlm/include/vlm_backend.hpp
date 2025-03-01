@@ -112,6 +112,7 @@ class BLAS {
         virtual void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
         virtual void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) = 0;
         virtual void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) = 0; // Y = alpha * X + Y
+        virtual void scal(const f32 alpha, const TensorView1fD& x) = 0;
         virtual f32 norm(const TensorView<f32, 1, Location::Device>& x) = 0;
 };
 

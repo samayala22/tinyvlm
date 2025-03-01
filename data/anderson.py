@@ -77,23 +77,25 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
         # Solve the least–squares problem:
         #     gamma = argmin || g_curr - Gbuf[:, :m_k]*gamma ||
         # gamma, _, _, _ = np.linalg.lstsq(Gbuf[:, :m_k], g_curr, rcond=None)
-        # _, gamma, _ = lapack.dgels(Gbuf[:, :m_k], g_curr)
-        gamma = sp.linalg.lstsq(Gbuf[:, :m_k], g_curr)[0]
+        _, gamma, _ = lapack.dgels(Gbuf[:, :m_k], g_curr)
+        # gamma = sp.linalg.lstsq(Gbuf[:, :m_k], g_curr)[0]
 
         # Compute the update correction:
         # The acceleration step uses all stored differences (from both x and g):
         #    x_new = x_curr + g_curr - (Xbuf + Gbuf) * gamma.
         x_new = x_curr + g_curr - (Xbuf[:, :m_k] + Gbuf[:, :m_k]) @ gamma[:m_k]
         # Shift
-        if (m_k == m):
-            Xbuf[:, :-1] = Xbuf[:, 1:]
-            Gbuf[:, :-1] = Gbuf[:, 1:]
+        # if (m_k == m):
+        #     Xbuf[:, :-1] = Xbuf[:, 1:]
+        #     Gbuf[:, :-1] = Gbuf[:, 1:]
 
-        Xbuf[:, min(m_k, m-1)] = x_new - x_curr
+        # Xbuf[:, min(m_k, m-1)] = x_new - x_curr
+        Xbuf[:, k % m] = x_new - x_curr
         x_curr = x_new.copy()
         x_new = f(x_curr)
         g_new = x_new - x_curr
-        Gbuf[:, min(m_k, m-1)] = g_new - g_curr
+        # Gbuf[:, min(m_k, m-1)] = g_new - g_curr
+        Gbuf[:, k % m] = g_new - g_curr
         g_curr = g_new.copy()
         k += 1
         residual_history.append(np.linalg.norm(g_curr))
@@ -123,10 +125,7 @@ def picard(f, x0, k_max=100, tol_res=1e-6):
 
 def mapping_2d(x):
     return np.array([2.0 * np.sin(x[0]) + np.arctan(x[1]),
-                     np.sin(x[1]) + 2.0 * np.arctan(x[0])])
-
-# def f(x):
-#     return np.array([np.sin(x[0]) + np.arctan(x[0])])
+                     np.sin(x[1]) + 2.0 * np.arctan(x[0])]) - x
 
 def nonlinear_fixed_point(n=100, scale=0.9, bias_scale=0.1, seed=42):
     np.random.seed(seed)
@@ -137,12 +136,12 @@ def nonlinear_fixed_point(n=100, scale=0.9, bias_scale=0.1, seed=42):
     delta=0.2
     
     def h(x):
-        return np.tanh(A @ x + b) + 0.1 * np.sin(A @ x + b) + x
+        return np.tanh(A @ x + b) + 0.1 * np.sin(A @ x + b)
     
     def f(x):
         return x + delta * (h(x) - x)
 
-    return h
+    return f
 
 def linear_system(n):
     np.random.seed(5)
@@ -170,9 +169,9 @@ def validate(func, sol, tol=1e-5):
 def main():
     k_max = 500
     tol_res = 1e-6
-    m = 3
+    m = 5
 
-    func = linear_system(10)
+    func = nonlinear_fixed_point(10)
     x0 = np.random.rand(10)
 
     rf = FunctionCounter(func)

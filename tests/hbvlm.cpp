@@ -127,17 +127,14 @@ void gamma_wake_from_coeffs(
 )
 {
     assert(gamma_coeffs.shape(0) == gamma_wake.shape(0));
-    const i32 unknowns = 2 * harmonics + 1;
-    const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));
-    const f32 sqrt_unknowns_2 = std::sqrt(2.f / static_cast<f32>(unknowns));
     i64 wake_start = gamma_wake.shape(1) - iteration;
     for (i64 j = wake_start; j < gamma_wake.shape(1); j++) { // row
         for (i64 i = 0; i < gamma_wake.shape(0); i++) { // col
-            f32 gamma_w = sqrt_unknowns * gamma_coeffs(i, 0);
+            f32 gamma_w = gamma_coeffs(i, 0);
             for (i64 h = 0; h < harmonics; h++) {
                 const f32 omega_k = omega * (f32)(h+1);
-                gamma_w += gamma_coeffs(i, 2*h+1) * std::cos(omega_k * (tn - (f32)(j - wake_start + 1)*dt)) * sqrt_unknowns_2;
-                gamma_w += gamma_coeffs(i, 2*h+2) * std::sin(omega_k * (tn - (f32)(j - wake_start + 1)*dt)) * sqrt_unknowns_2;
+                gamma_w += gamma_coeffs(i, 2*h+1) * std::cos(omega_k * (tn - (f32)(j - wake_start + 1)*dt));
+                gamma_w += gamma_coeffs(i, 2*h+2) * std::sin(omega_k * (tn - (f32)(j - wake_start + 1)*dt));
             }
             gamma_wake(i, j) = gamma_w;
         }
@@ -203,7 +200,7 @@ void anderson_acceleration(
     i32 k = 1;
     while (k < max_iter && backend->blas->norm(g_curr) > tol_res) {
         i32 m_k = std::min(m, k);
-        i32 m_bk = std::min(m_k, m-1);
+        
         g_curr.to(gamma);
         auto G_bufk = G_buf.slice(All, Range{0, m_k});
         auto G_bufk_k = G_buf_k.slice(All, Range{0, m_k});
@@ -216,22 +213,28 @@ void anderson_acceleration(
         backend->blas->axpy(1.0f, g_curr, x_new);
         backend->blas->gemv(-1.0f, X_bufk, gammak, 1.0f, x_new);
         backend->blas->gemv(-1.0f, G_bufk, gammak, 1.0f, x_new);
+        
+        // i32 m_bk = std::min(m_k, m-1);
+        // if (m_k == m) {
+        //     for (i32 i = 0; i < m-1; i++) {
+        //         X_bufk.slice(All, i+1).to(X_bufk.slice(All, i));
+        //         G_bufk.slice(All, i+1).to(G_bufk.slice(All, i));
+        //     }
+        // }
+        // auto X_bufbk = X_buf.slice(All, m_bk);
+        // auto G_bufbk = G_buf.slice(All, m_bk);
 
-        if (m_k == m) {
-            for (i32 i = 0; i < m-1; i++) {
-                X_bufk.slice(All, i+1).to(X_bufk.slice(All, i));
-                G_bufk.slice(All, i+1).to(G_bufk.slice(All, i));
-            }
-        }
+        auto X_bufbk = X_buf.slice(All, k % m);
+        auto G_bufbk = G_buf.slice(All, k % m);
 
-        x_new.to(X_buf.slice(All, m_bk));
-        backend->blas->axpy(-1.0f, x_curr, X_buf.slice(All, m_bk));
+        x_new.to(X_bufbk);
+        backend->blas->axpy(-1.0f, x_curr, X_bufbk);
         x_new.to(x_curr);
         f(x_curr, x_new);
         x_new.to(g_new);
         backend->blas->axpy(-1.0f, x_curr, g_new);
-        g_new.to(G_buf.slice(All, m_bk));
-        backend->blas->axpy(-1.0f, g_curr, G_buf.slice(All, m_bk));
+        g_new.to(G_bufbk);
+        backend->blas->axpy(-1.0f, g_curr, G_bufbk);
         g_new.to(g_curr);
         k += 1;
     }
@@ -244,6 +247,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
     const tiny::ScopedTimer timer("HBVLM::run");
     const f32 period = 2.0f * PI_f / omega;
     const f32 rho = 1.0f; // TODO: take this as input
+    const i32 unknowns = 2 * m_harmonics + 1;
 
     for (const auto& [wing_init, wing] : zip(verts_wing_init.views(), verts_wing.views())) wing_init.to(wing);
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
@@ -374,28 +378,31 @@ void HBVLM::run(f32 t_start, f32 omega) {
         backend->blas->gemm(1.0f, rhs.view(), dft_d.view(), 0.0f, gamma_out);
         // Solve to obtain the fourier coefficients for each panel
         solver->solve(lhs.view(), gamma_out);
+
+        // Scaling
+        const f32 coeff_scaling0 = 1.f / std::sqrt(static_cast<f32>(unknowns));
+        const f32 coeff_scaling = std::sqrt(2.f / static_cast<f32>(unknowns));
+        backend->blas->scal(coeff_scaling0, gamma_out.slice(All, 0));
+        backend->blas->scal(coeff_scaling, gamma_out.slice(All, Range{1, -1}).reshape(gamma_out.shape(0)*(gamma_out.shape(1)-1)));
     };
     
     auto& gamma_coeffs_v = gamma_coeffs.view();
     gamma_coeffs_v.fill(0.f);
 
-    anderson_acceleration(backend.get(), gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)), hb_vlm_iter, 100, 1e-3, 3);
+    anderson_acceleration(backend.get(), gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)), hb_vlm_iter, 100, 1e-5, 5);
 
     // Compute time domain solution from the obtained fourier coeffs
     {
         auto& gamma_coeffs_hv = gamma_coeffs_h.view();
         gamma_coeffs.view().to(gamma_coeffs_hv);
-        const i32 unknowns = 2 * m_harmonics + 1;
-        const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));
-        const f32 sqrt_unknowns_2 = std::sqrt(2.f / static_cast<f32>(unknowns));
         std::ofstream gamma_data("hbvlm_gamma_" + backend->name + ".txt");
         for (i64 i = 0; i < max_t_steps; i++) {
             const f32 t = (f32)i * dt;
-            f32 gamma = sqrt_unknowns * gamma_coeffs_hv(0,0);
+            f32 gamma = gamma_coeffs_hv(0,0);
             for (i64 j = 0; j < m_harmonics; j++) {
                 const f32 k = (f32)(j+1);
-                gamma += gamma_coeffs_hv(0, 2*j+1) * std::cos(omega * t * k) * sqrt_unknowns_2;
-                gamma += gamma_coeffs_hv(0, 2*j+2) * std::sin(omega * t * k) * sqrt_unknowns_2;
+                gamma += gamma_coeffs_hv(0, 2*j+1) * std::cos(omega * t * k);
+                gamma += gamma_coeffs_hv(0, 2*j+2) * std::sin(omega * t * k);
             }
             gamma_data << t << " " << gamma << "\n";
         }
@@ -417,7 +424,7 @@ int main() {
     const f32 k = 0.25f; // reduced frequency
     const f32 omega = k * u_inf / b;
     const f32 t_final = cycles * 2.0f * PI_f / omega;
-    const i32 harmonics = 3;
+    const i32 harmonics = 10;
 
     std::printf("t_final: %f\n", t_final);
     std::printf("omega: %f\n", omega);

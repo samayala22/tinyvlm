@@ -45,6 +45,7 @@ class CUDA_BLAS final : public BLAS {
         void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
         void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) override;
         void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) override;
+        void scal(const f32 alpha, const TensorView1fD& x) override;
         f32 norm(const TensorView<f32, 1, Location::Device>& x) override;
 };
 
@@ -142,4 +143,14 @@ f32 CUDA_BLAS::norm(const TensorView<f32, 1, Location::Device>& x) {
         &result
     ));
     return result;
+}
+
+void CUDA_BLAS::scal(const f32 alpha, const TensorView1fD& x) {
+    CHECK_CUBLAS(cublasSscal(
+        CUBlasCtx::get().handle(),
+        x.shape(0),
+        &alpha,
+        x.ptr(),
+        x.stride(0)
+    ));
 }

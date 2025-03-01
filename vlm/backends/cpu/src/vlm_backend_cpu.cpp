@@ -131,11 +131,16 @@ class CPU_BLAS final : public BLAS {
         void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
         void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) override;
         void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) override;
+        void scal(const f32 alpha, const TensorView1fD& x) override;
         f32 norm(const TensorView<f32, 1, Location::Device>& x) override;
 };
 
 f32 CPU_BLAS::norm(const TensorView<f32, 1, Location::Device>& x) {
     return cblas_snrm2(x.shape(0), x.ptr(), x.stride(0));
+}
+
+void CPU_BLAS::scal(const f32 alpha, const TensorView1fD& x) {
+    cblas_sscal(x.shape(0), alpha, x.ptr(), x.stride(0));
 }
 
 CBLAS_TRANSPOSE trans_to_cblas(BLAS::Trans trans) {
