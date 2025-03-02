@@ -22,9 +22,9 @@ class Backend {
         virtual ~Backend() = default;
 
         // Kernels that run for all the meshes
-        virtual void lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD&  verts_wing, const MultiTensorView3fD&  verts_wake, std::vector<i32>& condition, i32 iteration) = 0;
-        virtual void rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) = 0;
-        virtual void rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD&  verts_wake, const std::vector<bool>& lifting, i32 iteration) = 0;
+        virtual void lhs_assemble(TensorView2fD& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD&  verts_wing, const MultiTensorView3fD&  verts_wake, std::vector<i32>& condition, i32 iteration) = 0;
+        virtual void rhs_assemble_velocities(TensorView1fD& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) = 0;
+        virtual void rhs_assemble_wake_influence(TensorView1fD& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD&  verts_wake, const std::vector<bool>& lifting, i32 iteration) = 0;
         virtual void displace_wake_rollup(MultiTensorView3fD& wake_rollup, const MultiTensorView3fD&  verts_wake, const MultiTensorView3fD&  verts_wing, const MultiTensorView2fD& gamma_wing, const MultiTensorView2fD& gamma_wake, f32 dt, i32 iteration) = 0;
         void displace_wing(const MultiTensorView2fD& transforms, MultiTensorView3fD&  verts_wing, MultiTensorView3fD& verts_wing_init);
         void wake_shed(const MultiTensorView3fD& verts_wing, MultiTensorView3fD& verts_wake, i32 iteration);
@@ -91,7 +91,15 @@ class Backend {
 
         virtual void mesh_metrics(const f32 alpha_rad, const MultiTensorView3fD&  verts_wing, MultiTensorView3fD& colloc, MultiTensorView3fD& normals, MultiTensorView2fD& areas) = 0;
         virtual f32 mesh_mac(const TensorView3fD& verts_wing, const TensorView2fD& areas) = 0;
-
+        virtual void gamma_wake_from_coeffs(
+            const TensorView2fD& gamma_wake,
+            const TensorView2fD& gamma_coeffs,
+            i32 harmonics,
+            f32 tn,
+            f32 omega,
+            f32 dt,
+            i64 iteration
+        ) = 0;
         virtual f32 sum(const TensorView1fD& tensor) = 0;
         virtual f32 sum(const TensorView2fD& tensor) = 0;
 
@@ -99,7 +107,7 @@ class Backend {
         // virtual std::unique_ptr<Kernels> create_kernels() = 0;
         virtual std::unique_ptr<LU> create_lu_solver() = 0;
         virtual std::unique_ptr<BLAS> create_blas() = 0; // todo: deprecate
-        virtual std::unique_ptr<LSQ> create_lsq() = 0;
+        virtual std::unique_ptr<LSQ> create_lsq_solver() = 0;
 };
 
 class BLAS {
@@ -108,12 +116,12 @@ class BLAS {
         explicit BLAS() = default;
         virtual ~BLAS() = default;
 
-        virtual void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, const TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) = 0;
-        virtual void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
-        virtual void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) = 0;
-        virtual void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) = 0; // Y = alpha * X + Y
+        virtual void gemv(const f32 alpha, const TensorView2fD& A, const TensorView1fD& x, const f32 beta, const TensorView1fD& y, Trans trans = Trans::No) = 0;
+        virtual void gemm(const f32 alpha, const TensorView2fD& A, const TensorView2fD& B, const f32 beta, const TensorView2fD& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) = 0;
+        virtual void axpy(const f32 alpha, const TensorView1fD& x, const TensorView1fD& y) = 0;
+        virtual void axpy(const f32 alpha, const TensorView2fD& x, const TensorView2fD& y) = 0; // Y = alpha * X + Y
         virtual void scal(const f32 alpha, const TensorView1fD& x) = 0;
-        virtual f32 norm(const TensorView<f32, 1, Location::Device>& x) = 0;
+        virtual f32 norm(const TensorView1fD& x) = 0;
 };
 
 class LU {
@@ -121,10 +129,10 @@ class LU {
         explicit LU(std::unique_ptr<Memory> memory) : m_memory(std::move(memory)) {}
         virtual ~LU() = default;
         
-        virtual void init(const TensorView<f32, 2, Location::Device>& A) = 0;
-        virtual void factorize(const TensorView<f32, 2, Location::Device>& A) = 0;
-        virtual void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) = 0;
-        void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x) {
+        virtual void init(const TensorView2fD& A) = 0;
+        virtual void factorize(const TensorView2fD& A) = 0;
+        virtual void solve(const TensorView2fD& A, const TensorView2fD& x) = 0;
+        void solve(const TensorView2fD& A, const TensorView1fD& x) {
             return solve(A, x.reshape(x.shape(0), 1));
         }
     protected:
@@ -136,9 +144,13 @@ class LSQ {
         explicit LSQ(std::unique_ptr<Memory> memory) : m_memory(std::move(memory)) {}
         virtual ~LSQ() = default;
         
+        virtual void init(
+            const TensorView2fD& A,
+            const TensorView2fD& B
+        ) = 0;
         virtual void solve(
-            const TensorView<f32, 2, Location::Device>& A,
-            const TensorView<f32, 2, Location::Device>& B
+            const TensorView2fD& A,
+            const TensorView2fD& B
         ) = 0;
 
     protected:

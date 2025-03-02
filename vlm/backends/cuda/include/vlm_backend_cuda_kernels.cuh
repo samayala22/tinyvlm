@@ -578,4 +578,31 @@ __global__ void kernel_mac(
     }
 }
 
+__global__ void kernel_gamma_wake_from_coeffs(
+    DataDims dims, 
+    f32* gamma_wake,
+    f32* gamma_coeffs,
+    i64 gamma_coeffs_ld,
+    i32 harmonics,
+    f32 tn,
+    f32 omega,
+    f32 dt
+)
+{
+    const cg::thread_block block = cg::this_thread_block();
+    const i64 lane = block.thread_rank() % warpSize;
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // ns
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y; // nc
+
+    if (i < dims.panel_shape_0 && j < dims.panel_shape_1) {
+        f32 gamma_w = gamma_coeffs[i + 0 * gamma_coeffs_ld];
+        for (i64 h = 0; h < harmonics; h++) {
+            const f32 omega_k = omega * (f32)(h+1);
+            gamma_w += gamma_coeffs[i + (2*h + 1) * gamma_coeffs_ld] * cos(omega_k * (tn - (f32)(j + 1)*dt));
+            gamma_w += gamma_coeffs[i + (2*h + 2) * gamma_coeffs_ld] * sin(omega_k * (tn - (f32)(j + 1)*dt));
+        }
+        gamma_wake[i + j * dims.panel_stride_1] = gamma_w;
+    }
+}
+
 } // namespace vlm

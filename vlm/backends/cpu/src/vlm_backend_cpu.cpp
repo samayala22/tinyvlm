@@ -82,9 +82,9 @@ class CPU_LU final : public LU {
         explicit CPU_LU(std::unique_ptr<Memory> memory);
         ~CPU_LU() override = default;
         
-        void init(const TensorView<f32, 2, Location::Device>& A) override;
-        void factorize(const TensorView<f32, 2, Location::Device>& A) override;
-        void solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) override;
+        void init(const TensorView2fD& A) override;
+        void factorize(const TensorView2fD& A) override;
+        void solve(const TensorView2fD& A, const TensorView2fD& x) override;
 
     private:
         Tensor<i32, 1, Location::Device> ipiv{m_memory.get()};
@@ -92,11 +92,11 @@ class CPU_LU final : public LU {
 
 CPU_LU::CPU_LU(std::unique_ptr<Memory> memory) : LU(std::move(memory)) {}
 
-void CPU_LU::init(const TensorView<f32, 2, Location::Device>& A) {
+void CPU_LU::init(const TensorView2fD& A) {
     ipiv.init({A.shape(0)}); // row pivoting
 }
 
-void CPU_LU::factorize(const TensorView<f32, 2, Location::Device>& A) {
+void CPU_LU::factorize(const TensorView2fD& A) {
     assert(ipiv.view().shape(0) == A.shape(0));
     CHECK_LAPACK(LAPACKE_sgetrf(
         LAPACK_COL_MAJOR,
@@ -108,7 +108,7 @@ void CPU_LU::factorize(const TensorView<f32, 2, Location::Device>& A) {
     ));
 }
 
-void CPU_LU::solve(const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& x) {
+void CPU_LU::solve(const TensorView2fD& A, const TensorView2fD& x) {
     CHECK_LAPACK(LAPACKE_sgetrs(
         LAPACK_COL_MAJOR,
         'N',
@@ -127,15 +127,15 @@ class CPU_BLAS final : public BLAS {
         explicit CPU_BLAS() = default;
         ~CPU_BLAS() override= default;
 
-        void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, const TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) override;
-        void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
-        void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) override;
-        void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) override;
+        void gemv(const f32 alpha, const TensorView2fD& A, const TensorView1fD& x, const f32 beta, const TensorView1fD& y, Trans trans = Trans::No) override;
+        void gemm(const f32 alpha, const TensorView2fD& A, const TensorView2fD& B, const f32 beta, const TensorView2fD& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
+        void axpy(const f32 alpha, const TensorView1fD& x, const TensorView1fD& y) override;
+        void axpy(const f32 alpha, const TensorView2fD& x, const TensorView2fD& y) override;
         void scal(const f32 alpha, const TensorView1fD& x) override;
-        f32 norm(const TensorView<f32, 1, Location::Device>& x) override;
+        f32 norm(const TensorView1fD& x) override;
 };
 
-f32 CPU_BLAS::norm(const TensorView<f32, 1, Location::Device>& x) {
+f32 CPU_BLAS::norm(const TensorView1fD& x) {
     return cblas_snrm2(x.shape(0), x.ptr(), x.stride(0));
 }
 
@@ -150,7 +150,7 @@ CBLAS_TRANSPOSE trans_to_cblas(BLAS::Trans trans) {
     }
 }
 
-void CPU_BLAS::gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, const TensorView<f32, 1, Location::Device>& y, Trans trans) {
+void CPU_BLAS::gemv(const f32 alpha, const TensorView2fD& A, const TensorView1fD& x, const f32 beta, const TensorView1fD& y, Trans trans) {
     assert(A.stride(0) == 1);
 
     i32 m = (trans == BLAS::Trans::No) ? A.shape(0) : A.shape(1);
@@ -172,7 +172,7 @@ void CPU_BLAS::gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>&
     );
 }
 
-void CPU_BLAS::gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a, Trans trans_b) {
+void CPU_BLAS::gemm(const f32 alpha, const TensorView2fD& A, const TensorView2fD& B, const f32 beta, const TensorView2fD& C, Trans trans_a, Trans trans_b) {
     assert(A.stride(0) == 1);
     assert(B.stride(0) == 1);
     assert(C.stride(0) == 1);
@@ -199,7 +199,7 @@ void CPU_BLAS::gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>&
     );
 }
 
-void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) {
+void CPU_BLAS::axpy(const f32 alpha, const TensorView1fD& x, const TensorView1fD& y) {
     cblas_saxpy(
         x.shape(0),
         alpha, 
@@ -210,7 +210,7 @@ void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>&
     );
 }
 
-void CPU_BLAS::axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) {
+void CPU_BLAS::axpy(const f32 alpha, const TensorView2fD& x, const TensorView2fD& y) {
     assert(x.shape() == y.shape());
     f32* y_ptr = y.ptr();
     f32* x_ptr = x.ptr();
@@ -226,21 +226,46 @@ class CPU_LSQ final : public LSQ {
         explicit CPU_LSQ(std::unique_ptr<Memory> memory) : LSQ(std::move(memory)) {}
         virtual ~CPU_LSQ() = default;
         
+        void init(
+            const TensorView2fD& A,
+            const TensorView2fD& B
+        ) override;
         void solve(
-            const TensorView<f32, 2, Location::Device>& A,
-            const TensorView<f32, 2, Location::Device>& B
+            const TensorView2fD& A,
+            const TensorView2fD& B
         ) override;
 
     protected:
-        std::unique_ptr<Memory> m_memory;
+        Tensor1fD m_workspace{m_memory.get()};
 };
 
+void CPU_LSQ::init(
+    const TensorView2fD& A,
+    const TensorView2fD& B
+) {
+    f32 work_size;
+    CHECK_LAPACK(LAPACKE_sgels_work(
+        LAPACK_COL_MAJOR,
+        'N',
+        A.shape(0),
+        A.shape(1),
+        B.shape(1),
+        A.ptr(),
+        A.stride(1),
+        B.ptr(),
+        B.stride(1),
+        &work_size,
+        -1
+    ));
+    m_workspace.init({static_cast<i64>(work_size)});
+}
+
 void CPU_LSQ::solve(
-    const TensorView<f32, 2, Location::Device>& A,
-    const TensorView<f32, 2, Location::Device>& B
+    const TensorView2fD& A,
+    const TensorView2fD& B
 ) {
     CHECK_LAPACK(
-        LAPACKE_sgels(
+        LAPACKE_sgels_work(
             LAPACK_COL_MAJOR,
             'N',
             A.shape(0),
@@ -249,7 +274,9 @@ void CPU_LSQ::solve(
             A.ptr(),
             A.stride(1),
             B.ptr(),
-            B.stride(1)
+            B.stride(1),
+            m_workspace.ptr(),
+            m_workspace.size()
         )
     );
 }
@@ -265,7 +292,7 @@ std::unique_ptr<Memory> BackendCPU::create_memory_manager() { return std::make_u
 // std::unique_ptr<Kernels> create_kernels() { return std::make_unique<CPU_Kernels>(); }
 std::unique_ptr<LU> BackendCPU::create_lu_solver() { return std::make_unique<CPU_LU>(create_memory_manager()); }
 std::unique_ptr<BLAS> BackendCPU::create_blas() { return std::make_unique<CPU_BLAS>(); }
-std::unique_ptr<LSQ> BackendCPU::create_lsq() { return std::make_unique<CPU_LSQ>(create_memory_manager()); }
+std::unique_ptr<LSQ> BackendCPU::create_lsq_solver() { return std::make_unique<CPU_LSQ>(create_memory_manager()); }
 
 /// @brief Assemble the left hand side matrix
 /// @details
@@ -278,7 +305,7 @@ std::unique_ptr<LSQ> BackendCPU::create_lsq() { return std::make_unique<CPU_LSQ>
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wing, const MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) {
+void BackendCPU::lhs_assemble(TensorView2fD& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wing, const MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) {
     // tiny::ScopedTimer timer("LHS");
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
 
@@ -350,7 +377,7 @@ void BackendCPU::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const M
 /// @param rhs right hand side vector
 /// @param normals normals of all surfaces
 /// @param velocities displacement velocities of all surfaces
-void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) {
+void BackendCPU::rhs_assemble_velocities(TensorView1fD& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) {
     // const tiny::ScopedTimer timer("RHS");
 
     tf::Taskflow taskflow;
@@ -375,7 +402,7 @@ void BackendCPU::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& r
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
+void BackendCPU::rhs_assemble_wake_influence(TensorView1fD& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
     assert(lifting.size() == normals.size());
 
@@ -674,6 +701,37 @@ f32 BackendCPU::mesh_mac(const TensorView3fD& verts_wing, const TensorView2fD& a
     // Since we divide by half the total wing area (both sides) we dont need to multiply by 2
 
     return mac / sum(areas);
+}
+
+void BackendCPU::gamma_wake_from_coeffs(
+    const TensorView2fD& gamma_wake,
+    const TensorView2fD& gamma_coeffs, // already shifted to the trailing edge
+    i32 harmonics,
+    f32 tn,
+    f32 omega,
+    f32 dt,
+    i64 iteration
+)
+{
+    assert(gamma_coeffs.shape(0) == gamma_wake.shape(0));
+
+    tf::Taskflow taskflow;
+    auto end = taskflow.placeholder();
+
+    i64 wake_start = gamma_wake.shape(1) - iteration;
+    auto task = taskflow.for_each_index(wake_start, gamma_wake.shape(1), [=] (i64 j) {
+        for (i64 i = 0; i < gamma_wake.shape(0); i++) { // col
+            f32 gamma_w = gamma_coeffs(i, 0);
+            for (i64 h = 0; h < harmonics; h++) {
+                const f32 omega_k = omega * (f32)(h+1);
+                gamma_w += gamma_coeffs(i, 2*h+1) * std::cos(omega_k * (tn - (f32)(j - wake_start + 1)*dt));
+                gamma_w += gamma_coeffs(i, 2*h+2) * std::sin(omega_k * (tn - (f32)(j - wake_start + 1)*dt));
+            }
+            gamma_wake(i, j) = gamma_w;
+        }
+    });
+    task.precede(end);
+    Executor::get().run(taskflow).wait();
 }
 
 // TODO: parallelize

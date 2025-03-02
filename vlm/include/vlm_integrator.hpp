@@ -13,19 +13,19 @@ class NewmarkBeta {
         ~NewmarkBeta() = default;
 
         void init(
-            const TensorView<f32, 2, Location::Device>& M,
-            const TensorView<f32, 2, Location::Device>& C,
-            const TensorView<f32, 2, Location::Device>& K, f32 dt);
+            const TensorView2fD& M,
+            const TensorView2fD& C,
+            const TensorView2fD& K, f32 dt);
 
         void step(
-            const TensorView<f32, 2, Location::Device>& M,
-            const TensorView<f32, 2, Location::Device>& C,
-            const TensorView<f32, 1, Location::Device>& v_i,
-            const TensorView<f32, 1, Location::Device>& a_i,
-            const TensorView<f32, 1, Location::Device>& du,
-            const TensorView<f32, 1, Location::Device>& dv,
-            const TensorView<f32, 1, Location::Device>& da,
-            const TensorView<f32, 1, Location::Device>& delta_F,
+            const TensorView2fD& M,
+            const TensorView2fD& C,
+            const TensorView1fD& v_i,
+            const TensorView1fD& a_i,
+            const TensorView1fD& du,
+            const TensorView1fD& dv,
+            const TensorView1fD& da,
+            const TensorView1fD& delta_F,
             const f32 dt);
     private:
         std::unique_ptr<Memory> m_memory;

@@ -165,7 +165,7 @@ std::unique_ptr<Memory> BackendCUDA::create_memory_manager() { return std::make_
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wing, const MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) {
+void BackendCUDA::lhs_assemble(TensorView2fD& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wing, const MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) {
     // tiny::ScopedTimer timer("LHS");
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
     constexpr Dim3<i32> block{32, 16};
@@ -278,7 +278,7 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
 /// @param rhs right hand side vector
 /// @param normals normals of all surfaces
 /// @param velocities displacement velocities of all surfaces
-void BackendCUDA::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) {
+void BackendCUDA::rhs_assemble_velocities(TensorView1fD& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) {
     // const tiny::ScopedTimer timer("RHS");
     
     i64 offset = 0;
@@ -300,7 +300,7 @@ void BackendCUDA::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& 
     }
 }
 
-void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
+void BackendCUDA::rhs_assemble_wake_influence(TensorView1fD& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
     if (iteration == 0) return; // cuda doesnt support 0 sized domain
     constexpr Dim3<i32> block{32, 16}; // TODO: do not modify this 
 
@@ -547,6 +547,35 @@ f32 BackendCUDA::mesh_mac(
     f32 h_mac = 0.0f;
     memory->copy(Location::Host, &h_mac, 1, Location::Device, d_mac, 1, sizeof(f32), 1);
     return h_mac / sum(areas);
+}
+
+void BackendCUDA::gamma_wake_from_coeffs(
+    const TensorView2fD& gamma_wake,
+    const TensorView2fD& gamma_coeffs,
+    i32 harmonics,
+    f32 tn,
+    f32 omega,
+    f32 dt,
+    i64 iteration
+) {
+    constexpr Dim3<i32> block{16, 32};
+    const Dim3<i64> n{gamma_wake.shape(0), iteration};
+    auto gamma_wake_it = gamma_wake.slice(All, Range{-iteration, -1});
+    DataDims dims;
+    dims.panel_shape_0 = gamma_wake.shape(0);
+    dims.panel_shape_1 = iteration;
+    dims.panel_stride_1 = gamma_wake.stride(1);
+    kernel_gamma_wake_from_coeffs<<<grid_size(block, n)(), block()>>>(
+        dims, 
+        gamma_wake_it.ptr(),
+        gamma_coeffs.ptr(),
+        gamma_coeffs.stride(1),
+        harmonics,
+        tn,
+        omega,
+        dt
+    );
+    CHECK_CUDA(cudaGetLastError());
 }
 
 f32 BackendCUDA::sum(const TensorView1fD& tensor) {

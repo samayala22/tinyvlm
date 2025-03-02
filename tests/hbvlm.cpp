@@ -159,7 +159,7 @@ void anderson_acceleration(
     Tensor1fD _g_curr{backend->memory.get()};
     Tensor1fD _g_new{backend->memory.get()};
     Tensor1fD _gamma{backend->memory.get()};
-    auto lsq_solver = backend->create_lsq();
+    auto lsq_solver = backend->create_lsq_solver();
 
     _X_buf.init({n, m});
     _G_buf.init({n, m});
@@ -178,6 +178,8 @@ void anderson_acceleration(
     auto& g_curr = _g_curr.view();
     auto& g_new = _g_new.view();
     auto& gamma = _gamma.view();
+
+    lsq_solver->init(G_buf_k, gamma.reshape(gamma.shape(0), 1));
 
     X_buf.fill(0.f); // not necessary
     G_buf.fill(0.f); // not necessary
@@ -369,7 +371,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
 
             auto rhs_s = rhs.view().slice(All, s);
             backend->rhs_assemble_velocities(rhs_s, normals_d.views(), velocities.views());
-            gamma_wake_from_coeffs(gamma_wake[s].views()[0], te_gamma, m_harmonics, t, omega, dt, t_steps);
+            backend->gamma_wake_from_coeffs(gamma_wake[s].views()[0], te_gamma, m_harmonics, t, omega, dt, t_steps);
             backend->rhs_assemble_wake_influence(rhs_s, gamma_wake[s].views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), (i32)t_steps);
         } // unknowns for loop
 
@@ -411,7 +413,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
 
 int main() {
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_20x5.x"};
-    const std::vector<std::string> backends = {"cpu"};
+    const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
 

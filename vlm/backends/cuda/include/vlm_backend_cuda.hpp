@@ -10,9 +10,9 @@ class BackendCUDA final : public Backend {
     public:
         BackendCUDA();
         ~BackendCUDA() override;
-        void lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wing, const MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) override;
-        void rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) override;
-        void rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wake, const std::vector<bool>& lifting, i32 iteration) override;
+        void lhs_assemble(TensorView2fD& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wing, const MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) override;
+        void rhs_assemble_velocities(TensorView1fD& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) override;
+        void rhs_assemble_wake_influence(TensorView1fD& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wake, const std::vector<bool>& lifting, i32 iteration) override;
         void displace_wake_rollup(MultiTensorView3fD& wake_rollup, const MultiTensorView3fD& verts_wake, const MultiTensorView3fD& verts_wing, const MultiTensorView2fD& gamma_wing, const MultiTensorView2fD& gamma_wake, f32 dt, i32 iteration) override;
 
         // TODO: deprecate
@@ -50,6 +50,16 @@ class BackendCUDA final : public Backend {
         void mesh_metrics(const f32 alpha_rad, const MultiTensorView3fD& verts_wing, MultiTensorView3fD& colloc, MultiTensorView3fD& normals, MultiTensorView2fD& areas) override;
         f32 mesh_mac(const TensorView3fD& verts_wing, const TensorView2fD& areas) override;
 
+        void gamma_wake_from_coeffs(
+            const TensorView2fD& gamma_wake,
+            const TensorView2fD& gamma_coeffs,
+            i32 harmonics,
+            f32 tn,
+            f32 omega,
+            f32 dt,
+            i64 iteration
+        ) override;
+
         f32 sum(const TensorView1fD& tensor) override;
         f32 sum(const TensorView2fD& tensor) override;
 
@@ -57,6 +67,7 @@ class BackendCUDA final : public Backend {
         // std::unique_ptr<Kernels> create_kernels() override;
         std::unique_ptr<LU> create_lu_solver() override;
         std::unique_ptr<BLAS> create_blas() override;
+        std::unique_ptr<LSQ> create_lsq_solver() override;
 
         // Intermediate values for reduction
         // Still not certain if this is the best way
