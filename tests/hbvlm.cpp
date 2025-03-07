@@ -7,8 +7,10 @@
 #include "tinyad.hpp"
 #include "tinypbar.hpp"
 #include "tinytimer.hpp"
+#include "tinytest.hpp"
 
 #include "vlm.hpp"
+#include "vlm_backend.hpp"
 #include "vlm_types.hpp"
 #include "vlm_kinematics.hpp"
 #include "vlm_utils.hpp"
@@ -27,18 +29,25 @@ class HBVLM final: public Simulation {
         MultiTensor3fD normals_d{backend->memory.get()};
         MultiTensor2fD areas_d{backend->memory.get()};
 
-        // Data
+        // Data (uharmonics = 2*m_harmonics + 1)
         Tensor2fD lhs{backend->memory.get()}; // (ns*nc)^2
-        Tensor2fD rhs{backend->memory.get()}; // (ns*nc) x harmonics
-        Tensor2fD gamma_coeffs{backend->memory.get()}; // (ns*nc) x harmonics
-        Tensor2fH gamma_coeffs_h{backend->memory.get()}; // (ns*nc) x harmonics
+        Tensor2fD rhs{backend->memory.get()}; // (ns*nc) x uharmonics
+        Tensor2fD gamma_coeffs{backend->memory.get()}; // (ns*nc) x uharmonics
+        Tensor2fH gamma_coeffs_h{backend->memory.get()}; // (ns*nc) x uharmonics
+        Tensor2fD gamma_wing{backend->memory.get()}; // (ns*nc) x time instances
+        Tensor2fD dgamma_wing{backend->memory.get()}; // dgamma/dt
 
-        Tensor2fD residual{backend->memory.get()}; // (ns*nc) x harmonics
-        Tensor2fH dft_h{backend->memory.get()}; // harmonics x harmonics
+        Tensor2fD residual{backend->memory.get()}; // (ns*nc) x uharmonics
+        Tensor2fH dft_h{backend->memory.get()}; // uharmonics x uharmonics
         Tensor2fD dft_d{backend->memory.get()};
+        Tensor2fH ddft_h{backend->memory.get()}; // uharmonics x uharmonics
+        Tensor2fD ddft_d{backend->memory.get()};
         std::vector<MultiTensor2fD> gamma_wake;
-        MultiTensor3fD aero_forces{backend->memory.get()}; // ns*nc*3
-        
+        MultiTensor<f32, 4, Location::Host> aero_forces{backend->memory.get()}; // ns*nc*3*uharmonics
+        Tensor1fD cl_coeffs{backend->memory.get()}; // uharmonics
+        Tensor1fD cm_coeffs{backend->memory.get()}; // uharmonics
+        Tensor1fH fourier_factors_h{backend->memory.get()}; // uharmonics
+        Tensor1fD fourier_factors_d{backend->memory.get()}; // uharmonics
         MultiTensor3fD velocities{backend->memory.get()}; // ns*nc*3
         MultiTensor3fH velocities_h{backend->memory.get()}; // ns*nc*3
 
@@ -76,6 +85,19 @@ inline i64 total_panels(const MultiDim<2>& assembly_wing) {
     return total;
 }
 
+void build_scaled_fourier_series(TensorView1fH& factors, f32 omega, f32 t) {
+    TINY_ASSERT_EQ(factors.shape(0) % 2, 1);
+    i64 harmonics = (factors.shape(0)-1) / 2;
+    const f32 coeff_scaling0 = 1.f / std::sqrt(static_cast<f32>(factors.shape(0)));
+    const f32 coeff_scaling = std::sqrt(2.f / static_cast<f32>(factors.shape(0)));
+    factors(0) = coeff_scaling0;
+    for (i64 i = 0; i < harmonics; i++) {
+        const f32 k = (f32)(i+1);
+        factors(2*i+1) = std::cos(omega * t * k) * coeff_scaling;
+        factors(2*i+2) = std::sin(omega * t * k) * coeff_scaling;
+    }
+}
+
 void HBVLM::alloc_buffers() {
     const i64 n = total_panels(assembly_wings);
     const i64 unknowns = 2 * m_harmonics + 1;
@@ -83,12 +105,14 @@ void HBVLM::alloc_buffers() {
         gamma_wake.emplace_back(backend->memory.get());
     }
     // Mesh
-    MultiDim<3> panels_3D;  
+    MultiDim<3> panels_3D;
+    MultiDim<4> panels_4D;
     MultiDim<2> panels_2D;
     MultiDim<3> verts_wing_3D;
     MultiDim<2> transforms_2D;
     for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
+        panels_4D.push_back({ns, nc, 3, unknowns});
         panels_2D.push_back({ns, nc});
         verts_wing_3D.push_back({ns+1, nc+1, 4});
         transforms_2D.push_back({4, 4});
@@ -103,12 +127,16 @@ void HBVLM::alloc_buffers() {
     rhs.init({n, unknowns});
     gamma_coeffs.init({n, unknowns});
     gamma_coeffs_h.init({n, unknowns});
+    gamma_wing.init({n, unknowns});
+    dgamma_wing.init({n, unknowns});
     residual.init({n, unknowns});
     dft_d.init({unknowns, unknowns});
     dft_h.init({unknowns, unknowns});
+    ddft_d.init({unknowns, unknowns});
+    ddft_h.init({unknowns, unknowns});
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
-    aero_forces.init(panels_3D);
+    aero_forces.init(panels_4D);
     transforms_h.init(transforms_2D);
     transforms.init(transforms_2D);
     solver->init(lhs.view());
@@ -144,40 +172,40 @@ void gamma_wake_from_coeffs(
 void anderson_acceleration(
     Backend* backend,
     const TensorView1fD& x0,
-    std::function<void(const TensorView1fD& x, const TensorView1fD& y)> f,
+    const std::function<void(const TensorView1fD& x, const TensorView1fD& y)>& f,
     i32 max_iter = 100,
     f32 tol_res = 1e-6,
     i32 m = 3
 )
 {
     i64 n = x0.shape(0);
-    Tensor2fD _X_buf{backend->memory.get()};
-    Tensor2fD _G_buf{backend->memory.get()};
-    Tensor2fD _G_buf_k{backend->memory.get()}; // copy because lsq overwrites
-    Tensor1fD _x_curr{backend->memory.get()};
-    Tensor1fD _x_new{backend->memory.get()};
-    Tensor1fD _g_curr{backend->memory.get()};
-    Tensor1fD _g_new{backend->memory.get()};
-    Tensor1fD _gamma{backend->memory.get()};
+    Tensor2fD m_X_buf{backend->memory.get()};
+    Tensor2fD m_G_buf{backend->memory.get()};
+    Tensor2fD m_G_buf_k{backend->memory.get()}; // copy because lsq overwrites
+    Tensor1fD m_x_curr{backend->memory.get()};
+    Tensor1fD m_x_new{backend->memory.get()};
+    Tensor1fD m_g_curr{backend->memory.get()};
+    Tensor1fD m_g_new{backend->memory.get()};
+    Tensor1fD m_gamma{backend->memory.get()};
     auto lsq_solver = backend->create_lsq_solver();
 
-    _X_buf.init({n, m});
-    _G_buf.init({n, m});
-    _G_buf_k.init({n, m});
-    _x_curr.init({n});
-    _x_new.init({n});
-    _g_curr.init({n});
-    _g_new.init({n});
-    _gamma.init({n});
+    m_X_buf.init({n, m});
+    m_G_buf.init({n, m});
+    m_G_buf_k.init({n, m});
+    m_x_curr.init({n});
+    m_x_new.init({n});
+    m_g_curr.init({n});
+    m_g_new.init({n});
+    m_gamma.init({n});
 
-    auto& X_buf = _X_buf.view();
-    auto& G_buf = _G_buf.view();
-    auto& G_buf_k = _G_buf_k.view();
-    auto& x_curr = _x_curr.view();
-    auto& x_new = _x_new.view();
-    auto& g_curr = _g_curr.view();
-    auto& g_new = _g_new.view();
-    auto& gamma = _gamma.view();
+    auto& X_buf = m_X_buf.view();
+    auto& G_buf = m_G_buf.view();
+    auto& G_buf_k = m_G_buf_k.view();
+    auto& x_curr = m_x_curr.view();
+    auto& x_new = m_x_new.view();
+    auto& g_curr = m_g_curr.view();
+    auto& g_new = m_g_new.view();
+    auto& gamma = m_gamma.view();
 
     lsq_solver->init(G_buf_k, gamma.reshape(gamma.shape(0), 1));
 
@@ -248,8 +276,6 @@ void anderson_acceleration(
 void HBVLM::run(f32 t_start, f32 omega) {
     const tiny::ScopedTimer timer("HBVLM::run");
     const f32 period = 2.0f * PI_f / omega;
-    const f32 rho = 1.0f; // TODO: take this as input
-    const i32 unknowns = 2 * m_harmonics + 1;
 
     for (const auto& [wing_init, wing] : zip(verts_wing_init.views(), verts_wing.views())) wing_init.to(wing);
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
@@ -308,8 +334,12 @@ void HBVLM::run(f32 t_start, f32 omega) {
         const f32 sqrt_unknowns_2 = std::sqrt(2.f / static_cast<f32>(unknowns));
         auto& dft_hv = dft_h.view();
         auto& dft_dv = dft_d.view();
+        auto ddft_hv = ddft_h.view();
+        auto ddft_dv = ddft_d.view();
+
         for (i64 i = 0; i < unknowns; i++) {
             dft_hv(i, 0) = sqrt_unknowns;
+            ddft_hv(i, 0) = 0.0f;
         }
         for (i64 j = 1; j < unknowns; j += 2) {
             const f32 k = ((f32)j + 1.f) / 2.f;
@@ -317,9 +347,12 @@ void HBVLM::run(f32 t_start, f32 omega) {
                 const f32 tn = ((f32)i / (f32)unknowns) * period;
                 dft_hv(i, j) = std::cos(omega * tn * k) * sqrt_unknowns_2;
                 dft_hv(i, j+1) = std::sin(omega * tn * k) * sqrt_unknowns_2;
+                ddft_hv(i, j) = - omega * k * std::sin(omega * tn * k) * sqrt_unknowns_2;
+                ddft_hv(i, j+1) = omega * k * std::cos(omega * tn * k) * sqrt_unknowns_2;
             }
         }
         dft_hv.to(dft_dv);
+        ddft_hv.to(ddft_dv);
     }
 
     auto hb_vlm_iter = [&](
@@ -380,31 +413,44 @@ void HBVLM::run(f32 t_start, f32 omega) {
         backend->blas->gemm(1.0f, rhs.view(), dft_d.view(), 0.0f, gamma_out);
         // Solve to obtain the fourier coefficients for each panel
         solver->solve(lhs.view(), gamma_out);
-
-        // Scaling
-        const f32 coeff_scaling0 = 1.f / std::sqrt(static_cast<f32>(unknowns));
-        const f32 coeff_scaling = std::sqrt(2.f / static_cast<f32>(unknowns));
-        backend->blas->scal(coeff_scaling0, gamma_out.slice(All, 0));
-        backend->blas->scal(coeff_scaling, gamma_out.slice(All, Range{1, -1}).reshape(gamma_out.shape(0)*(gamma_out.shape(1)-1)));
     };
     
     auto& gamma_coeffs_v = gamma_coeffs.view();
     gamma_coeffs_v.fill(0.f);
 
     anderson_acceleration(backend.get(), gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)), hb_vlm_iter, 100, 1e-5, 5);
+    
+    // Compute the forces coefficients
+    {
+        backend->blas->gemm(1.0f, gamma_coeffs.view(), dft_d.view(), 0.0f, gamma_wing.view(), BLAS::Trans::No, BLAS::Trans::Yes);
+        backend->blas->gemm(1.0f, gamma_coeffs.view(), ddft_d.view(), 0.0f, dgamma_wing.view(), BLAS::Trans::No, BLAS::Trans::Yes);
+        for (i32 s = 0; s < 2*m_harmonics+1; s++) {
+            // const f32 tn = period * (f32)s / (f32)(2*m_harmonics+1);
+            // build_scaled_fourier_series(fourier_factors_h.view(), omega, tn);
+            // TODO: compute unsteady forces
+            // TODO: compute coefficients
+        }
+        // TODO: Apply DFT to obtain fourier coefficients for cl and cm
+    }
 
     // Compute time domain solution from the obtained fourier coeffs
     {
+
         auto& gamma_coeffs_hv = gamma_coeffs_h.view();
         gamma_coeffs.view().to(gamma_coeffs_hv);
         std::ofstream gamma_data("hbvlm_gamma_" + backend->name + ".txt");
+
+        const i32 unknowns = 2 * m_harmonics + 1;
+        const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));
+        const f32 sqrt_unknowns_2 = std::sqrt(2.f / static_cast<f32>(unknowns));
+
         for (i64 i = 0; i < max_t_steps; i++) {
             const f32 t = (f32)i * dt;
-            f32 gamma = gamma_coeffs_hv(0,0);
+            f32 gamma = gamma_coeffs_hv(0,0) * sqrt_unknowns;
             for (i64 j = 0; j < m_harmonics; j++) {
                 const f32 k = (f32)(j+1);
-                gamma += gamma_coeffs_hv(0, 2*j+1) * std::cos(omega * t * k);
-                gamma += gamma_coeffs_hv(0, 2*j+2) * std::sin(omega * t * k);
+                gamma += gamma_coeffs_hv(0, 2*j+1) * std::cos(omega * t * k) * sqrt_unknowns_2;
+                gamma += gamma_coeffs_hv(0, 2*j+2) * std::sin(omega * t * k) * sqrt_unknowns_2;
             }
             gamma_data << t << " " << gamma << "\n";
         }
@@ -426,7 +472,7 @@ int main() {
     const f32 k = 0.25f; // reduced frequency
     const f32 omega = k * u_inf / b;
     const f32 t_final = cycles * 2.0f * PI_f / omega;
-    const i32 harmonics = 10;
+    const i32 harmonics = 3;
 
     std::printf("t_final: %f\n", t_final);
     std::printf("omega: %f\n", omega);

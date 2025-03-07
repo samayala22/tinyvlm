@@ -6,30 +6,10 @@
 
 #include "tinycombination.hpp"
 #include "tinypbar.hpp"
+#include "tinytest.hpp"
 
 #include <fstream>
 #include <memory>
-
-// TODO: move these asserts somewhere else
-#define ASSERT_EQ(x, y) \
-    do { \
-        auto val1 = (x); \
-        auto val2 = (y); \
-        if (!(val1 == val2)) { \
-            std::cerr << "Assertion failed: " << #x << " == " << #y << " (Left: " << val1 << ", Right: " << val2 << ")\n"; \
-            std::abort(); \
-        } \
-    } while (0)
-
-#define ASSERT_NEAR(x, y, tol) \
-    do { \
-        auto val1 = (x); \
-        auto val2 = (y); \
-        if (!(std::abs(val1 - val2) <= tol)) { \
-            std::cerr << "Assertion failed: |" << #x << " - " << #y << "| <= " << tol << " (Left: " << val1 << ", Right: " << val2 << ", Diff: " << std::abs(val1 - val2) << ")\n"; \
-            std::abort(); \
-        } \
-    } while (0)
 
 #define COUPLED 1
 // Note: these defines are deprecated and possibly broken
@@ -606,8 +586,8 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
         // Temporary Position correctness checks
         const f32 w_alpha = wing_alpha();
         const f32 w_h_nd = wing_h(1 + vars.a_h);
-        ASSERT_NEAR(w_h_nd, -u_h.view()(0, i), 1e-5f);
-        ASSERT_NEAR(w_alpha, u_h.view()(1, i), 1e-5f);
+        TINY_ASSERT_NEAR(w_h_nd, -u_h.view()(0, i), 1e-5f);
+        TINY_ASSERT_NEAR(w_alpha, u_h.view()(1, i), 1e-5f);
 
         // Wake outputs
         for (i64 m = 0; m < assembly_wings.size(); m++) {

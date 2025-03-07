@@ -10,6 +10,7 @@
 #include <ostream>
 
 #include "vlm_types.hpp"
+#include "tinytest.hpp"
 
 namespace vlm {
 
@@ -328,8 +329,18 @@ public:
     inline i64 size() const { return m_view.size(); }
     inline i64 size_bytes() const { return m_view.size_bytes(); }
     
-    inline const View& view() const { return m_view; }
-    inline View& view() { return m_view; }
+    inline const View& view() const {
+        if (m_view.size_bytes() == 0) {
+            TINY_ABORT("Tensor::view() called on uninitialized tensor");
+        }
+        return m_view;
+    }
+    inline View& view() {
+        if (m_view.size_bytes() == 0) {
+            TINY_ABORT("Tensor::view() called on uninitialized tensor");
+        }
+        return m_view;
+    }
 
     inline T& operator[](i64 i) { return ptr()[i]; }
 };

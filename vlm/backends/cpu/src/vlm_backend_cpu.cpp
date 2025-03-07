@@ -715,17 +715,21 @@ void BackendCPU::gamma_wake_from_coeffs(
 {
     assert(gamma_coeffs.shape(0) == gamma_wake.shape(0));
 
+    const i32 unknowns = 2 * harmonics + 1;
+    const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));
+    const f32 sqrt_unknowns_2 = std::sqrt(2.f / static_cast<f32>(unknowns));
+
     tf::Taskflow taskflow;
     auto end = taskflow.placeholder();
 
     i64 wake_start = gamma_wake.shape(1) - iteration;
     auto task = taskflow.for_each_index(wake_start, gamma_wake.shape(1), [=] (i64 j) {
         for (i64 i = 0; i < gamma_wake.shape(0); i++) { // col
-            f32 gamma_w = gamma_coeffs(i, 0);
+            f32 gamma_w = gamma_coeffs(i, 0) * sqrt_unknowns;
             for (i64 h = 0; h < harmonics; h++) {
                 const f32 omega_k = omega * (f32)(h+1);
-                gamma_w += gamma_coeffs(i, 2*h+1) * std::cos(omega_k * (tn - (f32)(j - wake_start + 1)*dt));
-                gamma_w += gamma_coeffs(i, 2*h+2) * std::sin(omega_k * (tn - (f32)(j - wake_start + 1)*dt));
+                gamma_w += gamma_coeffs(i, 2*h+1) * std::cos(omega_k * (tn - (f32)(j - wake_start + 1)*dt)) * sqrt_unknowns_2;
+                gamma_w += gamma_coeffs(i, 2*h+2) * std::sin(omega_k * (tn - (f32)(j - wake_start + 1)*dt)) * sqrt_unknowns_2;
             }
             gamma_wake(i, j) = gamma_w;
         }
