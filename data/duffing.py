@@ -1,6 +1,7 @@
 import numpy as np
 import scipy as sp
 import plotly.express as px
+import plotly.graph_objects as go
 
 def create_dft_matrix(omega, harmonics=3):
     unknowns = 2 * harmonics + 1
@@ -28,12 +29,29 @@ def create_dft_matrix(omega, harmonics=3):
             dddft[i, j] = - (omega * k)**2 * np.cos(omega * tn * k) * sqrt_unknowns_2
             dddft[i, j + 1] = - (omega * k)**2 * np.sin(omega * tn * k) * sqrt_unknowns_2
 
-    # assert np.allclose(np.linalg.inv(dft), dft.T)
-    # assert np.allclose(np.linalg.inv(ddft), ddft.T)
-    # assert np.allclose(np.linalg.inv(dddft), dddft.T)
-
     return dft, ddft, dddft
 
+def create_fourier_basis(omega, harmonics, t):
+    unknowns = 2 * harmonics + 1
+    basis = np.zeros((unknowns))
+    dbasis = np.zeros((unknowns))
+    ddbasis = np.zeros((unknowns))
+    sqrt_unknowns = 1 / np.sqrt(unknowns)
+    sqrt_unknowns_2 = np.sqrt(2 / unknowns)
+    basis[0] = sqrt_unknowns
+    dbasis[0] = 0
+    ddbasis[0] = 0
+    for i in range(harmonics):
+        k = float(i+1)
+        basis[2 * i + 1] = sqrt_unknowns_2 * np.cos(omega * t * k)
+        basis[2 * i + 2] = sqrt_unknowns_2 * np.sin(omega * t * k)
+        dbasis[2 * i + 1] = - sqrt_unknowns_2 * omega * k * np.sin(omega * t * k)
+        dbasis[2 * i + 2] = sqrt_unknowns_2 * omega * k * np.cos(omega * t * k)
+        ddbasis[2 * i + 1] = - sqrt_unknowns_2 * (omega * k)**2 * np.cos(omega * t * k)
+        ddbasis[2 * i + 2] = - sqrt_unknowns_2 * (omega * k)**2 * np.sin(omega * t * k)
+
+    return basis, dbasis, ddbasis
+    
 def anderson_acceleration(f, x0, k_max=100, tol_res=1e-6, m=3):
     assert m <= x0.shape[0]
     n = x0.shape[0]
@@ -93,12 +111,12 @@ def newmark_beta_step(M, C, K, v_i, a_i, delta_F, dt, beta=1/4, gamma=1/2):
     return du, dv, da
 
 def nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt):
-    t_steps = int((t_final + dt)/ dt)
+    t_steps = int(t_final / dt) + 1
     n = u0.shape[0] # number of equations
     vec_t = np.arange(0, t_final + dt, dt)
-    u = np.zeros((n, t_steps+1))
-    v = np.zeros((n, t_steps+1))
-    a = np.zeros((n, t_steps+1))
+    u = np.zeros((n, t_steps))
+    v = np.zeros((n, t_steps))
+    a = np.zeros((n, t_steps))
     f_curr = nonlinear_func(0.0, u0, v0)
     u[:, 0] = u0
     v[:, 0] = v0
@@ -106,7 +124,7 @@ def nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt):
 
     avg_iters = 0
 
-    for i in range(0, t_steps):
+    for i in range(0, t_steps-1):
         t = i*dt
         f_next = f_curr.copy()
         du = np.zeros(2)
@@ -161,7 +179,13 @@ def nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, d
 
     return vec_t, x[0:n, :], x[n:2*n, :], x[2*n:3*n, :]
 
-def create_duffing_system(delta = 0.3, alpha = -1.0, beta = 1.0, gamma = 0.37, omega = 1.2):
+def create_motion_system():
+    # duffing
+    delta = 0.3
+    alpha = -1.0
+    beta = 1.0
+    gamma = 0.29
+    omega = 1.2
     def nonlinear_func(t, u, v):
         return np.array([gamma * np.cos(omega * t) - beta * u[0]**3])
     
@@ -172,49 +196,120 @@ def create_duffing_system(delta = 0.3, alpha = -1.0, beta = 1.0, gamma = 0.37, o
     u0 = np.array([1.0])
     v0 = np.array([0.0])
 
+    # delta = 0.3       # Damping coefficient
+    # alpha = 1.0       # Stiffness (positive for stable system)
+    # gamma = 0.37      # Force amplitude
+    # omega = 1.2       # Force frequency
+
+    # # Define the external force function
+    # def nonlinear_func(t, u, v):
+    #     return np.array([gamma * np.cos(omega * t) + 5*gamma * np.cos(3*omega * t)])  # Periodic forcing
+
+    # # Mass matrix (1DOF)
+    # M = np.array([[1.0]])
+    # # Damping matrix
+    # C = np.array([[delta]])
+    # # Stiffness matrix
+    # K = np.array([[alpha]])
+
+    # # Initial conditions
+    # u0 = np.array([1.0])  # Initial displacement
+    # v0 = np.array([0.0])  # Initial velocity
+
     return M, C, K, u0, v0, nonlinear_func
 
-def integrate_duffing():
-    M, C, K, u0, v0, nonlinear_func = create_duffing_system()
-    t_final = 150.0
-    dt = 0.2
+def integrate_duffing(dt):
+    M, C, K, u0, v0, nonlinear_func = create_motion_system()
+    t_final = 100.0
     t, u, v, a = nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
     # t, u, v, a = nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
 
     fig = px.line(x=t, y=u[0, :], title="Duffing Oscillator")
     fig.show()
 
-def hb_duffing(harmonics=3):
-    M, C, K, u0, v0, nonlinear_func = create_duffing_system()
+    return t, u
+
+def hb_duffing(harmonics=10, xf0=None, omega0 = 1.0):
+    M, C, K, u0, v0, nonlinear_func = create_motion_system()
     samples = 2*harmonics+1
     dofs = u0.shape[0] # only 1 dof for now
-    omega0 = 1.0
+    omega = omega0
 
     def f(xf):
-        omega_k = xf[-1]
-        uf = xf[:-1].reshape(samples, dofs).T # Matrix where each col is the fourier coeffs for row idx dof
-        R = np.zeros_like(xf)
-        d, dd, ddd = create_dft_matrix(omega_k, harmonics)
+        nonlocal omega
+        uf = xf.reshape(samples, dofs).T # Matrix where each col is the fourier coeffs for row idx dof
+        R = np.zeros_like(uf)
+        # omega = xf[0]
+        d, dd, ddd = create_dft_matrix(omega, harmonics)
 
-        # pos, vel and accel at time samples
+        # uf[0,0] = 0.0 # force a0 = 0
+
+        # pos, vel and accel at time samples using IDFT
         u = uf @ d.T
         v = uf @ dd.T
         a = uf @ ddd.T
 
+        # Alternating frequency-time scheme
         for s in range(samples):
-            period = 2.0 * np.pi / omega_k
+            period = 2.0 * np.pi / omega
             t_n = (s / samples) * period
-            R[dofs*s:dofs*(s+1)] = M @ a[:, s] + C @ v[:, s] + K @ u[:, s] - nonlinear_func(t_n, u[:, s], v[:, s])
+            R[:, s] = M @ a[:, s] + C @ v[:, s] + K @ u[:, s] - nonlinear_func(t_n, u[:, s], v[:, s])
 
-        # TODO: couple back with a DFT
-        R[-1] = omega0 - omega_k
-        return 
+        R = R @ d # DFT
+        return R.T.reshape(-1)
 
-    xf0 = np.zeros(dofs*(2*harmonics+1)+1)
-    xf0[-1] = omega0
+    if xf0 is None:
+        xf0 = np.zeros(dofs*(2*harmonics+1))
 
-    xf_sol = sp.optimize.newton_krylov(f, xf0)
+    # xf_sol = sp.optimize.newton_krylov(f, xf0, maxiter=10000, verbose=True, f_tol=1e-4)
+    xf_sol = sp.optimize.root(f, xf0, tol=1e-3)
+    if not xf_sol.success:
+        print(f"Root finding failed with error: {xf_sol.message}")
+    else:
+        print("Root found")
+
+    # Plot the result in time domain
+    t_final = 100.0
+    dt = 0.1
+    vec_t = np.arange(0, t_final + dt, dt)
+    sol = np.zeros((3*dofs, vec_t.shape[0])) # u, v, a
+    residual = np.zeros(vec_t.shape[0])
+    uf_sol_ = xf_sol.x.reshape(samples, dofs).T
+    # uf_sol_ = xf0.reshape(samples, dofs).T
+    for i, t in enumerate(vec_t):
+        b, db, ddb = create_fourier_basis(omega, harmonics, t)
+        sol[0:dofs, i] = uf_sol_ @ b
+        sol[dofs:2*dofs, i] = uf_sol_ @ db
+        sol[2*dofs:3*dofs, i] = uf_sol_ @ ddb
+
+        residual[i] = (M @ sol[2*dofs:3*dofs, i] + C @ sol[1*dofs:2*dofs, i] + K @ sol[0*dofs:1*dofs, i] - nonlinear_func(t, sol[0*dofs:1*dofs, i], sol[1*dofs:2*dofs, i]))[0]
+
+    fig = px.line(x=vec_t, y=sol[0, :], title="Duffing Oscillator")
+    fig.add_trace(go.Scattergl(x=vec_t, y=residual, mode='lines', name='Residual'))
+
+    fig.show()
 
 if __name__ == "__main__":
-    integrate_duffing()
-    # hb_duffing()
+    # params
+    harmonics = 10
+    omega0 = 0.3
+    dt = 0.01
+    # dependent vars
+    unknowns = 2 * harmonics + 1
+    period = 2.0 * np.pi / omega0
+    t_start = 3*period
+    t, u = integrate_duffing(dt)
+    samples = np.zeros((u.shape[0], unknowns))
+    xf0 = np.zeros_like(samples)
+
+    # sampling
+    for i in range(0, unknowns):
+        tn = t_start + (i / unknowns) * period
+        samples[:, i] = u[:, int(round(tn / dt))]
+        print(f"tn: {tn}")
+        print(f"t[int(tn / dt)]: {t[int(round(tn / dt))]}")
+
+    dft, _, _ = create_dft_matrix(omega0, harmonics)
+    xf0 = samples @ dft
+
+    hb_duffing(harmonics, xf0.T.reshape(-1), omega0)
