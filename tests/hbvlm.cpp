@@ -391,7 +391,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
     auto& gamma_coeffs_v = gamma_coeffs.view();
     gamma_coeffs_v.fill(0.f);
 
-    anderson_acceleration(backend.get(), gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)), hb_vlm_iter, 100, 1e-5, 5);
+    anderson_acceleration(backend.get(), gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)), hb_vlm_iter, 100, 1e-5, 8);
 
     // Compute time domain solution from the obtained fourier coeffs
     {
@@ -416,7 +416,7 @@ int main() {
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
-
+ 
     // Geometry
     const f32 b = 0.5f; // half chord
 

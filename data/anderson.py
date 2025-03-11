@@ -100,14 +100,45 @@ def anderson_acceleration_fast(f, x0, k_max=100, tol_res=1e-6, m=3):
         k += 1
         residual_history.append(np.linalg.norm(g_curr))
 
-    fig = px.line(x=range(k-1), y=residual_history, log_y=True)
-    fig.update_yaxes(
-        tickformat='.2e',  # Format as exponential with 2 decimal places
-        exponentformat='e'  # Use 'e' notation (alternatives: 'E', 'power', 'SI', 'B')
-    )
+    # fig = px.line(x=range(k-1), y=residual_history, log_y=True)
+    # fig.update_yaxes(
+    #     tickformat='.2e',  # Format as exponential with 2 decimal places
+    #     exponentformat='e'  # Use 'e' notation (alternatives: 'E', 'power', 'SI', 'B')
+    # )
     # fig.show()
 
     return x_curr
+
+def J(f, x, dx=1e-8):
+    n = len(x)
+    func = f(x)
+    jac = np.zeros((n, n))
+    for j in range(n):  # through columns to allow for vector addition
+        Dxj = (abs(x[j])*dx if x[j] != 0 else dx)
+        x_plus = [(xi if k != j else xi + Dxj) for k, xi in enumerate(x)]
+        jac[:, j] = (f(x_plus) - func)/Dxj
+    return jac
+
+def newton_krylov_anderson(f, x0, max_iter=100, tol_res=1e-6, m=5):
+    delta_x = np.zeros(x0.shape) + 1.0
+    x = x0.copy()
+    iteration = 0
+    # while np.linalg.norm(delta_x) > tol_res and iteration < max_iter:
+    #     jac = J(f, x)
+    #     delta_x = np.linalg.solve(jac, -f(x))
+    #     x = x + delta_x
+    #     iteration += 1
+
+    # print(iteration)
+
+    def inner(x):
+        jac = J(f, x)
+        delta_x = np.linalg.solve(jac, -f(x))
+        return x + delta_x
+    
+    x = anderson_acceleration_fast(inner, x0)
+
+    return x
 
 def picard(f, x0, k_max=100, tol_res=1e-6):
     """Picard iteration for fixed-point problems.
@@ -133,7 +164,7 @@ def nonlinear_fixed_point(n=100, scale=0.9, bias_scale=0.1, seed=42):
     spectral_norm = np.linalg.norm(A_temp, 2)
     A = (scale / spectral_norm) * A_temp
     b = bias_scale * np.random.randn(n)
-    delta=0.2
+    delta=0.5
     
     def h(x):
         return np.tanh(A @ x + b) + 0.1 * np.sin(A @ x + b)
@@ -171,8 +202,8 @@ def main():
     tol_res = 1e-6
     m = 5
 
-    func = nonlinear_fixed_point(10)
-    x0 = np.random.rand(10)
+    func = nonlinear_fixed_point(100)
+    x0 = np.random.rand(100)
 
     rf = FunctionCounter(func)
     fp = FunctionCounter(create_fixed_point(func))
@@ -187,6 +218,10 @@ def main():
 
     ok = validate(func, opt.newton_krylov(rf, x0, method='lgmres', verbose=0, maxiter=k_max, f_tol=tol_res))
     print(f"[{ok}] Newton-Krylov Function evaluations: {rf.eval_count}")
+    rf.reset()
+
+    ok = validate(func, newton_krylov_anderson(rf, x0))
+    print(f"[{ok}] Newton-Krylov Anderson Function evaluations: {rf.eval_count}")
     rf.reset()
 
     ROOT_METHODS = ['hybr', 'lm', 'broyden1', 'broyden2', 'anderson']
