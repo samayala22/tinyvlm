@@ -327,7 +327,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
         }
     }
 
-    // Assemble DFT matrix
+    // Assemble DFT matrix (TODO: move to a standalone function)
     {
         const i32 unknowns = 2 * m_harmonics + 1;
         const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));

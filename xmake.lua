@@ -47,6 +47,7 @@ end
 includes("packages/*.lua")
 includes("vlm/xmake.lua") -- library and main driver
 
+add_requires("cminpack") -- temporary (to be moved into cpu backend)
 -- Create tests
 for _, file in ipairs(os.files("tests/*.cpp")) do
     local name = path.basename(file)
@@ -55,6 +56,7 @@ for _, file in ipairs(os.files("tests/*.cpp")) do
         set_default(false)
         add_rpathdirs("$ORIGIN")
         add_deps("libvlm")
+        add_packages("cminpack") -- temporary
         add_files("tests/" .. name .. ".cpp")
         add_tests("default")
 end

@@ -94,6 +94,6 @@ if __name__ == '__main__':
     methods = [fd, fd2, cd, cd2]
     h_methods = [fd_h, cd_h, cd2_h]
 
-    step_sweep(methods, h_methods, f, df, -1e8)
-    # value_sweep(methods, f, df)
+    step_sweep(methods, h_methods, f, df, 100.0)
+    value_sweep(methods, f, df)
     

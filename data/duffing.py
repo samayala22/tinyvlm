@@ -178,42 +178,24 @@ def nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, d
 
     return vec_t, x[0:n, :], x[n:2*n, :], x[2*n:3*n, :]
     
-    
+
+# NLvib params
 P = 0.18
 mu = 1
 zeta = 0.05
 kappa = 1
 gamma = 0.1
 
+# Wikipedia params
+# P = 0.29
+# mu = 1
+# zeta = 0.3
+# kappa = -1.0
+# gamma = 1.0
+
 def create_motion_system():
-    # # duffing
-    # delta = 0.3
-    # alpha = -1.0
-    # beta = 1.0
-    # gamma = 0.29
-    # omega = 1.2
-    # def nonlinear_func(t, u, v):
-    #     return np.array([gamma * np.cos(omega * t) - beta * u[0]**3])
-    
-    # M = np.array([[1.0]])
-    # C = np.array([[delta]])
-    # K = np.array([[alpha]])
-
-    # delta = 0.3       # Damping coefficient
-    # alpha = 1.0       # Stiffness (positive for stable system)
-    # gamma = 0.37      # Force amplitude
-    # omega = 1.2       # Force frequency
-
-    # # Define the external force function
-    # def nonlinear_func(t, u, v):
-    #     return np.array([gamma * np.cos(omega * t) + 5*gamma * np.cos(3*omega * t)])  # Periodic forcing
-
-    # M = np.array([[1.0]])
-    # C = np.array([[delta]])
-    # K = np.array([[alpha]])
-
     # NLvib params
-    omega = 0.5
+    omega = 0.1
     def nonlinear_func(t, u, v):
         return np.array([P * np.cos(omega * t) - gamma * u[0]**3])
     
@@ -229,9 +211,8 @@ def create_motion_system():
 
     return M, C, K, u0, v0, nonlinear_func, hb_nl_forces
 
-def integrate_duffing(dt):
+def integrate_duffing(t_final, dt):
     M, C, K, u0, v0, nonlinear_func, _ = create_motion_system()
-    t_final = 100.0
     t, u, v, a = nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
     # t, u, v, a = nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
 
@@ -241,33 +222,46 @@ def integrate_duffing(dt):
     return t, u
 
 # TODO: improve this disgusting function
+# def tangent_predictor(J, zref, Xref):
+#     """Compute tangent vector using Seydel's pivot strategy."""
+#     # 1. Determine pivot indices
+#     with np.errstate(divide='ignore', invalid='ignore'):
+#         rel_changes = np.abs(zref) / np.maximum(np.abs(Xref), 1e-4)
+#     kk = np.argsort(-rel_changes)  # Descending order
+    
+#     # 2. Try different pivots until success
+#     ztmp = None
+#     for k in kk:
+#         # 3. Create constraint vector
+#         c = np.zeros_like(Xref)
+#         c[k] = 1.0
+        
+#         # 4. Build extended system
+#         J_red = J[:-1, :]  # Exclude last row (parameter derivative)
+#         A = np.vstack([J_red, c])
+#         b = np.concatenate([np.zeros(J_red.shape[0]), [1.0]])
+        
+#         # 5. Solve with least-squares for numerical stability
+#         ztmp, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+        
+#         if not np.any(np.isnan(ztmp)):
+#             break
+    
+#     # 6. Normalize tangent vector
+#     z = ztmp / np.linalg.norm(ztmp) # length 1 vector
+#     print(z)
+#     return z
+
+# def tangent_predictor(J, zref, Xref):
+#     Q, R = np.linalg.qr(J.T)
+#     z = Q[:, -1]
+#     return z / np.linalg.norm(z)
+
 def tangent_predictor(J, zref, Xref):
-    """Compute tangent vector using Seydel's pivot strategy."""
-    # 1. Determine pivot indices
-    with np.errstate(divide='ignore', invalid='ignore'):
-        rel_changes = np.abs(zref) / np.maximum(np.abs(Xref), 1e-4)
-    kk = np.argsort(-rel_changes)  # Descending order
-    
-    # 2. Try different pivots until success
-    ztmp = None
-    for k in kk:
-        # 3. Create constraint vector
-        c = np.zeros_like(Xref)
-        c[k] = 1.0
-        
-        # 4. Build extended system
-        J_red = J[:-1, :]  # Exclude last row (parameter derivative)
-        A = np.vstack([J_red, c])
-        b = np.concatenate([np.zeros(J_red.shape[0]), [1.0]])
-        
-        # 5. Solve with least-squares for numerical stability
-        ztmp, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
-        
-        if not np.any(np.isnan(ztmp)):
-            break
-    
-    # 6. Normalize tangent vector
-    z = ztmp / np.linalg.norm(ztmp) # length 1 vector
+    _, _, vt = np.linalg.svd(J[:-1, :], full_matrices=True)
+    z = vt[-1, :]
+    z = z / np.linalg.norm(z)
+    print(z)
     return z
 
 EPS = np.finfo(np.float64).eps
@@ -300,6 +294,23 @@ def numerical_jac(f, x):
         delta = xp[j] - xm[j]
         jac[:, j] = (f(xp) - f(xm)) / delta
     return jac
+
+def plot_hb_timedomain(t_final, dt, dofs, X, omega, harmonics):
+    # Plot the result in time domain
+    samples = 2*harmonics+1
+    vec_t = np.arange(0, t_final + dt, dt)
+    sol = np.zeros((3*dofs, vec_t.shape[0])) # u, v, a
+    uf_sol_ = X.reshape(samples, dofs).T
+    # uf_sol_ = xf0.reshape(samples, dofs).T
+    for i, t in enumerate(vec_t):
+        b, db, ddb = create_fourier_basis(omega, harmonics, t)
+        sol[0:dofs, i] = uf_sol_ @ b
+        sol[dofs:2*dofs, i] = uf_sol_ @ db
+        sol[2*dofs:3*dofs, i] = uf_sol_ @ ddb
+
+    fig = px.line(x=vec_t, y=sol[0, :], title=f"Duffing Oscillator (omega={omega})")
+
+    fig.show()
 
 def hb_duffing(harmonics, omega_start, omega_end, ds=.01):
     M, C, K, u0, v0, _, hb_nl_forces = create_motion_system()
@@ -361,13 +372,15 @@ def hb_duffing(harmonics, omega_start, omega_end, ds=.01):
     z_ref[-1] = 1
 
     Xp = sp.optimize.root(f, X0, args=(X_ref, z_ref, True)) # initial step
-    X0[:-1] = Xp.x[:-1] # TODO: check if we cant just copy the whole thing
+    # X0[:-1] = Xp.x[:-1] # TODO: check if we cant just copy the whole thing
+    X0 = Xp.x.copy()
 
     X_mat = np.zeros((X0.shape[0], max_continuation_steps))
     X_mat[:, 0] = X0
 
     iteration = 1
     while iteration < max_continuation_steps:
+        print(X0[-1])
         J = numerical_jac(lambda X: f(X, X_ref, z_ref, False), X0)
 
         z = tangent_predictor(J, z_ref, X_ref)
@@ -393,26 +406,7 @@ def hb_duffing(harmonics, omega_start, omega_end, ds=.01):
     fig = px.line(x=X_mat[-1, :iteration], y=X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2, title="Duffing Oscillator")
     fig.show()
 
-    # Plot the result in time domain
-    # t_final = 100.0
-    # dt = 0.1
-    # vec_t = np.arange(0, t_final + dt, dt)
-    # sol = np.zeros((3*dofs, vec_t.shape[0])) # u, v, a
-    # residual = np.zeros(vec_t.shape[0])
-    # uf_sol_ = xf_sol.x.reshape(samples, dofs).T
-    # # uf_sol_ = xf0.reshape(samples, dofs).T
-    # for i, t in enumerate(vec_t):
-    #     b, db, ddb = create_fourier_basis(omega, harmonics, t)
-    #     sol[0:dofs, i] = uf_sol_ @ b
-    #     sol[dofs:2*dofs, i] = uf_sol_ @ db
-    #     sol[2*dofs:3*dofs, i] = uf_sol_ @ ddb
-
-    #     residual[i] = (M @ sol[2*dofs:3*dofs, i] + C @ sol[1*dofs:2*dofs, i] + K @ sol[0*dofs:1*dofs, i] - nonlinear_func(t, sol[0*dofs:1*dofs, i], sol[1*dofs:2*dofs, i]))[0]
-
-    # fig = px.line(x=vec_t, y=sol[0, :], title="Duffing Oscillator")
-    # fig.add_trace(go.Scattergl(x=vec_t, y=residual, mode='lines', name='Residual'))
-
-    # fig.show()
+    plot_hb_timedomain(100.0, 0.1, dofs, X_mat[:-1, 3], X_mat[-1, 3], harmonics)
 
 if __name__ == "__main__":
     # params
@@ -423,7 +417,7 @@ if __name__ == "__main__":
     # unknowns = 2 * harmonics + 1
     # period = 2.0 * np.pi / omega0
     # t_start = 3*period
-    # t, u = integrate_duffing(dt)
+    t, u = integrate_duffing(300.0, 0.1)
     # samples = np.zeros((u.shape[0], unknowns))
     # xf0 = np.zeros_like(samples)
 
@@ -441,5 +435,5 @@ if __name__ == "__main__":
     harmonics = 3
     omega_start = 0.5
     omega_end = 1.6
-    ds = 0.1
+    ds = 0.05
     hb_duffing(harmonics, omega_start, omega_end, ds)
