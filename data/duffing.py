@@ -2,52 +2,90 @@ import numpy as np
 import scipy as sp
 import plotly.express as px
 
+np.set_printoptions(formatter={'float': '{:.4e}'.format}) # format shortE
+
 def create_dft_matrix(omega, harmonics=3):
+    unknowns = 2 * harmonics + 1
+    period = 2.0 * np.pi / omega
+
+    dft = np.zeros((unknowns, unknowns))
+
+    scaling0 = 1 / unknowns
+    scaling = 2 / unknowns
+    
+    for i in range(unknowns): # first col
+        dft[i, 0] = scaling0
+    for j in range(1, unknowns, 2):
+        k = (j + 1) / 2
+        for i in range(0, unknowns):
+            tn = (i / unknowns) * period
+            dft[i, j] = np.cos(omega * tn * k) * scaling
+            dft[i, j + 1] = np.sin(omega * tn * k) * scaling
+
+    return dft
+
+def create_unscaled_dft_matrix(omega, harmonics):
     unknowns = 2 * harmonics + 1
     period = 2.0 * np.pi / omega
 
     dft = np.zeros((unknowns, unknowns))
     ddft = np.zeros((unknowns, unknowns))
     dddft = np.zeros((unknowns, unknowns))
-
-    sqrt_unknowns = 1 / np.sqrt(unknowns)
-    sqrt_unknowns_2 = np.sqrt(2 / unknowns)
     
     for i in range(unknowns): # first col
-        dft[i, 0] = sqrt_unknowns
+        dft[i, 0] = 1
         ddft[i, 0] = 0
         dddft[i, 0] = 0
     for j in range(1, unknowns, 2):
         k = (j + 1) / 2
         for i in range(0, unknowns):
             tn = (i / unknowns) * period
-            dft[i, j] = np.cos(omega * tn * k) * sqrt_unknowns_2
-            dft[i, j + 1] = np.sin(omega * tn * k) * sqrt_unknowns_2
-            ddft[i, j] = - omega * k * np.sin(omega * tn * k) * sqrt_unknowns_2
-            ddft[i, j + 1] = omega * k * np.cos(omega * tn * k) * sqrt_unknowns_2
-            dddft[i, j] = - (omega * k)**2 * np.cos(omega * tn * k) * sqrt_unknowns_2
-            dddft[i, j + 1] = - (omega * k)**2 * np.sin(omega * tn * k) * sqrt_unknowns_2
+            dft[i, j] = np.cos(omega * tn * k)
+            dft[i, j + 1] = np.sin(omega * tn * k)
+            ddft[i, j] = - omega * k * np.sin(omega * tn * k)
+            ddft[i, j + 1] = omega * k * np.cos(omega * tn * k)
+            dddft[i, j] = - (omega * k)**2 * np.cos(omega * tn * k)
+            dddft[i, j + 1] = - (omega * k)**2 * np.sin(omega * tn * k)
 
     return dft, ddft, dddft
+
+# def create_fourier_basis(omega, harmonics, t):
+#     unknowns = 2 * harmonics + 1
+#     basis = np.zeros((unknowns))
+#     dbasis = np.zeros((unknowns))
+#     ddbasis = np.zeros((unknowns))
+#     sqrt_unknowns = 1 / np.sqrt(unknowns)
+#     sqrt_unknowns_2 = np.sqrt(2 / unknowns)
+#     basis[0] = sqrt_unknowns
+#     dbasis[0] = 0
+#     ddbasis[0] = 0
+#     for i in range(harmonics):
+#         k = float(i+1)
+#         basis[2 * i + 1] = sqrt_unknowns_2 * np.cos(omega * t * k)
+#         basis[2 * i + 2] = sqrt_unknowns_2 * np.sin(omega * t * k)
+#         dbasis[2 * i + 1] = - sqrt_unknowns_2 * omega * k * np.sin(omega * t * k)
+#         dbasis[2 * i + 2] = sqrt_unknowns_2 * omega * k * np.cos(omega * t * k)
+#         ddbasis[2 * i + 1] = - sqrt_unknowns_2 * (omega * k)**2 * np.cos(omega * t * k)
+#         ddbasis[2 * i + 2] = - sqrt_unknowns_2 * (omega * k)**2 * np.sin(omega * t * k)
+
+#     return basis, dbasis, ddbasis
 
 def create_fourier_basis(omega, harmonics, t):
     unknowns = 2 * harmonics + 1
     basis = np.zeros((unknowns))
     dbasis = np.zeros((unknowns))
     ddbasis = np.zeros((unknowns))
-    sqrt_unknowns = 1 / np.sqrt(unknowns)
-    sqrt_unknowns_2 = np.sqrt(2 / unknowns)
-    basis[0] = sqrt_unknowns
+    basis[0] = 1
     dbasis[0] = 0
     ddbasis[0] = 0
     for i in range(harmonics):
         k = float(i+1)
-        basis[2 * i + 1] = sqrt_unknowns_2 * np.cos(omega * t * k)
-        basis[2 * i + 2] = sqrt_unknowns_2 * np.sin(omega * t * k)
-        dbasis[2 * i + 1] = - sqrt_unknowns_2 * omega * k * np.sin(omega * t * k)
-        dbasis[2 * i + 2] = sqrt_unknowns_2 * omega * k * np.cos(omega * t * k)
-        ddbasis[2 * i + 1] = - sqrt_unknowns_2 * (omega * k)**2 * np.cos(omega * t * k)
-        ddbasis[2 * i + 2] = - sqrt_unknowns_2 * (omega * k)**2 * np.sin(omega * t * k)
+        basis[2 * i + 1] = np.cos(omega * t * k)
+        basis[2 * i + 2] = np.sin(omega * t * k)
+        dbasis[2 * i + 1] = - omega * k * np.sin(omega * t * k)
+        dbasis[2 * i + 2] = omega * k * np.cos(omega * t * k)
+        ddbasis[2 * i + 1] = - (omega * k)**2 * np.cos(omega * t * k)
+        ddbasis[2 * i + 2] = - (omega * k)**2 * np.sin(omega * t * k)
 
     return basis, dbasis, ddbasis
     
@@ -180,22 +218,22 @@ def nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, d
     
 
 # NLvib params
-P = 0.18
-mu = 1
-zeta = 0.05
-kappa = 1
-gamma = 0.1
+# P = 0.18
+# mu = 1
+# zeta = 0.05
+# kappa = 1
+# gamma = 0.1
 
 # Wikipedia params
-# P = 0.29
-# mu = 1
-# zeta = 0.3
-# kappa = -1.0
-# gamma = 1.0
+P = 0.29
+mu = 1
+zeta = 0.3
+kappa = -1.0
+gamma = 1.0
 
 def create_motion_system():
     # NLvib params
-    omega = 0.1
+    omega = 0.2
     def nonlinear_func(t, u, v):
         return np.array([P * np.cos(omega * t) - gamma * u[0]**3])
     
@@ -222,47 +260,45 @@ def integrate_duffing(t_final, dt):
     return t, u
 
 # TODO: improve this disgusting function
-# def tangent_predictor(J, zref, Xref):
-#     """Compute tangent vector using Seydel's pivot strategy."""
-#     # 1. Determine pivot indices
-#     with np.errstate(divide='ignore', invalid='ignore'):
-#         rel_changes = np.abs(zref) / np.maximum(np.abs(Xref), 1e-4)
-#     kk = np.argsort(-rel_changes)  # Descending order
+def tangent_predictor(J, zref, Xref):
+    """Compute tangent vector using Seydel's pivot strategy."""
+    # 1. Determine pivot indices
+    with np.errstate(divide='ignore', invalid='ignore'):
+        rel_changes = np.abs(zref) / np.maximum(np.abs(Xref), 1e-4)
+    kk = np.argsort(-rel_changes)  # Descending order
     
-#     # 2. Try different pivots until success
-#     ztmp = None
-#     for k in kk:
-#         # 3. Create constraint vector
-#         c = np.zeros_like(Xref)
-#         c[k] = 1.0
+    # 2. Try different pivots until success
+    ztmp = None
+    for k in kk:
+        # 3. Create constraint vector
+        c = np.zeros_like(Xref)
+        c[k] = 1.0
         
-#         # 4. Build extended system
-#         J_red = J[:-1, :]  # Exclude last row (parameter derivative)
-#         A = np.vstack([J_red, c])
-#         b = np.concatenate([np.zeros(J_red.shape[0]), [1.0]])
+        # 4. Build extended system
+        J_red = J[:-1, :]  # Exclude last row (parameter derivative)
+        A = np.vstack([J_red, c])
+        b = np.concatenate([np.zeros(J_red.shape[0]), [1.0]])
         
-#         # 5. Solve with least-squares for numerical stability
-#         ztmp, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+        # 5. Solve with least-squares for numerical stability
+        ztmp, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
         
-#         if not np.any(np.isnan(ztmp)):
-#             break
+        if not np.any(np.isnan(ztmp)):
+            break
     
-#     # 6. Normalize tangent vector
-#     z = ztmp / np.linalg.norm(ztmp) # length 1 vector
-#     print(z)
-#     return z
+    # 6. Normalize tangent vector
+    z = ztmp / np.linalg.norm(ztmp) # length 1 vector
+    return z
 
 # def tangent_predictor(J, zref, Xref):
 #     Q, R = np.linalg.qr(J.T)
 #     z = Q[:, -1]
 #     return z / np.linalg.norm(z)
 
-def tangent_predictor(J, zref, Xref):
-    _, _, vt = np.linalg.svd(J[:-1, :], full_matrices=True)
-    z = vt[-1, :]
-    z = z / np.linalg.norm(z)
-    print(z)
-    return z
+# def tangent_predictor(J, zref, Xref):
+#     _, _, vt = np.linalg.svd(J[:-1, :], full_matrices=True)
+#     z = vt[-1, :]
+#     z = z / np.linalg.norm(z)
+#     return z
 
 EPS = np.finfo(np.float64).eps
 def cd2_h(x0):
@@ -312,45 +348,125 @@ def plot_hb_timedomain(t_final, dt, dofs, X, omega, harmonics):
 
     fig.show()
 
-def hb_duffing(harmonics, omega_start, omega_end, ds=.01):
-    M, C, K, u0, v0, _, hb_nl_forces = create_motion_system()
-    samples = 2*harmonics+1
+
+def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
+    ext_res = np.zeros_like(X)
+    ext_res[:-1] = residual_func(X)
+    if init: # local parametrization
+        ext_res[-1] = np.dot(z_ref, X - X_ref)
+    else: # arc-length parametrization
+        ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
+    return ext_res
+
+def hb_duffing(H, omega_start, omega_end, ds=.01):
+    M, C, K, u0, _, _, hb_nl_forces = create_motion_system() # Mxdd + Cxd + Kx = nl_forces
+    samples = 2*H+1
     dofs = u0.shape[0] # only 1 dof for now
+    
+    # Full AFT version (doesnt converge for high H)
+    # def duffing_residual(X):
+    #     # Extract the excitation frequency and Fourier coefficients from X.
+    #     Om = X[-1]
+    #     X0 = X[0]
+    #     # a_j and b_j are stored interleaved in X.
+    #     a_coeff = X[1:-1:2]   # a1, a2, ..., a_H
+    #     b_coeff = X[2:-1:2]   # b1, b2, ..., b_H
 
-    # Extended residual function
-    # TODO: separate the continuation part
-    def f(X, X_ref, z_ref, init: bool): # Xf is the full state vector
-        uf = X[:-1].reshape(samples, dofs).T # Matrix where (i, j) is the j-th fourier coeff for i-th dof
-        residual = np.zeros_like(X)
-        R = np.zeros_like(uf)
-        omega = X[-1]
-        d, dd, ddd = create_dft_matrix(omega, harmonics)
+    #     # Define one period and the time discretization.
+    #     T = 2 * np.pi / Om      # period
+    #     dt = T / N              # time step
+    #     n = np.arange(N)
+    #     t = n * dt              # time vector, evenly spaced in [0, T)
 
-        # pos, vel and accel at time samples using IDFT
-        u = uf @ d.T
-        v = uf @ dd.T
-        a = uf @ ddd.T
+    #     # Synthesize the response q(t) from the sine-cosine representation.
+    #     # For harmonic j, the phase is 2*pi*j*n/N since:
+    #     #    j*Om*t = j*Om*(n*dt) = j*Om*(n*T/N) = 2*pi*j*n/N.
+    #     j_array = np.arange(1, H+1)  # harmonic indices 1,...,H
+    #     # Create a (N x H) array of phases.
+    #     angles = 2 * np.pi * np.outer(n, j_array) / N  
+    #     # q(t) = X0 + sum_{j=1}^H [ a_j*cos(angle) + b_j*sin(angle) ].
+    #     q = X0 + np.dot(np.cos(angles), a_coeff) + np.dot(np.sin(angles), b_coeff)
 
-        # Alternating frequency-time scheme
+    #     # Compute derivatives of q(t) using FFT differentiation.
+    #     # First, compute the FFT of q(t). (No scaling is applied here.)
+    #     Q_fft = np.fft.fft(q)
+    #     # Frequency vector in Hz: np.fft.fftfreq returns cycles per unit time.
+    #     freqs = np.fft.fftfreq(N, d=dt)
+    #     # Angular frequencies (rad/s).
+    #     w = 2 * np.pi * freqs  
+    #     # Compute q̇ and q̈ by multiplying the FFT of q with 1j*w and -w^2, respectively.
+    #     q_dot = np.fft.ifft(1j * w * Q_fft).real
+    #     q_ddot = np.fft.ifft(- (w**2) * Q_fft).real
+
+    #     # Compute the linear force in the time domain.
+    #     F_lin = mu * q_ddot + zeta * q_dot + kappa * q
+
+    #     # Compute the nonlinear (Duffing) force.
+    #     F_nl = gamma * q**3
+
+    #     # Evaluate the external force at the time instants using the provided function.
+    #     # f_ext_func must accept (t, Om) and return an array of shape (N,).
+    #     f_ext = P * np.cos(Om * t)
+
+    #     # Form the total residual in time (the dynamic equilibrium).
+    #     R_time = F_lin + F_nl - f_ext
+
+    #     # Transform the time–domain residual into Fourier space via FFT.
+    #     R_fft = np.fft.fft(R_time)
+
+    #     # Convert the FFT coefficients into sine–cosine representation.
+    #     # Note on normalization:
+    #     #   - The DC term is R0 = (1/N)*R_fft[0] (and is real).
+    #     #   - For j>=1: a_j = (2/N)*Re{R_fft[j]}, and b_j = -(2/N)*Im{R_fft[j]}.
+    #     R0 = R_fft[0].real / N
+    #     a_R = np.empty(H)
+    #     b_R = np.empty(H)
+    #     for j in range(1, H+1):
+    #         a_R[j-1] = 2 * R_fft[j].real / N
+    #         b_R[j-1] = -2 * R_fft[j].imag / N
+
+    #     # Concatenate into one residual vector.
+    #     R = np.concatenate(([R0], a_R, b_R))
+    #     return R
+
+    N = 2 * H + 1 # sampling points
+    def duffing_residual(X):
+        """
+        X[:-1]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
+        where Xx is [xx_0, xx_1, ... xx_M] with M = dofs
+        X[-1]: Fourier series base frequency
+        """
+        Om = X[-1]
+        R_lin = np.zeros(X.shape[0]-1) # we exclude the continuation parameter equation
+
+        # Compute the linear forces in Fourier domain
+        R_lin[0:dofs] = K @ X[0:dofs]
+        for k in range(1, H+1):
+            i = (2*k-1) * dofs
+            R_lin[i:i+dofs] = (K - (k*Om)**2 * M) @ X[i:i+dofs] + k * Om * C @ X[i+dofs:i+2*dofs]
+            R_lin[i+dofs:i+2*dofs] = - k * Om * C @ X[i:i+dofs] + (K - (k*Om)**2 * M) @ X[i+dofs:i+2*dofs]
+
+        dft, ddft, _ = create_unscaled_dft_matrix(Om, H)
+        dftt = create_dft_matrix(Om, H)
+        qf = X[:-1].reshape(samples, dofs).T
+        R_nl = np.zeros_like(qf)
+        q_ = qf @ dft.T
+        qd_ = qf @ ddft.T
         for s in range(samples):
-            period = 2.0 * np.pi / omega
+            period = 2.0 * np.pi / Om
             t_n = (s / samples) * period
-            R[:, s] = M @ a[:, s] + C @ v[:, s] + K @ u[:, s] - hb_nl_forces(t_n, u[:, s], v[:, s], omega)
+            R_nl[:, s] = - hb_nl_forces(t_n, q_[:, s], qd_[:, s], Om)
 
-        R = R @ d # DFT
-        residual[:-1] = R.T.reshape(-1)
+        R_nl = R_nl @ dftt # forward scaling
+        R_nl = R_nl.T.reshape(-1)
 
-        if init: # local parametrization
-            residual[-1] = np.dot(z_ref, X - X_ref)
-        else: # arc-length parametrization
-            residual[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
-
-        return residual
+        return R_lin + R_nl
     
     # Duffing initial conditions from NLvib
     x0 = np.zeros(dofs*(2*harmonics+1))
     q_real = -(omega_start**2) * mu + kappa
     q_imag = omega_start*zeta
+
     x0[1] = P*q_real / (q_real**2 + q_imag**2)
     x0[2] = P*q_imag / (q_real**2 + q_imag**2)
 
@@ -361,9 +477,15 @@ def hb_duffing(harmonics, omega_start, omega_end, ds=.01):
     
     # Continuation framework
     max_continuation_steps = 2000
+    ds_min = 1e-5
+    ds_max = (omega_end - omega_start) / 5
+    target_prediction_error = 1e-2 # l2 norm
+
     if omega_end > omega_start:
+        param_direction = 1
         direction = 1
     else:
+        param_direction = -1
         direction = -1
 
     X_ref = X0.copy()
@@ -371,42 +493,65 @@ def hb_duffing(harmonics, omega_start, omega_end, ds=.01):
     z_ref = np.zeros_like(X0)
     z_ref[-1] = 1
 
-    Xp = sp.optimize.root(f, X0, args=(X_ref, z_ref, True)) # initial step
+    _ = duffing_residual(X0)
+
+    Xp = sp.optimize.root(extended_residual, X0, args=(X_ref, z_ref, duffing_residual,True)) # initial step
+    if not Xp.success:
+        print("Initial step failed, exiting")
+        return
     # X0[:-1] = Xp.x[:-1] # TODO: check if we cant just copy the whole thing
     X0 = Xp.x.copy()
+
+    # [real(Fnl_ce(H+1));real(Fnl_ce(H+2: end));-imag(Fnl_ce(H+2: end))] * 2 * sqrt((2*H+1)/2)
 
     X_mat = np.zeros((X0.shape[0], max_continuation_steps))
     X_mat[:, 0] = X0
 
     iteration = 1
     while iteration < max_continuation_steps:
-        print(X0[-1])
-        J = numerical_jac(lambda X: f(X, X_ref, z_ref, False), X0)
+        J = numerical_jac(lambda X: extended_residual(X, X_ref, z_ref, duffing_residual, False), X0)
 
         z = tangent_predictor(J, z_ref, X_ref)
 
         # Take a step in the tangent direction ensuring to stay along the solution path
-        if (iteration > 1) and np.dot(X0-X_old, ds*z) < 0:
-            Xp = X0 - direction*ds*z
-        else:
-            Xp = X0 + direction*ds*z
+        if (iteration > 1) and np.dot(X0-X_old, direction*ds*z) < 0:
+            direction *= -1
 
         # Parametrizaton params
         X_ref = X0.copy()
         z_ref = z.copy()
-        Xtmp = sp.optimize.root(f, Xp, args=(X_ref, z_ref, False))
+        while 1:
+            Xp = X0 + direction*ds*z
+            Xtmp = sp.optimize.root(extended_residual, Xp, args=(X_ref, z_ref, duffing_residual, False))
+            if (Xtmp.success):
+                break
+            else:
+                print("Solver failed, trying again")
+                ds = ds * 0.5
+                if (ds < ds_min):
+                    print("Continuation failed, exiting")
+                    return 
+                
         X_old = X0.copy()
         X0 = Xtmp.x.copy()
+
+        # step control
+        e = np.linalg.norm(Xp - X0)
+        ds = max(min(ds * np.sqrt(target_prediction_error / e), ds_max), ds_min)
+
+        print(f"omega: {X0[-1]:.2f}, ds: {ds:.2e}, nfev: {Xtmp.nfev}")
+
+        # history
         X_mat[:, iteration] = X0
         iteration += 1
-        if (X0[-1] - omega_end) * direction >= 0:
+        if (X0[-1] - omega_end) * param_direction >= 0:
             print("Continuation reached the end")
             break
     
-    fig = px.line(x=X_mat[-1, :iteration], y=X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2, title="Duffing Oscillator")
+    fig = px.scatter(x=X_mat[-1, :iteration], y=np.sqrt(X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2), title="Duffing Oscillator")
     fig.show()
 
-    plot_hb_timedomain(100.0, 0.1, dofs, X_mat[:-1, 3], X_mat[-1, 3], harmonics)
+    plot_hb_timedomain(100.0, 0.1, dofs, X_mat[:-1, 0], X_mat[-1, 0], harmonics)
 
 if __name__ == "__main__":
     # params
@@ -417,7 +562,9 @@ if __name__ == "__main__":
     # unknowns = 2 * harmonics + 1
     # period = 2.0 * np.pi / omega0
     # t_start = 3*period
+
     t, u = integrate_duffing(300.0, 0.1)
+
     # samples = np.zeros((u.shape[0], unknowns))
     # xf0 = np.zeros_like(samples)
 
@@ -432,8 +579,8 @@ if __name__ == "__main__":
     # xf0 = samples @ dft
 
     # hb_duffing(harmonics, xf0.T.reshape(-1), omega0)
-    harmonics = 3
-    omega_start = 0.5
-    omega_end = 1.6
+    harmonics = 7
+    omega_start = 0.1
+    omega_end = 0.5
     ds = 0.05
     hb_duffing(harmonics, omega_start, omega_end, ds)
