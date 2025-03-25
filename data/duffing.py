@@ -49,6 +49,16 @@ def create_unscaled_dft_matrix(omega, harmonics):
 
     return dft, ddft, dddft
 
+def create_lanczos_filter(H, m=1):
+    L = np.zeros(2*H+1)
+    L[0] = 1
+    def sinc(x): return np.sin(np.pi * x) / (np.pi*x)
+    for i in range(1, H+1):
+        xi = i / (H+1)
+        L[2*i-1] = sinc(xi) ** m
+        L[2*i] = L[2*i-1]
+    return L
+
 # def create_fourier_basis(omega, harmonics, t):
 #     unknowns = 2 * harmonics + 1
 #     basis = np.zeros((unknowns))
@@ -223,17 +233,26 @@ def nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, d
 # zeta = 0.05
 # kappa = 1
 # gamma = 0.1
+# gamma2 = 0.0
 
 # Wikipedia params
-P = 0.29
-mu = 1
-zeta = 0.3
-kappa = -1.0
-gamma = 1.0
+# P = 0.29
+# mu = 1
+# zeta = 0.3
+# kappa = -1.0
+# gamma = 1.0
+# gamma2 = 0.0
 
-def create_motion_system():
+# Krack
+P = 1.0
+mu = 1.0
+zeta = 0.0063
+kappa = 1.0
+gamma = 0.1
+gamma2 = 0.1
+
+def create_motion_system(omega=0.5):
     # NLvib params
-    omega = 0.2
     def nonlinear_func(t, u, v):
         return np.array([P * np.cos(omega * t) - gamma * u[0]**3])
     
@@ -249,13 +268,10 @@ def create_motion_system():
 
     return M, C, K, u0, v0, nonlinear_func, hb_nl_forces
 
-def integrate_duffing(t_final, dt):
-    M, C, K, u0, v0, nonlinear_func, _ = create_motion_system()
+def integrate_duffing(t_final, dt, om_s):
+    M, C, K, u0, v0, nonlinear_func, _ = create_motion_system(om_s)
     t, u, v, a = nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
     # t, u, v, a = nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
-
-    fig = px.line(x=t, y=u[0, :], title="Duffing Oscillator")
-    fig.show()
 
     return t, u
 
@@ -358,7 +374,7 @@ def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
         ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
     return ext_res
 
-def hb_duffing(H, omega_start, omega_end, ds=.01):
+def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
     M, C, K, u0, _, _, hb_nl_forces = create_motion_system() # Mxdd + Cxd + Kx = nl_forces
     samples = 2*H+1
     dofs = u0.shape[0] # only 1 dof for now
@@ -446,34 +462,42 @@ def hb_duffing(H, omega_start, omega_end, ds=.01):
             R_lin[i:i+dofs] = (K - (k*Om)**2 * M) @ X[i:i+dofs] + k * Om * C @ X[i+dofs:i+2*dofs]
             R_lin[i+dofs:i+2*dofs] = - k * Om * C @ X[i:i+dofs] + (K - (k*Om)**2 * M) @ X[i+dofs:i+2*dofs]
 
-        dft, ddft, _ = create_unscaled_dft_matrix(Om, H)
-        dftt = create_dft_matrix(Om, H)
+        # AFT scheme
+        idft, iddft, _ = create_unscaled_dft_matrix(Om, H) # unscaled
+        dft = create_dft_matrix(Om, H) # scaled
         qf = X[:-1].reshape(samples, dofs).T
         R_nl = np.zeros_like(qf)
-        q_ = qf @ dft.T
-        qd_ = qf @ ddft.T
+        q_ = qf @ idft.T
+        qd_ = qf @ iddft.T
+
         for s in range(samples):
             period = 2.0 * np.pi / Om
             t_n = (s / samples) * period
             R_nl[:, s] = - hb_nl_forces(t_n, q_[:, s], qd_[:, s], Om)
 
-        R_nl = R_nl @ dftt # forward scaling
+        R_nl = R_nl @ dft # forward scaling
+        L = create_lanczos_filter(H, 1)
+        for i in range(R_nl.shape[0]):
+            R_nl[i, :] *= L # element-wise multiplication
         R_nl = R_nl.T.reshape(-1)
 
         return R_lin + R_nl
     
-    # Duffing initial conditions from NLvib
-    x0 = np.zeros(dofs*(2*harmonics+1))
-    q_real = -(omega_start**2) * mu + kappa
-    q_imag = omega_start*zeta
+    if X0 is None:
+        # Duffing initial conditions from NLvib
+        x0 = np.zeros(dofs*(2*H+1))
+        q_real = -(omega_start**2) * mu + kappa
+        q_imag = omega_start*zeta
 
-    x0[1] = P*q_real / (q_real**2 + q_imag**2)
-    x0[2] = P*q_imag / (q_real**2 + q_imag**2)
+        x0[1] = P*q_real / (q_real**2 + q_imag**2)
+        x0[2] = P*q_imag / (q_real**2 + q_imag**2)
 
-    # Full state initial conditions
-    X0 = np.zeros(dofs*(2*harmonics+1) + 1)
-    X0[:-1] = x0
-    X0[-1] = omega_start
+        # Full state initial conditions
+        X0 = np.zeros(dofs*(2*H+1) + 1)
+        X0[:-1] = x0
+        X0[-1] = omega_start
+        # print(X0)
+        # plot_hb_timedomain(100.0, 0.1, 1, X0[:-1], X0[-1], H)
     
     # Continuation framework
     max_continuation_steps = 2000
@@ -551,36 +575,107 @@ def hb_duffing(H, omega_start, omega_end, ds=.01):
     fig = px.scatter(x=X_mat[-1, :iteration], y=np.sqrt(X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2), title="Duffing Oscillator")
     fig.show()
 
-    plot_hb_timedomain(100.0, 0.1, dofs, X_mat[:-1, 0], X_mat[-1, 0], harmonics)
+    plot_hb_timedomain(100.0, 0.1, dofs, X_mat[:-1, 0], X_mat[-1, 0], H)
 
 if __name__ == "__main__":
-    # params
-    # harmonics = 10
-    # omega0 = 0.3
-    # dt = 0.01
-    # # dependent vars
-    # unknowns = 2 * harmonics + 1
-    # period = 2.0 * np.pi / omega0
-    # t_start = 3*period
-
-    t, u = integrate_duffing(300.0, 0.1)
-
-    # samples = np.zeros((u.shape[0], unknowns))
-    # xf0 = np.zeros_like(samples)
-
-    # # sampling
-    # for i in range(0, unknowns):
-    #     tn = t_start + (i / unknowns) * period
-    #     samples[:, i] = u[:, int(round(tn / dt))]
-    #     print(f"tn: {tn}")
-    #     print(f"t[int(tn / dt)]: {t[int(round(tn / dt))]}")
-
-    # dft, _, _ = create_dft_matrix(omega0, harmonics)
-    # xf0 = samples @ dft
-
-    # hb_duffing(harmonics, xf0.T.reshape(-1), omega0)
-    harmonics = 7
-    omega_start = 0.1
+    # HB Continuation
+    H = 5
+    omega_start = 0.356
     omega_end = 0.5
     ds = 0.05
-    hb_duffing(harmonics, omega_start, omega_end, ds)
+    # Time integration
+    t_final = 2000.0
+    dt = 0.1
+
+    t, u = integrate_duffing(t_final, dt, omega_start)
+
+    # 1. Extract the last 25% of the signal
+    N = len(t)
+    idx_start = int(0.75 * N)
+    t_tr = t[idx_start:]
+    u_tr = u[0, idx_start:]
+    N_tr = len(t_tr)
+
+    fig = px.line(x=t_tr, y=u_tr, title="Duffing Oscillator Time integration")
+    fig.show()
+
+    # # 2. Compute the FFT of u_tr
+    # U_fft = np.fft.fft(u_tr)
+    # freqs = np.fft.fftfreq(N_tr, dt)
+
+    # # 3. Identify the fundamental frequency from the positive frequencies (skip DC)
+    # pos = freqs > 0
+    # f_pos = freqs[pos]
+    # U_pos = U_fft[pos]
+    # amp = np.abs(U_pos)
+    # i0 = np.argmax(amp)
+    # f0 = f_pos[i0]
+    # omega0 = 2 * np.pi * f0
+    # print("Fundamental frequency = {:.4f} Hz, ω₀ = {:.4f}".format(f0, omega0))
+
+    # # 4. Extract Fourier coefficients:
+    # a0 = np.real(U_fft[0]) / N_tr
+    # a_coeffs = np.zeros(H+1)  # a0,..., aH
+    # b_coeffs = np.zeros(H+1)  # b0 is not used.
+    # a_coeffs[0] = a0
+
+    # for h in range(1, H+1):
+    #     target = h * f0
+    #     # find index in positive frequencies closest to target
+    #     i = np.argmin(np.abs(f_pos - target))
+    #     Y = U_pos[i]
+    #     a_coeffs[h] = 2 * np.real(Y) / N_tr
+    #     b_coeffs[h] = -2 * np.imag(Y) / N_tr
+
+    # # 5. Assemble the initial guess vector: [a0, a1,...,aH, b1,...,bH] (total length 1+2H)
+    # X0_list = [a_coeffs[0]]
+    # for h in range(1, H + 1):
+    #     X0_list.append(a_coeffs[h])
+    #     X0_list.append(b_coeffs[h])
+    # X0_list.append(omega0)
+    # X0 = np.array(X0_list)
+    # print(X0)
+
+    w = np.hanning(N_tr)         # Create the Hann window of the same length as u_tr
+    u_tr_windowed = u_tr * w     # Multiply the signal by the window
+
+    U_fft = np.fft.fft(u_tr_windowed)
+    norm_factor = np.sum(w)
+    freqs = np.fft.fftfreq(N_tr, dt)
+
+    pos = freqs > 0
+    f_pos = freqs[pos]
+    U_pos = U_fft[pos]
+    amp = np.abs(U_pos)
+    i0 = np.argmax(amp)
+    f0 = f_pos[i0]
+    omega0 = 2*np.pi * f0
+    print("Fundamental frequency = {:.4f} Hz, ω₀ = {:.4f}".format(f0, omega0))
+
+    a0 = np.real(U_fft[0]) / norm_factor
+    a_coeffs = np.zeros(H+1)  # a0,..., aH; a0 has been computed already.
+    b_coeffs = np.zeros(H+1)  # here b_coeffs[0] is not used.
+    a_coeffs[0] = a0
+
+    for h in range(1, H+1):
+        target = h * f0
+        # Find index among positive frequencies closest to target
+        i = np.argmin(np.abs(f_pos - target))
+        Y = U_pos[i]
+        # Multiply by 2 as usual since you’re using a one-sided spectrum.
+        a_coeffs[h] = 2 * np.real(Y) / norm_factor
+        b_coeffs[h] = -2 * np.imag(Y) / norm_factor
+
+    X0_list = [a_coeffs[0]]
+    for h in range(1, H + 1):
+        X0_list.append(a_coeffs[h])
+        X0_list.append(b_coeffs[h])
+    X0_list.append(omega0)
+    X0 = np.array(X0_list)
+
+    assert X0.shape[0] == (2*H+1)+1
+    print("Initial guess X0:", X0)
+
+    plot_hb_timedomain(100.0, 0.1, 1, X0[:-1], X0[-1], H)
+
+    hb_duffing(H, omega_start, omega_end, ds, X0)
