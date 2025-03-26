@@ -1,84 +1,24 @@
 import numpy as np
 import scipy as sp
 import plotly.express as px
+import os
 
 np.set_printoptions(formatter={'float': '{:.4e}'.format}) # format shortE
 
-def create_dft_matrix(omega, harmonics=3):
-    unknowns = 2 * harmonics + 1
-    period = 2.0 * np.pi / omega
+def getenv(key):
+    var = os.getenv(key)
+    if int(var) == 0:
+        return False
+    return True
 
-    dft = np.zeros((unknowns, unknowns))
-
-    scaling0 = 1 / unknowns
-    scaling = 2 / unknowns
-    
-    for i in range(unknowns): # first col
-        dft[i, 0] = scaling0
-    for j in range(1, unknowns, 2):
-        k = (j + 1) / 2
-        for i in range(0, unknowns):
-            tn = (i / unknowns) * period
-            dft[i, j] = np.cos(omega * tn * k) * scaling
-            dft[i, j + 1] = np.sin(omega * tn * k) * scaling
-
-    return dft
-
-def create_unscaled_dft_matrix(omega, harmonics):
-    unknowns = 2 * harmonics + 1
-    period = 2.0 * np.pi / omega
-
-    dft = np.zeros((unknowns, unknowns))
-    ddft = np.zeros((unknowns, unknowns))
-    dddft = np.zeros((unknowns, unknowns))
-    
-    for i in range(unknowns): # first col
-        dft[i, 0] = 1
-        ddft[i, 0] = 0
-        dddft[i, 0] = 0
-    for j in range(1, unknowns, 2):
-        k = (j + 1) / 2
-        for i in range(0, unknowns):
-            tn = (i / unknowns) * period
-            dft[i, j] = np.cos(omega * tn * k)
-            dft[i, j + 1] = np.sin(omega * tn * k)
-            ddft[i, j] = - omega * k * np.sin(omega * tn * k)
-            ddft[i, j + 1] = omega * k * np.cos(omega * tn * k)
-            dddft[i, j] = - (omega * k)**2 * np.cos(omega * tn * k)
-            dddft[i, j + 1] = - (omega * k)**2 * np.sin(omega * tn * k)
-
-    return dft, ddft, dddft
-
-def create_lanczos_filter(H, m=1):
-    L = np.zeros(2*H+1)
+def create_lanczos_filter(N, m=1):
+    L = np.zeros(N)
     L[0] = 1
     def sinc(x): return np.sin(np.pi * x) / (np.pi*x)
-    for i in range(1, H+1):
-        xi = i / (H+1)
-        L[2*i-1] = sinc(xi) ** m
-        L[2*i] = L[2*i-1]
+    for i in range(1, N+1):
+        xi = i / (N+1)
+        L[i-1] = sinc(xi) ** m
     return L
-
-# def create_fourier_basis(omega, harmonics, t):
-#     unknowns = 2 * harmonics + 1
-#     basis = np.zeros((unknowns))
-#     dbasis = np.zeros((unknowns))
-#     ddbasis = np.zeros((unknowns))
-#     sqrt_unknowns = 1 / np.sqrt(unknowns)
-#     sqrt_unknowns_2 = np.sqrt(2 / unknowns)
-#     basis[0] = sqrt_unknowns
-#     dbasis[0] = 0
-#     ddbasis[0] = 0
-#     for i in range(harmonics):
-#         k = float(i+1)
-#         basis[2 * i + 1] = sqrt_unknowns_2 * np.cos(omega * t * k)
-#         basis[2 * i + 2] = sqrt_unknowns_2 * np.sin(omega * t * k)
-#         dbasis[2 * i + 1] = - sqrt_unknowns_2 * omega * k * np.sin(omega * t * k)
-#         dbasis[2 * i + 2] = sqrt_unknowns_2 * omega * k * np.cos(omega * t * k)
-#         ddbasis[2 * i + 1] = - sqrt_unknowns_2 * (omega * k)**2 * np.cos(omega * t * k)
-#         ddbasis[2 * i + 2] = - sqrt_unknowns_2 * (omega * k)**2 * np.sin(omega * t * k)
-
-#     return basis, dbasis, ddbasis
 
 def create_fourier_basis(omega, harmonics, t):
     unknowns = 2 * harmonics + 1
@@ -276,45 +216,46 @@ def integrate_duffing(t_final, dt, om_s):
     return t, u
 
 # TODO: improve this disgusting function
-def tangent_predictor(J, zref, Xref):
-    """Compute tangent vector using Seydel's pivot strategy."""
-    # 1. Determine pivot indices
-    with np.errstate(divide='ignore', invalid='ignore'):
-        rel_changes = np.abs(zref) / np.maximum(np.abs(Xref), 1e-4)
-    kk = np.argsort(-rel_changes)  # Descending order
+# def tangent_predictor(J, zref, Xref):
+#     """Compute tangent vector using Seydel's pivot strategy."""
+#     # 1. Determine pivot indices
+#     with np.errstate(divide='ignore', invalid='ignore'):
+#         rel_changes = np.abs(zref) / np.maximum(np.abs(Xref), 1e-4)
+#     kk = np.argsort(-rel_changes)  # Descending order
     
-    # 2. Try different pivots until success
-    ztmp = None
-    for k in kk:
-        # 3. Create constraint vector
-        c = np.zeros_like(Xref)
-        c[k] = 1.0
+#     # 2. Try different pivots until success
+#     ztmp = None
+#     for k in kk:
+#         # 3. Create constraint vector
+#         c = np.zeros_like(Xref)
+#         c[k] = 1.0
         
-        # 4. Build extended system
-        J_red = J[:-1, :]  # Exclude last row (parameter derivative)
-        A = np.vstack([J_red, c])
-        b = np.concatenate([np.zeros(J_red.shape[0]), [1.0]])
+#         # 4. Build extended system
+#         J_red = J[:-1, :]  # Exclude last row (parameter derivative)
+#         A = np.vstack([J_red, c])
+#         b = np.concatenate([np.zeros(J_red.shape[0]), [1.0]])
         
-        # 5. Solve with least-squares for numerical stability
-        ztmp, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+#         # 5. Solve with least-squares for numerical stability
+#         ztmp, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
         
-        if not np.any(np.isnan(ztmp)):
-            break
+#         if not np.any(np.isnan(ztmp)):
+#             print("Nan found in tangent predictor, changing pivot...")
+#             break
     
-    # 6. Normalize tangent vector
-    z = ztmp / np.linalg.norm(ztmp) # length 1 vector
-    return z
+#     # 6. Normalize tangent vector
+#     z = ztmp / np.linalg.norm(ztmp) # length 1 vector
+#     return z
 
 # def tangent_predictor(J, zref, Xref):
 #     Q, R = np.linalg.qr(J.T)
 #     z = Q[:, -1]
 #     return z / np.linalg.norm(z)
 
-# def tangent_predictor(J, zref, Xref):
-#     _, _, vt = np.linalg.svd(J[:-1, :], full_matrices=True)
-#     z = vt[-1, :]
-#     z = z / np.linalg.norm(z)
-#     return z
+def tangent_predictor(J, zref, Xref):
+    _, _, vt = np.linalg.svd(J[:-1, :], full_matrices=True)
+    z = vt[-1, :]
+    z = z / np.linalg.norm(z)
+    return z
 
 EPS = np.finfo(np.float64).eps
 def cd2_h(x0):
@@ -348,6 +289,8 @@ def numerical_jac(f, x):
     return jac
 
 def plot_hb_timedomain(t_final, dt, dofs, X, omega, harmonics):
+    if not getenv("PLOT"): 
+        return
     # Plot the result in time domain
     samples = 2*harmonics+1
     vec_t = np.arange(0, t_final + dt, dt)
@@ -364,7 +307,6 @@ def plot_hb_timedomain(t_final, dt, dofs, X, omega, harmonics):
 
     fig.show()
 
-
 def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
     ext_res = np.zeros_like(X)
     ext_res[:-1] = residual_func(X)
@@ -374,9 +316,42 @@ def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
         ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
     return ext_res
 
+def X_to_complex(X):
+    """
+    Converts a dofs * (2H+1) real array [A0, A1, B1, ... A_H, B_H] to a dofs * (H+1) comlex array
+    """
+    assert len(X.shape) == 2 # matrix form
+    dofs = X.shape[0]
+    H = int((X.shape[1] - 1) / 2)
+    Xc = np.zeros((dofs, H+1), dtype=np.complex128)
+    for d in range(dofs):
+        Xc[d, 0] = X[d, 0] - 0j
+    for h in range(1, H+1):
+        for d in range(dofs):
+            Xc[d, h] = (X[d, 2*h-1] - 1j * X[d, 2*h])/2
+    return Xc
+
+def X_to_real(X):
+    """
+    Converts a dofs * N complex array to a dofs * (2*N-1) real array
+    """
+    assert len(X.shape) == 2 # matrix form
+    dofs = X.shape[0]
+    N = X.shape[1]
+    L = create_lanczos_filter(N, 1)
+    Xr = np.zeros((dofs, 2*N-1), dtype=np.float64)
+    for d in range(dofs):
+        Xr[d, 0] = X[d, 0].real
+    for h in range(1, N):
+        for d in range(dofs):
+            Xr[d, 2*h-1] = L[h] * 2 * X[d, h].real
+            Xr[d, 2*h] = L[h] * -2 * X[d, h].imag
+    
+    return Xr
+
 def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
     M, C, K, u0, _, _, hb_nl_forces = create_motion_system() # Mxdd + Cxd + Kx = nl_forces
-    samples = 2*H+1
+    samples = int(2*H+1)
     dofs = u0.shape[0] # only 1 dof for now
     
     # Full AFT version (doesnt converge for high H)
@@ -445,7 +420,9 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
     #     R = np.concatenate(([R0], a_R, b_R))
     #     return R
 
-    N = 2 * H + 1 # sampling points
+    # N = (H+1)*(2**2) # sampling points (needs to be power of 2)
+    N = 4*H+1
+    print("Sampling points:", N)
     def duffing_residual(X):
         """
         X[:-1]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
@@ -462,24 +439,18 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
             R_lin[i:i+dofs] = (K - (k*Om)**2 * M) @ X[i:i+dofs] + k * Om * C @ X[i+dofs:i+2*dofs]
             R_lin[i+dofs:i+2*dofs] = - k * Om * C @ X[i:i+dofs] + (K - (k*Om)**2 * M) @ X[i+dofs:i+2*dofs]
 
-        # AFT scheme
-        idft, iddft, _ = create_unscaled_dft_matrix(Om, H) # unscaled
-        dft = create_dft_matrix(Om, H) # scaled
-        qf = X[:-1].reshape(samples, dofs).T
-        R_nl = np.zeros_like(qf)
-        q_ = qf @ idft.T
-        qd_ = qf @ iddft.T
-
-        for s in range(samples):
-            period = 2.0 * np.pi / Om
-            t_n = (s / samples) * period
-            R_nl[:, s] = - hb_nl_forces(t_n, q_[:, s], qd_[:, s], Om)
-
-        R_nl = R_nl @ dft # forward scaling
-        L = create_lanczos_filter(H, 1)
-        for i in range(R_nl.shape[0]):
-            R_nl[i, :] *= L # element-wise multiplication
-        R_nl = R_nl.T.reshape(-1)
+        # Optimized FFT version of AFT
+        T = 2 * np.pi / Om      # period
+        dt = T / N              # time step
+        q = np.fft.irfft(X_to_complex(X[:-1].reshape(samples, dofs).T), N, axis=1, norm='forward') # no scaling
+        R_nlt = np.zeros((dofs, N))
+        dt = T / N
+        for s in range(N):
+            t_n = s * dt
+            R_nlt[:, s] = - hb_nl_forces(t_n, q[:, s], None, Om)
+        
+        R_nl_fft = np.fft.rfft(R_nlt, N, axis=1, norm='backward') # no scaling
+        R_nl = X_to_real(R_nl_fft[:, :H+1] / N).T.reshape(-1)
 
         return R_lin + R_nl
     
@@ -560,10 +531,10 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
         X0 = Xtmp.x.copy()
 
         # step control
-        e = np.linalg.norm(Xp - X0)
-        ds = max(min(ds * np.sqrt(target_prediction_error / e), ds_max), ds_min)
+        # e = np.linalg.norm(Xp - X0)
+        # ds = max(min(ds * np.sqrt(target_prediction_error / e), ds_max), ds_min)
 
-        print(f"omega: {X0[-1]:.2f}, ds: {ds:.2e}, nfev: {Xtmp.nfev}")
+        print(f"omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {Xtmp.nfev}")
 
         # history
         X_mat[:, iteration] = X0
@@ -571,17 +542,20 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
         if (X0[-1] - omega_end) * param_direction >= 0:
             print("Continuation reached the end")
             break
-    
-    fig = px.scatter(x=X_mat[-1, :iteration], y=np.sqrt(X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2), title="Duffing Oscillator")
-    fig.show()
+
+    if getenv("PLOT"):
+        fig = px.scatter(x=X_mat[-1, :iteration], y=np.sqrt(X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2), title="Duffing Oscillator")
+        fig.show()
 
     plot_hb_timedomain(100.0, 0.1, dofs, X_mat[:-1, 0], X_mat[-1, 0], H)
+    plot_hb_timedomain(100.0, 0.1, dofs, X_mat[:-1, iteration-1], X_mat[-1, iteration-1], H)
 
 if __name__ == "__main__":
     # HB Continuation
     H = 5
-    omega_start = 0.356
-    omega_end = 0.5
+    # assert ((H+1) & H) == 0 # or log2(H+1) is integer
+    omega_start = 0.1
+    omega_end = 1.6
     ds = 0.05
     # Time integration
     t_final = 2000.0
@@ -595,9 +569,9 @@ if __name__ == "__main__":
     t_tr = t[idx_start:]
     u_tr = u[0, idx_start:]
     N_tr = len(t_tr)
-
-    fig = px.line(x=t_tr, y=u_tr, title="Duffing Oscillator Time integration")
-    fig.show()
+    if getenv("PLOT"):
+        fig = px.line(x=t_tr, y=u_tr, title="Duffing Oscillator Time integration")
+        fig.show()
 
     # # 2. Compute the FFT of u_tr
     # U_fft = np.fft.fft(u_tr)
