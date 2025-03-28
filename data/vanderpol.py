@@ -2,7 +2,7 @@ import numpy as np
 import scipy as sp
 import plotly.express as px
 import plotly.graph_objects as go
-
+from tqdm import tqdm
 import os
 
 np.set_printoptions(formatter={'float': '{:.4e}'.format}) # format shortE
@@ -40,47 +40,6 @@ def create_fourier_basis(omega, harmonics, t):
         ddbasis[2 * i + 2] = - (omega * k)**2 * np.sin(omega * t * k)
 
     return basis, dbasis, ddbasis
-    
-def anderson_acceleration(f, x0, k_max=100, tol_res=1e-6, m=3):
-    assert m <= x0.shape[0]
-    n = x0.shape[0]
-
-    Xbuf = np.zeros((n, m))  # differences in iterates
-    Gbuf = np.zeros((n, m))  # differences in residuals (g = f(x) - x)
-    x_curr = np.zeros(n)
-    x_new = np.zeros(n)
-    g_curr = np.zeros(n)
-    g_new = np.zeros(n)
-    gamma = np.zeros(n)
-    residual_history = []
-
-    x_curr = x0.copy() # in reality x_curr actually initialzed to x0
-    x_new = f(x_curr)              # x₁ = f(x₀)
-    g_curr = x_new - x_curr     # g₀ = f(x₀) - x₀
-    Xbuf[:, 0] = g_curr # x1 - x0
-    x_curr = x_new.copy()
-    x_new = f(x_curr)              # x₂ = f(x₁)
-    g_new = x_new - x_curr        # g₁ = f(x₁) - x₁
-    Gbuf[:, 0] = g_new - g_curr # g1 - g0
-    g_curr = g_new.copy()
-    
-    k = 1
-    while k < k_max and np.linalg.norm(g_curr) > tol_res:
-        m_k = min(m, k)
-        _, gamma, _ = sp.linalg.lapack.dgels(Gbuf[:, :m_k], g_curr)
-
-        x_new = x_curr + g_curr - (Xbuf[:, :m_k] + Gbuf[:, :m_k]) @ gamma[:m_k]
-
-        Xbuf[:, k % m] = x_new - x_curr
-        x_curr = x_new.copy()
-        x_new = f(x_curr)
-        g_new = x_new - x_curr
-        Gbuf[:, k % m] = g_new - g_curr
-        g_curr = g_new.copy()
-        k += 1
-        residual_history.append(np.linalg.norm(g_curr))
-
-    return x_curr, len(residual_history)
 
 def newmark_beta_step(M, C, K, v_i, a_i, delta_F, dt, beta=1/4, gamma=1/2):
     x2 = 1
@@ -113,7 +72,7 @@ def nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt):
 
     avg_iters = 0
 
-    for i in range(0, t_steps-1):
+    for i in tqdm(range(0, t_steps-1)):
         t = i*dt
         f_next = f_curr.copy()
         du = np.zeros(2)
@@ -136,88 +95,24 @@ def nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt):
 
     return vec_t, u, v, a
 
-def nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt):
-    t_steps = int((t_final + dt)/ dt)
-    n = u0.shape[0] # number of equations
-    vec_t = np.arange(0, t_final + dt, dt)
-    f_curr = nonlinear_func(0.0, u0, v0)
-    x = np.zeros((3*n, t_steps+1))
-    x[0:n, 0] = u0
-    x[n:2*n, 0] = v0
-    x[2*n:3*n, 0] = np.linalg.solve(M, f_curr - C @ v0 - K @ u0)
-
-    avg_iters = 0
-    for i in range(0, t_steps):
-        t = i*dt
-        f_next = f_curr.copy()
-        def newmark_fixed_point(x_k):
-            nonlocal f_next, x, i
-            x_k_next = x_k.copy()
-            du, dv, da = newmark_beta_step(M, C, K, x[n:2*n,i], x[2*n:3*n,i], f_next - f_curr, dt)
-            x_k_next[0:n] = x[0:n, i] + du
-            x_k_next[n:2*n] = x[n:2*n, i] + dv
-            x_k_next[2*n:3*n] = x[2*n:3*n, i] + da
-            f_next = nonlinear_func(t, x_k_next[0:n], x_k_next[n:2*n])
-            return x_k_next
-        
-        x[:, i+1], iteration = anderson_acceleration(newmark_fixed_point, x[:, i], 100, 1e-10, 3)
-        avg_iters += iteration
-        f_curr = f_next.copy()
-
-    print(f"Average iterations: {avg_iters / t_steps:.2f}")
-
-    return vec_t, x[0:n, :], x[n:2*n, :], x[2*n:3*n, :]
-    
-
-# NLvib params
-# P = 0.18
-# mu = 1
-# zeta = 0.05
-# kappa = 1
-# gamma = 0.1
-
-# Wikipedia params
-# P = 0.29
-# mu = 1
-# zeta = 0.3
-# kappa = -1.0
-# gamma = 1.0
-
-# Krack
-# P = 1.0
-# mu = 1.0
-# zeta = 0.0063
-# kappa = 1.0
-# gamma = 0.1
-
-# Guillot
-P = 3.0
-mu = 1.0
-zeta = 0.05
-kappa = 1.0
-gamma = 1.0
-
-def create_motion_system(omega=0.5):
+def create_motion_system(mu=5):
+    theta = 1.0
+    kappa = 1.0
     # NLvib params
     def nonlinear_func(t, u, v):
-        return np.array([P * np.cos(omega * t) - gamma * u[0]**3])
+        return np.array([- mu * u[0]**2 * v[0]])
     
-    def hb_nl_forces(t, u, v, omega_):
-        return np.array([P * np.cos(omega_ * t) - gamma * u[0]**3])
-    
-    M = np.array([[mu]])
-    C = np.array([[zeta]])
+    M = np.array([[theta]])
+    C = np.array([[-mu]])
     K = np.array([[kappa]])
 
+    return M, C, K, nonlinear_func
+
+def integrate_duffing(t_final, dt, mu):
     u0 = np.array([1.0])
     v0 = np.array([0.0])
-
-    return M, C, K, u0, v0, nonlinear_func, hb_nl_forces
-
-def integrate_duffing(t_final, dt, om_s):
-    M, C, K, u0, v0, nonlinear_func, _ = create_motion_system(om_s)
+    M, C, K, nonlinear_func = create_motion_system(mu)
     t, u, v, a = nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
-    # t, u, v, a = nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
 
     return t, u
 
@@ -308,7 +203,17 @@ def plot_hb_timedomain(t_begin, t_end, dt, dofs, X, omega, harmonics):
 
 def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
     ext_res = np.zeros_like(X)
-    ext_res[:-1] = residual_func(X)
+    ext_res[:-2] = residual_func(X)
+
+    # Integral orthogonality phase condition
+    X_mat = X[:-2].reshape(2*H+1, 1).T
+    X_mat_ref = X_ref[:-2].reshape(2*H+1, 1).T
+    orthogonality = 0
+    for k in range(1, H+1):
+        orthogonality += k * (np.dot(X_mat_ref[:, 2*k], X_mat[:, 2*k-1]) - np.dot(X_mat_ref[:, 2*k-1], X_mat[:, 2*k]))
+    # ext_res[-2] = orthogonality
+    ext_res[-2] = X[2] # phase fixing condition
+
     if init: # local parametrization
         ext_res[-1] = np.dot(z_ref, X - X_ref)
     else: # arc-length parametrization
@@ -348,22 +253,27 @@ def X_to_real(X):
     
     return Xr
 
-def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
-    M, C, K, _, _, _, hb_nl_forces = create_motion_system() # Mxdd + Cxd + Kx = nl_forces
+def continuation(H, param_start, param_end, ds=.01, X0=None):
+    """
+    Continuation for autonomous systems using the harmonic balance method
+    """
     samples = int(2*H+1)
-    dofs = M.shape[0]
+    dofs = 1
 
-    # N = (H+1)*(2**2) # sampling points (needs to be power of 2)
-    N = 4*H+1
+    N = (H+1)*(2**3) # sampling points (needs to be power of 2)
+    # N = 4*H+1
     print("Sampling points:", N)
-    def dynamics_residual(X):
+    def hb_residual(X):
         """
-        X[:-1]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
+        X[:-2]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
         where Xx is [xx_0, xx_1, ... xx_M] with M = dofs
+        X[-2]: Continuation parameter
         X[-1]: Fourier series base frequency
         """
         Om = X[-1]
-        R_lin = np.zeros(X.shape[0]-1) # we exclude the continuation parameter equation
+        param = X[-2]
+        M, C, K, func_nl = create_motion_system(param)
+        R_lin = np.zeros(X.shape[0]-2)
 
         # Compute the linear forces in Fourier domain
         R_lin[0:dofs] = K @ X[0:dofs]
@@ -375,45 +285,29 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
         # Optimized FFT version of AFT
         T = 2 * np.pi / Om      # period
         dt = T / N              # time step
-        q = np.fft.irfft(X_to_complex(X[:-1].reshape(samples, dofs).T), N, axis=1, norm='forward') # no scaling
-        # q_dot = np.fft.ifft(1j * w * Q_fft).real
+        Xc = X_to_complex(X[:-2].reshape(samples, dofs).T) # Each row for each dof, each col corresponds to the jth fourier coeffs (a0, a1, b1, ... aH, bH)
+        q = np.fft.irfft(Xc, N, axis=1, norm='forward') # no scaling
+        k = np.arange(H+1)
+        q_dot = np.fft.irfft(1j * Om * k * Xc, N, axis=1, norm='forward')
         # q_ddot = np.fft.ifft(- (w**2) * Q_fft).real
         R_nlt = np.zeros((dofs, N))
         dt = T / N
         for s in range(N):
             t_n = s * dt
-            R_nlt[:, s] = - hb_nl_forces(t_n, q[:, s], None, Om)
+            R_nlt[:, s] = - func_nl(t_n, q[:, s], q_dot[:, s])
         
         R_nl_fft = np.fft.rfft(R_nlt, N, axis=1, norm='backward') # no scaling
         R_nl = X_to_real(R_nl_fft[:, :H+1] / N).T.reshape(-1)
 
         return R_lin + R_nl
     
-    if X0 is None:
-        # Duffing initial conditions from NLvib
-        x0 = np.zeros(dofs*(2*H+1))
-        q_real = -(omega_start**2) * mu + kappa
-        q_imag = omega_start*zeta
-
-        x0[1] = P*q_real / (q_real**2 + q_imag**2)
-        x0[2] = P*q_imag / (q_real**2 + q_imag**2)
-
-        # Full state initial conditions
-        X0 = np.zeros(dofs*(2*H+1) + 1)
-        X0[:-1] = x0
-        X0[-1] = omega_start
-        # print(X0)
-        # plot_hb_timedomain(0.0, 100.0, 0.1, 1, X0[:-1], X0[-1], H)
-    
     print("Initial guess X0:", X0)
 
     # Continuation framework
     max_continuation_steps = 5000
     ds_min = 1e-5
-    ds_max = (omega_end - omega_start) / 5
-    target_prediction_error = 1e-2 # l2 norm
 
-    if omega_end > omega_start:
+    if param_end > param_start:
         param_direction = 1
         direction = 1
     else:
@@ -425,16 +319,16 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
     z_ref = np.zeros_like(X0)
     z_ref[-1] = 1
 
-    res0 = dynamics_residual(X0)
+    res0 = hb_residual(X0)
     print("Initial spectral residual norm:", np.linalg.norm(res0))
     # print(np.concatenate(([res0[0]], res0[1::2]/2, res0[2::2]/2)))
     
     Xp, info, ier, mesg = sp.optimize.fsolve(
         extended_residual,
         X0,
-        args=(X_ref, z_ref, dynamics_residual,True),
+        args=(X_ref, z_ref, hb_residual,True),
         full_output=True,
-        xtol = 1e-4
+        xtol = 1e-6
     ) # initial step
     if ier != 1:
         print(f"Initial step failed: {mesg}")
@@ -447,9 +341,14 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
     X_mat = np.zeros((X0.shape[0], max_continuation_steps))
     X_mat[:, 0] = X0
 
+    if getenv("PLOT"):
+        plot_hb_timedomain(0.0, 2 * np.pi / X_mat[-1, 0], 0.02, dofs, X_mat[:-2, 0], X_mat[-1, 0], H).show()
+    
+    return
+    
     iteration = 1
     while iteration < max_continuation_steps:
-        J = numerical_jac(lambda X: extended_residual(X, X_ref, z_ref, dynamics_residual, False), X0)
+        J = numerical_jac(lambda X: extended_residual(X, X_ref, z_ref, hb_residual, False), X0)
 
         z = tangent_predictor(J, z_ref, X_ref)
         # print(np.concatenate(([z[0]], z[1:-1:2]/2, z[2:-1:2]/2, [z[-1]])))
@@ -467,9 +366,9 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
             Xtmp, info, ier, mesg = sp.optimize.fsolve(
                 extended_residual,
                 Xp,
-                args=(X_ref, z_ref, dynamics_residual,False),
+                args=(X_ref, z_ref, hb_residual,False),
                 full_output=True,
-                xtol = 1e-4
+                xtol = 1e-6
             )
             if ier == 1:
                 break
@@ -483,38 +382,33 @@ def hb_duffing(H, omega_start, omega_end, ds=.01, X0=None):
         X_old = X0.copy()
         X0 = Xtmp.copy()
 
-        # step control
-        # e = np.linalg.norm(Xp - X0)
-        # ds = max(min(ds * np.sqrt(target_prediction_error / e), ds_max), ds_min)
-
-        print(f"omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}")
+        print(f"param: {X0[-2]:.3f}, omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}")
 
         # history
         X_mat[:, iteration] = X0
         iteration += 1
-        if (X0[-1] - omega_end) * param_direction >= 0:
+        if (X0[-2] - param_end) * param_direction >= 0:
             print("Continuation reached the end")
             break
 
     if getenv("PLOT"):
-        fig = px.scatter(x=X_mat[-1, :iteration], y=np.sqrt(X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2), title="Duffing Oscillator")
+        fig = px.scatter(x=X_mat[-2, :iteration], y=np.sqrt(X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2), title="Parameter continuation")
         fig.show()
 
-    plot_hb_timedomain(0.0, 100.0, 0.1, dofs, X_mat[:-1, 0], X_mat[-1, 0], H).show()
-    plot_hb_timedomain(0.0, 100.0, 0.1, dofs, X_mat[:-1, iteration-1], X_mat[-1, iteration-1], H).show()
+        plot_hb_timedomain(0.0, 2 * np.pi / X_mat[-1, iteration-1], 0.02, dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H).show()
 
 if __name__ == "__main__":
     # HB Continuation
-    H = 30
+    H = 3
     # assert ((H+1) & H) == 0 # or log2(H+1) is integer
-    omega_start = 0.1
-    omega_end = 8
+    param_start = 0.1
+    param_end = 5.0
     ds = 0.02
     # Time integration
-    t_final = 2000.0
-    dt = 0.1
+    t_final = 500.0
+    dt = 0.05
 
-    t, u = integrate_duffing(t_final, dt, omega_start)
+    t, u = integrate_duffing(t_final, dt, param_start)
 
     # 1. Extract the last 25% of the signal
     N = len(t)
@@ -540,7 +434,7 @@ if __name__ == "__main__":
     i0 = np.argmax(amp)
     f0 = f_pos[i0]
     omega0 = 2*np.pi * f0
-    print("Fundamental frequency = {:.4f} Hz, ω₀ = {:.4f}".format(f0, omega0))
+    print(f"omega0 = {omega0:.3f}")
 
     a0 = np.real(U_fft[0]) / norm_factor
     a_coeffs = np.zeros(H+1)  # a0,..., aH; a0 has been computed already.
@@ -560,22 +454,24 @@ if __name__ == "__main__":
     for h in range(1, H + 1):
         X0_list.append(a_coeffs[h])
         X0_list.append(b_coeffs[h])
+    X0_list.append(param_start)
     X0_list.append(omega0)
     X0 = np.array(X0_list)
 
-    assert X0.shape[0] == (2*H+1)+1
+    assert X0.shape[0] == (2*H+1)+2 # continuation param + HB omega
 
-    fig = plot_hb_timedomain(t_tr[0], t_tr[-1], 0.1, 1, X0[:-1], X0[-1], H)
-    fig.add_trace(
-        go.Scatter(
-            x=t_tr,  # x values for new line
-            y=u_tr,  # y values for new line
-            name='Time integration',  # legend label
-            line=dict(color='red')  # optional: customize line color
+    if (getenv("PLOT")):
+        fig = plot_hb_timedomain(t_tr[0], t_tr[-1], 0.1, 1, X0[:-2], X0[-1], H)
+        fig.add_trace(
+            go.Scatter(
+                x=t_tr,  # x values for new line
+                y=u_tr,  # y values for new line
+                name='Time integration',  # legend label
+                line=dict(color='red')  # optional: customize line color
+            )
         )
-    )
-    fig.show()
-    hb_duffing(H, omega_start, omega_end, ds, None)
+        fig.show()
+    continuation(H, param_start, param_end, ds, X0)
 
 # TODO:
 # 1. Phase shifting on initial guess using angle rotations -> make initial guess more robust
