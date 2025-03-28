@@ -44,3 +44,7 @@ void create_idft_matrices(
         }
     }
 }
+
+int main(int argc, char** argv) {
+    return 0;
+}
