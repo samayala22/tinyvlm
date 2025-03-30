@@ -117,40 +117,39 @@ def integrate_duffing(t_final, dt, mu):
     return t, u
 
 # TODO: improve this disgusting function
-# def tangent_predictor(J, zref, Xref):
-#     """Compute tangent vector using Seydel's pivot strategy."""
-#     # 1. Determine pivot indices
-#     with np.errstate(divide='ignore', invalid='ignore'):
-#         rel_changes = np.abs(zref) / np.maximum(np.abs(Xref), 1e-4)
-#     kk = np.argsort(-rel_changes)  # Descending order
-    
-#     # 2. Try different pivots until success
-#     ztmp = None
-#     for k in kk:
-#         # 3. Create constraint vector
-#         c = np.zeros_like(Xref)
-#         c[k] = 1.0
-        
-#         # 4. Build extended system
-#         J_red = J[:-1, :]  # Exclude last row (parameter derivative)
-#         A = np.vstack([J_red, c])
-#         b = np.concatenate([np.zeros(J_red.shape[0]), [1.0]])
-        
-#         # 5. Solve with least-squares for numerical stability
-#         ztmp, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
-        
-#         if not np.any(np.isnan(ztmp)):
-#             print("Nan found in tangent predictor, changing pivot...")
-#             break
-    
-#     # 6. Normalize tangent vector
-#     z = ztmp / np.linalg.norm(ztmp) # length 1 vector
-#     return z
-
 def tangent_predictor(J, zref, Xref):
-    Q, R = np.linalg.qr(J.T)
-    z = Q[:, -1]
-    return z / np.linalg.norm(z)
+    """Compute tangent vector using Seydel's pivot strategy."""
+    # 1. Determine pivot indices
+    with np.errstate(divide='ignore', invalid='ignore'):
+        rel_changes = np.abs(zref) / np.maximum(np.abs(Xref), 1e-4)
+    kk = np.argsort(-rel_changes)  # Descending order
+    
+    # 2. Try different pivots until success
+    ztmp = None
+    for k in kk:
+        # 3. Create constraint vector
+        c = np.zeros_like(Xref)
+        c[k] = 1.0
+        
+        # 4. Build extended system
+        J_red = J[:-1, :]  # Exclude last row (parameter derivative)
+        A = np.vstack([J_red, c])
+        b = np.concatenate([np.zeros(J_red.shape[0]), [1.0]])
+        
+        # 5. Solve with least-squares for numerical stability
+        ztmp, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+        
+        if not np.any(np.isnan(ztmp)):
+            break
+    
+    # 6. Normalize tangent vector
+    z = ztmp / np.linalg.norm(ztmp) # length 1 vector
+    return z
+
+# def tangent_predictor(J, zref, Xref):
+#     Q, R = np.linalg.qr(J.T)
+#     z = Q[:, -1]
+#     return z / np.linalg.norm(z)
 
 EPS = np.finfo(np.float64).eps
 def cd2_h(x0):
@@ -211,8 +210,8 @@ def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
     orthogonality = 0
     for k in range(1, H+1):
         orthogonality += k * (np.dot(X_mat_ref[:, 2*k], X_mat[:, 2*k-1]) - np.dot(X_mat_ref[:, 2*k-1], X_mat[:, 2*k]))
-    # ext_res[-2] = orthogonality
-    ext_res[-2] = X[2] # phase fixing condition
+    ext_res[-2] = orthogonality
+    # ext_res[-2] = X[2] # phase fixing condition
 
     if init: # local parametrization
         ext_res[-1] = np.dot(z_ref, X - X_ref)
@@ -242,7 +241,7 @@ def X_to_real(X):
     assert len(X.shape) == 2 # matrix form
     dofs = X.shape[0]
     N = X.shape[1]
-    L = create_lanczos_filter(N, 0)
+    L = create_lanczos_filter(N, 1)
     Xr = np.zeros((dofs, 2*N-1), dtype=np.float64)
     for d in range(dofs):
         Xr[d, 0] = X[d, 0].real
@@ -263,6 +262,8 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     N = (H+1)*(2**3) # sampling points (needs to be power of 2)
     # N = 4*H+1
     print("Sampling points:", N)
+    def hb_residual2(x, param, om):
+        return hb_residual(np.concatenate((x, [param, om])))
     def hb_residual(X):
         """
         X[:-2]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
@@ -317,7 +318,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     X_ref = X0.copy()
     X_old = X0.copy()
     z_ref = np.zeros_like(X0)
-    z_ref[-1] = 1
+    z_ref[-2] = 1
 
     res0 = hb_residual(X0)
     print("Initial spectral residual norm:", np.linalg.norm(res0))
@@ -334,6 +335,19 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         print(f"Initial step failed: {mesg}")
         return
     
+    # Xp2, info2, ier2, mesg2 = sp.optimize.fsolve(
+    #     hb_residual2,
+    #     X0[:-2],
+    #     args=(X0[-2], X0[-1]),
+    #     full_output=True,
+    #     xtol = 1e-6
+    # )
+    # Xp2 = np.concatenate((Xp2, [X0[-2], X0[-1]]))
+    # if getenv("PLOT"):
+    #     plot_hb_timedomain(0.0, 2 * np.pi / Xp2[-1], 0.02, dofs, Xp2[:-2], Xp2[-1], H).show()
+    
+    # print(Xp2)
+
     print(Xp)
     # X0[:-1] = Xp.x[:-1] # TODO: check if we cant just copy the whole thing
     X0 = Xp.copy()
@@ -342,9 +356,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     X_mat[:, 0] = X0
 
     if getenv("PLOT"):
-        plot_hb_timedomain(0.0, 2 * np.pi / X_mat[-1, 0], 0.02, dofs, X_mat[:-2, 0], X_mat[-1, 0], H).show()
-    
-    return
+        plot_hb_timedomain(0.0, 4 * np.pi / X_mat[-1, 0], 0.02, dofs, X_mat[:-2, 0], X_mat[-1, 0], H).show()
     
     iteration = 1
     while iteration < max_continuation_steps:
@@ -395,11 +407,11 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         fig = px.scatter(x=X_mat[-2, :iteration], y=np.sqrt(X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2), title="Parameter continuation")
         fig.show()
 
-        plot_hb_timedomain(0.0, 2 * np.pi / X_mat[-1, iteration-1], 0.02, dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H).show()
+        plot_hb_timedomain(0.0, 4 * np.pi / X_mat[-1, iteration-1], 0.02, dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H).show()
 
 if __name__ == "__main__":
     # HB Continuation
-    H = 3
+    H = 15
     # assert ((H+1) & H) == 0 # or log2(H+1) is integer
     param_start = 0.1
     param_end = 5.0
