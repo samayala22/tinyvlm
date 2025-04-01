@@ -35,7 +35,7 @@ class HBVLM final: public Simulation {
         Tensor2fD gamma_coeffs{backend->memory.get()}; // (ns*nc) x uharmonics
         Tensor2fH gamma_coeffs_h{backend->memory.get()}; // (ns*nc) x uharmonics
         Tensor2fD gamma_wing{backend->memory.get()}; // (ns*nc) x time instances
-        Tensor2fD gamma_wing_delta{backend->memory.get()}; // ns x nc
+        MultiTensor2fD gamma_wing_delta{backend->memory.get()}; // ns x nc
         Tensor2fD dgamma_wing_dt{backend->memory.get()}; // dgamma/dt
 
         Tensor2fD residual{backend->memory.get()}; // (ns*nc) x uharmonics
@@ -43,7 +43,7 @@ class HBVLM final: public Simulation {
         Tensor2fD dft_d{backend->memory.get()};
         Tensor2fH ddft_h{backend->memory.get()}; // uharmonics x uharmonics
         Tensor2fD ddft_d{backend->memory.get()};
-        std::vector<MultiTensor2fD> gamma_wake;
+        std::vector<MultiTensor2fD> gamma_wake; // TODO: change this to something better
         MultiTensor3fD aero_forces{backend->memory.get()}; // ns*nc*3
         Tensor2fH coeffs_h{backend->memory.get()}; // 2 x coeffs
         Tensor2fD coeffs_d{backend->memory.get()}; // 2 x coeffs
@@ -128,6 +128,7 @@ void HBVLM::alloc_buffers() {
     gamma_coeffs.init({n, unknowns});
     gamma_coeffs_h.init({n, unknowns});
     gamma_wing.init({n, unknowns});
+    gamma_wing_delta.init(panels_2D);
     dgamma_wing_dt.init({n, unknowns});
     residual.init({n, unknowns});
     dft_d.init({unknowns, unknowns});
@@ -466,21 +467,21 @@ void HBVLM::run(f32 t_start, f32 omega) {
 
             auto gamma_wing_s = gamma_wing.view().slice(All, s).reshape(c_ns, c_nc);
             auto dgamma_wing_dt_s = dgamma_wing_dt.view().slice(All, s).reshape(c_ns, c_nc);
-            gamma_wing_s.to(gamma_wing_delta.view());
+            gamma_wing_s.to(gamma_wing_delta.views()[0]);
             backend->blas->axpy(
                 -1.0f,
                 gamma_wing_s.slice(All, Range{0, -2}),
-                gamma_wing_delta.view().slice(All, Range{1, -1})
+                gamma_wing_delta.views()[0].slice(All, Range{1, -1})
             );
             backend->forces_unsteady2(
                 verts_wing.views()[0],
-                gamma_wing_delta.view(),
+                gamma_wing_delta.views()[0],
                 dgamma_wing_dt_s,
                 velocities.views()[0],
                 areas_d.views()[0],
                 normals_d.views()[0],
                 aero_forces.views()[0]
-            );
+            ); 
             coeffs_h.view()(0, s) = backend->coeff_cl_multibody(
                 aero_forces.views(),
                 areas_d.views(),
@@ -497,7 +498,7 @@ void HBVLM::run(f32 t_start, f32 omega) {
                 {ref_pt.x, ref_pt.y, ref_pt.z},
                 freestream,
                 1.0f // TODO: remove hardcoded rho
-            ).y; // Warning: pure assignment doesnt work for gpu
+            ).y;
         }
         coeffs_h.view().to(coeffs_d.view());
         backend->blas->gemm(1.0f, coeffs_d.view(), dft_d.view(), 0.0f, coeffs_c_d.view());
@@ -507,8 +508,10 @@ void HBVLM::run(f32 t_start, f32 omega) {
     // Compute time domain solution from the obtained fourier coeffs
     {
         auto& gamma_coeffs_hv = gamma_coeffs_h.view();
+        auto coeffs_cl_v = coeffs_h.view().slice(0, All);
+        auto coeffs_cm_v = coeffs_h.view().slice(1, All);
         gamma_coeffs.view().to(gamma_coeffs_hv);
-        std::ofstream gamma_data("hbvlm_gamma_" + backend->name + ".txt");
+        std::ofstream hb_data("hbvlm_data_" + backend->name + ".txt");
 
         const i32 unknowns = 2 * m_harmonics + 1;
         const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));
@@ -517,12 +520,20 @@ void HBVLM::run(f32 t_start, f32 omega) {
         for (i64 i = 0; i < max_t_steps; i++) {
             const f32 t = (f32)i * dt;
             f32 gamma = gamma_coeffs_hv(0,0) * sqrt_unknowns;
+            f32 cl = coeffs_cl_v(0) * sqrt_unknowns;
+            f32 cm = coeffs_cm_v(0) * sqrt_unknowns;
             for (i64 j = 0; j < m_harmonics; j++) {
                 const f32 k = (f32)(j+1);
-                gamma += gamma_coeffs_hv(0, 2*j+1) * std::cos(omega * t * k) * sqrt_unknowns_2;
-                gamma += gamma_coeffs_hv(0, 2*j+2) * std::sin(omega * t * k) * sqrt_unknowns_2;
+                const f32 c = std::cos(omega * t * k) * sqrt_unknowns_2;
+                const f32 s = std::sin(omega * t * k) * sqrt_unknowns_2;
+                gamma += gamma_coeffs_hv(0, 2*j+1) * c;
+                gamma += gamma_coeffs_hv(0, 2*j+2) * s;
+                cl += coeffs_cl_v(2*j+1) * c;
+                cl += coeffs_cl_v(2*j+2) * s;
+                cm += coeffs_cm_v(2*j+1) * c;
+                cm += coeffs_cm_v(2*j+2) * s;
             }
-            gamma_data << t << " " << gamma << "\n";
+            hb_data << t << " " << gamma << " " << cl << " " << cm << "\n";
         }
     }
 }
@@ -542,7 +553,7 @@ int main() {
     const f32 k = 0.25f; // reduced frequency
     const f32 omega = k * u_inf / b;
     const f32 t_final = cycles * 2.0f * PI_f / omega;
-    const i32 harmonics = 3;
+    const i32 harmonics = 10;
 
     std::printf("t_final: %f\n", t_final);
     std::printf("omega: %f\n", omega);

@@ -374,7 +374,7 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
     cl_data << "0.5" << "\n"; // TODO: this should be according to inputs
 
     // TEMPORARY
-    std::ofstream gamma_data("uvlm_gamma_" + backend->name + ".txt");
+    std::ofstream uvlm_data("uvlm_data_" + backend->name + ".txt");
 
     // 4. Transient simulation loop
     // for (i32 i = 0; i < vec_t.size()-1; i++) {
@@ -409,11 +409,6 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
         backend->rhs_assemble_velocities(rhs.view(), normals_d.views(), velocities.views());
         backend->rhs_assemble_wake_influence(rhs.view(), gamma_wake.views(), colloc_d.views(), normals_d.views(), verts_wake.views(), assembly.lifting(), i);
         solver->solve(lhs.view(), rhs.view());
-
-        // TEMPORARY
-        if (backend->name == "CPU") {
-            gamma_data << t << " " << rhs.view()(0) << "\n";
-        }
         
         i64 begin = 0;
         for (i64 m = 0; m < assembly_wings.size(); m++) {
@@ -432,7 +427,17 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
         if (i > 0) {
             backend->forces_unsteady_multibody(verts_wing.views(), gamma_wing_delta.views(), gamma_wing.views(), gamma_wing_prev.views(), velocities.views(), areas_d.views(), normals_d.views(), aero_forces.views(), dt);
             const f32 cl = backend->coeff_cl_multibody(aero_forces.views(), areas_d.views(), freestream, rho);
-
+            const auto transform_node0 = assembly.surface_kinematics()[0];
+            const auto transform_mat = transform_node0->transform(t);
+            auto ref_pt = linalg::mul(transform_mat, {0.5f, 0.0f, 0.0f, 1.0f});
+            const f32 cm_y = backend->coeff_cm_multibody(
+                aero_forces.views(),
+                verts_wing.views(), 
+                areas_d.views(),
+                {ref_pt.x, ref_pt.y, ref_pt.z},
+                freestream,
+                rho
+            ).y;  
             for (const auto& [wing, wing_h] : zip(verts_wing.views(), verts_wing_h.views())) {
                 wing.to(wing_h);
             }
@@ -444,6 +449,11 @@ void UVLM::run(const Assembly& assembly, f32 t_final) {
             });
 
             cl_data << t << " " << verts_wing_h.views()[0](0, 0, 2) << " " << cl << " " << std::atan2(-chord_axis.z, chord_axis.x) << "\n";
+        
+            // TEMPORARY
+            if (backend->name == "CPU") {
+                uvlm_data << t << " " << rhs.view()(0) << " " << cl << " " << cm_y << "\n";
+            }
         }
 
         {
