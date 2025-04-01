@@ -556,6 +556,38 @@ void BackendCPU::forces_unsteady(
     }
 }
 
+void BackendCPU::forces_unsteady2(
+    const TensorView3fD& verts_wing,
+    const TensorView2fD& gamma_delta, // chordwise delta
+    const TensorView2fD& dgamma_dt, // dgamma/dt
+    const TensorView3fD& velocities,
+    const TensorView2fD& areas,
+    const TensorView3fD& normals,
+    const TensorView3fD& forces
+) {
+    const f32 rho = 1.0f; // TODO: remove hardcoded rho
+    for (i64 j = 0; j < gamma_delta.shape(1); j++) { // chordwise
+        for (i64 i = 0; i < gamma_delta.shape(0); i++) { // spanwise
+
+            const linalg::float3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
+
+            const linalg::float3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
+            const linalg::float3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
+            const linalg::float3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
+
+            linalg::float3 force = {0.0f, 0.0f, 0.0f};
+
+            // Joukowski method
+            force += rho * gamma_delta(i, j) * linalg::cross(V, vertex1 - vertex0); // steady contribution
+            force += rho * dgamma_dt(i, j) * areas(i, j) * normal; // unsteady contribution
+
+            forces(i, j, 0) = force.x;
+            forces(i, j, 1) = force.y;
+            forces(i, j, 2) = force.z;
+        }
+    }
+}
+
 f32 BackendCPU::coeff_cl(
     const TensorView3fD& forces,
     const linalg::float3& lift_axis,

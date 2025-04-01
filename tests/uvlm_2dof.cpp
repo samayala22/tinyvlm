@@ -725,7 +725,7 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
                     gamma_wing_i.slice(All, -1).to(gamma_wake_i.slice(All, -1-(i+1)));
                     
                     // Compute delta
-                    // TODO: remove this hack
+                    // TODO: remove this hack -> true fix would be to become a unstructured code
                     if (m == 1) { // gross hack for missing connectivity on the flap trailing edge
                         backend->blas->axpy(
                             -1.0f,

@@ -46,6 +46,15 @@ class Backend {
             const TensorView3fD& forces,
             f32 dt
         ) = 0;
+        virtual void forces_unsteady2(
+            const TensorView3fD& verts_wing,
+            const TensorView2fD& gamma_delta, // chordwise delta
+            const TensorView2fD& dgamma_dt, // dgamma/dt
+            const TensorView3fD& velocities,
+            const TensorView2fD& areas,
+            const TensorView3fD& normals,
+            const TensorView3fD& forces
+        ) = 0;
         virtual f32 coeff_cl(
             const TensorView3fD& forces,
             const linalg::float3& lift_axis,

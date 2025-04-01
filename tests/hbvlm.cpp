@@ -35,7 +35,8 @@ class HBVLM final: public Simulation {
         Tensor2fD gamma_coeffs{backend->memory.get()}; // (ns*nc) x uharmonics
         Tensor2fH gamma_coeffs_h{backend->memory.get()}; // (ns*nc) x uharmonics
         Tensor2fD gamma_wing{backend->memory.get()}; // (ns*nc) x time instances
-        Tensor2fD dgamma_wing{backend->memory.get()}; // dgamma/dt
+        Tensor2fD gamma_wing_delta{backend->memory.get()}; // ns x nc
+        Tensor2fD dgamma_wing_dt{backend->memory.get()}; // dgamma/dt
 
         Tensor2fD residual{backend->memory.get()}; // (ns*nc) x uharmonics
         Tensor2fH dft_h{backend->memory.get()}; // uharmonics x uharmonics
@@ -43,11 +44,10 @@ class HBVLM final: public Simulation {
         Tensor2fH ddft_h{backend->memory.get()}; // uharmonics x uharmonics
         Tensor2fD ddft_d{backend->memory.get()};
         std::vector<MultiTensor2fD> gamma_wake;
-        MultiTensor<f32, 4, Location::Host> aero_forces{backend->memory.get()}; // ns*nc*3*uharmonics
-        Tensor1fD cl_coeffs{backend->memory.get()}; // uharmonics
-        Tensor1fD cm_coeffs{backend->memory.get()}; // uharmonics
-        Tensor1fH fourier_factors_h{backend->memory.get()}; // uharmonics
-        Tensor1fD fourier_factors_d{backend->memory.get()}; // uharmonics
+        MultiTensor3fD aero_forces{backend->memory.get()}; // ns*nc*3
+        Tensor2fH coeffs_h{backend->memory.get()}; // 2 x coeffs
+        Tensor2fD coeffs_d{backend->memory.get()}; // 2 x coeffs
+        Tensor2fD coeffs_c_d{backend->memory.get()}; // 2 x coeffs
         MultiTensor3fD velocities{backend->memory.get()}; // ns*nc*3
         MultiTensor3fH velocities_h{backend->memory.get()}; // ns*nc*3
 
@@ -59,6 +59,7 @@ class HBVLM final: public Simulation {
         std::vector<i32> condition0;
         Assembly m_assembly;
         i32 m_harmonics;
+        i32 m_coeffs;
 
     private:
         void alloc_buffers();
@@ -70,7 +71,8 @@ HBVLM::HBVLM(
     const i32 harmonics) : 
     Simulation(backend_name, assembly.mesh_filenames(), true),
     m_assembly(assembly),
-    m_harmonics(harmonics)
+    m_harmonics(harmonics),
+    m_coeffs(2*harmonics+1)
 {
     solver = backend->create_lu_solver();
     alloc_buffers();
@@ -106,13 +108,11 @@ void HBVLM::alloc_buffers() {
     }
     // Mesh
     MultiDim<3> panels_3D;
-    MultiDim<4> panels_4D;
     MultiDim<2> panels_2D;
     MultiDim<3> verts_wing_3D;
     MultiDim<2> transforms_2D;
     for (const auto& [ns, nc] : assembly_wings) {
         panels_3D.push_back({ns, nc, 3});
-        panels_4D.push_back({ns, nc, 3, unknowns});
         panels_2D.push_back({ns, nc});
         verts_wing_3D.push_back({ns+1, nc+1, 4});
         transforms_2D.push_back({4, 4});
@@ -128,15 +128,18 @@ void HBVLM::alloc_buffers() {
     gamma_coeffs.init({n, unknowns});
     gamma_coeffs_h.init({n, unknowns});
     gamma_wing.init({n, unknowns});
-    dgamma_wing.init({n, unknowns});
+    dgamma_wing_dt.init({n, unknowns});
     residual.init({n, unknowns});
     dft_d.init({unknowns, unknowns});
     dft_h.init({unknowns, unknowns});
     ddft_d.init({unknowns, unknowns});
     ddft_h.init({unknowns, unknowns});
+    coeffs_h.init({2, unknowns});
+    coeffs_d.init({2, unknowns});
+    coeffs_c_d.init({2, unknowns});
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
-    aero_forces.init(panels_4D);
+    aero_forces.init(panels_3D);
     transforms_h.init(transforms_2D);
     transforms.init(transforms_2D);
     solver->init(lhs.view());
@@ -359,8 +362,8 @@ void HBVLM::run(f32 t_start, f32 omega) {
         const TensorView1fD& _gamma_in, 
         const TensorView1fD& _gamma_out
     ){
-        auto gamma_in  = _gamma_in.reshape(lhs.view().shape(0), 2*m_harmonics+1);
-        auto gamma_out = _gamma_out.reshape(lhs.view().shape(0), 2*m_harmonics+1);
+        auto gamma_in  = _gamma_in.reshape(lhs.view().shape(0), m_coeffs);
+        auto gamma_out = _gamma_out.reshape(lhs.view().shape(0), m_coeffs);
 
         rhs.view().fill(0.f);
         // Note this only work on a single wing
@@ -369,8 +372,8 @@ void HBVLM::run(f32 t_start, f32 omega) {
             .slice(All, -1, All);
             
         // For each unknown we fill their respective rhs column in a matrix free fashion
-        for (i32 s = 0; s < 2*m_harmonics+1; s++) {
-            const f32 t_final = t_start + period * (f32)s / (f32)(2*m_harmonics+1);
+        for (i32 s = 0; s < m_coeffs; s++) {
+            const f32 t_final = t_start + period * (f32)s / (f32)(m_coeffs);
             const i64 t_steps = static_cast<i64>(std::round(t_final / dt));
             const f32 t = (f32)t_steps * dt; // t_final rounded to nearest dt
 
@@ -422,20 +425,87 @@ void HBVLM::run(f32 t_start, f32 omega) {
     
     // Compute the forces coefficients
     {
+        // Maybe we should use mesh dims throughout the code ...
+        i64 c_ns = colloc_d.views()[0].shape(0);
+        i64 c_nc = colloc_d.views()[0].shape(1);
         backend->blas->gemm(1.0f, gamma_coeffs.view(), dft_d.view(), 0.0f, gamma_wing.view(), BLAS::Trans::No, BLAS::Trans::Yes);
-        backend->blas->gemm(1.0f, gamma_coeffs.view(), ddft_d.view(), 0.0f, dgamma_wing.view(), BLAS::Trans::No, BLAS::Trans::Yes);
-        for (i32 s = 0; s < 2*m_harmonics+1; s++) {
-            // const f32 tn = period * (f32)s / (f32)(2*m_harmonics+1);
-            // build_scaled_fourier_series(fourier_factors_h.view(), omega, tn);
-            // TODO: compute unsteady forces
-            // TODO: compute coefficients
+        backend->blas->gemm(1.0f, gamma_coeffs.view(), ddft_d.view(), 0.0f, dgamma_wing_dt.view(), BLAS::Trans::No, BLAS::Trans::Yes);
+        for (i32 s = 0; s < m_coeffs; s++) {
+            const f32 t_final = period * (f32)s / (f32)(m_coeffs);
+            const i64 t_steps = static_cast<i64>(std::round(t_final / dt));
+            const f32 t = (f32)t_steps * dt; // t_final rounded to nearest dt
+
+            for (i64 m = 0; m < assembly_wings.size(); m++) {
+                auto transform = m_assembly.surface_kinematics()[m]->transform(t);
+                transform.store(transforms_h.views()[m].ptr(), transforms_h.views()[m].stride(1));
+                transforms_h.views()[m].to(transforms.views()[m]);
+            }
+
+            backend->displace_wing(transforms.views(), verts_wing.views(), verts_wing_init.views());
+            backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
+
+            // TODO: move this into its own standalone function
+            for (i64 m = 0; m < assembly_wings.size(); m++) {
+                const auto transform_node = m_assembly.surface_kinematics()[m];
+                const auto& colloc_h_m = colloc_h.views()[m];
+                const auto& velocities_h_m = velocities_h.views()[m];
+                const auto& velocities_m = velocities.views()[m];
+                const auto mat_transform_dual = transform_node->transform_dual(t);
+
+                for (i64 j = 0; j < colloc_h_m.shape(1); j++) {
+                    for (i64 i = 0; i < colloc_h_m.shape(0); i++) {
+                        auto local_velocity = -transform_node->linear_velocity(mat_transform_dual, {colloc_h_m(i, j, 0), colloc_h_m(i, j, 1), colloc_h_m(i, j, 2)});
+                        velocities_h_m(i, j, 0) = local_velocity.x;
+                        velocities_h_m(i, j, 1) = local_velocity.y;
+                        velocities_h_m(i, j, 2) = local_velocity.z;
+                    }
+                }
+                velocities_h_m.to(velocities_m);
+            }
+            const linalg::float3 freestream = -m_assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
+
+            auto gamma_wing_s = gamma_wing.view().slice(All, s).reshape(c_ns, c_nc);
+            auto dgamma_wing_dt_s = dgamma_wing_dt.view().slice(All, s).reshape(c_ns, c_nc);
+            gamma_wing_s.to(gamma_wing_delta.view());
+            backend->blas->axpy(
+                -1.0f,
+                gamma_wing_s.slice(All, Range{0, -2}),
+                gamma_wing_delta.view().slice(All, Range{1, -1})
+            );
+            backend->forces_unsteady2(
+                verts_wing.views()[0],
+                gamma_wing_delta.view(),
+                dgamma_wing_dt_s,
+                velocities.views()[0],
+                areas_d.views()[0],
+                normals_d.views()[0],
+                aero_forces.views()[0]
+            );
+            coeffs_h.view()(0, s) = backend->coeff_cl_multibody(
+                aero_forces.views(),
+                areas_d.views(),
+                freestream,
+                1.0f // TODO: remove hardcoded rho
+            );
+            const auto transform_node0 = m_assembly.surface_kinematics()[0];
+            const auto transform_mat = transform_node0->transform(t);
+            auto ref_pt = linalg::mul(transform_mat, {0.5f, 0.0f, 0.0f, 1.0f});
+            coeffs_h.view()(1, s) = backend->coeff_cm_multibody(
+                aero_forces.views(),
+                verts_wing.views(),
+                areas_d.views(),
+                {ref_pt.x, ref_pt.y, ref_pt.z},
+                freestream,
+                1.0f // TODO: remove hardcoded rho
+            ).y; // Warning: pure assignment doesnt work for gpu
         }
-        // TODO: Apply DFT to obtain fourier coefficients for cl and cm
+        coeffs_h.view().to(coeffs_d.view());
+        backend->blas->gemm(1.0f, coeffs_d.view(), dft_d.view(), 0.0f, coeffs_c_d.view());
+        coeffs_c_d.view().to(coeffs_h.view());
     }
 
     // Compute time domain solution from the obtained fourier coeffs
     {
-
         auto& gamma_coeffs_hv = gamma_coeffs_h.view();
         gamma_coeffs.view().to(gamma_coeffs_hv);
         std::ofstream gamma_data("hbvlm_gamma_" + backend->name + ".txt");
