@@ -95,23 +95,42 @@ def nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt):
 
     return vec_t, u, v, a
 
+# Single dof Van der Pol oscillator
+# def create_motion_system(mu=5):
+#     theta = 1.0
+#     kappa = 1.0
+#     # NLvib params
+#     def nonlinear_func(t, u, v):
+#         return np.array([- mu * u[0]**2 * v[0]])
+    
+#     M = np.array([[theta]])
+#     C = np.array([[-mu]])
+#     K = np.array([[kappa]])
+
+#     return M, C, K, nonlinear_func
+
+# 2 dof coupled Van der Pol oscillators
 def create_motion_system(mu=5):
     theta = 1.0
     kappa = 1.0
     # NLvib params
     def nonlinear_func(t, u, v):
-        return np.array([- mu * u[0]**2 * v[0]])
+        return np.array([
+            - mu * u[0]**2 * v[0],
+            - mu * u[1]**2 * v[1]
+        ])
     
-    M = np.array([[theta]])
-    C = np.array([[-mu]])
-    K = np.array([[kappa]])
+    M = np.array([[theta, 0.0], [0.0, theta]])
+    C = np.array([[-mu, 0.0], [0.0, -mu]])
+    K = np.array([[1 + kappa, - kappa], [- kappa, 1 + kappa]])
 
     return M, C, K, nonlinear_func
 
-def integrate_duffing(t_final, dt, mu):
-    u0 = np.array([1.0])
-    v0 = np.array([0.0])
+def integrate_motion_system(t_final, dt, mu):
     M, C, K, nonlinear_func = create_motion_system(mu)
+    u0 = np.zeros(M.shape[0])
+    v0 = np.zeros(M.shape[0])
+    u0[0] = 1.0
     t, u, v, a = nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
 
     return t, u
@@ -182,7 +201,7 @@ def numerical_jac(f, x):
         jac[:, j] = (f(xp) - f(xm)) / delta
     return jac
 
-def plot_hb_timedomain(t_begin, t_end, dt, dofs, X, omega, harmonics):
+def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics):
     if not getenv("PLOT"): 
         return
     # Plot the result in time domain
@@ -196,17 +215,22 @@ def plot_hb_timedomain(t_begin, t_end, dt, dofs, X, omega, harmonics):
         sol[0:dofs, i] = uf_sol_ @ b
         sol[dofs:2*dofs, i] = uf_sol_ @ db
         sol[2*dofs:3*dofs, i] = uf_sol_ @ ddb
-
-    fig = px.line(x=vec_t, y=sol[0, :], title=f"Duffing Oscillator (omega={omega})")
-    return fig
+    
+    fig.add_trace(
+        go.Scatter(
+            x=vec_t,
+            y=sol[0, :],
+            name="HB"
+        )
+    )
 
 def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
     ext_res = np.zeros_like(X)
     ext_res[:-2] = residual_func(X)
 
     # Integral orthogonality phase condition
-    X_mat = X[:-2].reshape(2*H+1, 1).T
-    X_mat_ref = X_ref[:-2].reshape(2*H+1, 1).T
+    X_mat = X[:-2].reshape(2*H+1, n_dofs).T
+    X_mat_ref = X_ref[:-2].reshape(2*H+1, n_dofs).T
     orthogonality = 0
     for k in range(1, H+1):
         orthogonality += k * (np.dot(X_mat_ref[:, 2*k], X_mat[:, 2*k-1]) - np.dot(X_mat_ref[:, 2*k-1], X_mat[:, 2*k]))
@@ -257,7 +281,8 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     Continuation for autonomous systems using the harmonic balance method
     """
     samples = int(2*H+1)
-    dofs = 1
+    M__, _, _, _ = create_motion_system(param_start)
+    dofs = M__.shape[0]
 
     N = (H+1)*(2**3) # sampling points (needs to be power of 2)
     # N = 4*H+1
@@ -356,7 +381,10 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     X_mat[:, 0] = X0
 
     if getenv("PLOT"):
-        plot_hb_timedomain(0.0, 4 * np.pi / X_mat[-1, 0], 0.02, dofs, X_mat[:-2, 0], X_mat[-1, 0], H).show()
+        fig2 = go.Figure()
+        fig2.update_layout(title=f"Van der Pol Oscillator (omega={X_mat[-1, 0]})")
+        plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, 0], 0.02, dofs, X_mat[:-2, 0], X_mat[-1, 0], H)
+        fig2.show()
     
     iteration = 1
     while iteration < max_continuation_steps:
@@ -404,10 +432,23 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
             break
 
     if getenv("PLOT"):
-        fig = px.scatter(x=X_mat[-2, :iteration], y=np.sqrt(X_mat[1, :iteration]**2 + X_mat[2, :iteration]**2), title="Parameter continuation")
+        fig = go.Figure()
+        fig.update_layout(title="Continuation")
+        for h in range(1, H+1):
+            fig.add_trace(
+                go.Scattergl(
+                    x = X_mat[-2, :iteration],
+                    y = np.sqrt(X_mat[2*h-1, :iteration]**2 + X_mat[2*h, :iteration]**2),
+                    name = f"Harmonic {h}",
+                    mode = "lines+markers"
+                )
+            )
         fig.show()
 
-        plot_hb_timedomain(0.0, 4 * np.pi / X_mat[-1, iteration-1], 0.02, dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H).show()
+        fig2 = go.Figure()
+        fig2.update_layout(title=f"Van der Pol Oscillator (omega={X_mat[-1, iteration-1]})")
+        plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, iteration-1], 0.02, dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H)
+        fig2.show()
 
 if __name__ == "__main__":
     # HB Continuation
@@ -420,64 +461,65 @@ if __name__ == "__main__":
     t_final = 500.0
     dt = 0.05
 
-    t, u = integrate_duffing(t_final, dt, param_start)
+    t, u = integrate_motion_system(t_final, dt, param_start)
 
     # 1. Extract the last 25% of the signal
     N = len(t)
     idx_start = int(0.75 * N)
     t_tr = t[idx_start:]
-    u_tr = u[0, idx_start:]
+    u_tr = u[:, idx_start:]
     N_tr = len(t_tr)
-    # if getenv("PLOT"):
-    #     fig = px.line(x=t_tr, y=u_tr, title="Duffing Oscillator Time integration")
-    #     fig.show()
+    n_dofs = u.shape[0]
 
-    w = np.hanning(N_tr)         # Create the Hann window of the same length as u_tr
-    u_tr_windowed = u_tr * w     # Multiply the signal by the window
+    # Apply Hann window to reduce spectral leakage:
+    window = np.hanning(N_tr)             # shape (N_tr,)
+    u_tr_windowed = u_tr * window[None, :]  # shape (n_dofs, N_tr)
 
-    U_fft = np.fft.fft(u_tr_windowed)
-    norm_factor = np.sum(w)
+    # Compute the Fourier transform along the time axis:
+    U_fft = np.fft.fft(u_tr_windowed, axis=1)
+    norm_factor = window.sum()
+
+    # Frequency vector (same for all DoFs):
     freqs = np.fft.fftfreq(N_tr, dt)
 
+    # Restrict to positive frequencies (excluding 0):
     pos = freqs > 0
-    f_pos = freqs[pos]
-    U_pos = U_fft[pos]
-    amp = np.abs(U_pos)
-    i0 = np.argmax(amp)
-    f0 = f_pos[i0]
-    omega0 = 2*np.pi * f0
-    print(f"omega0 = {omega0:.3f}")
+    f_pos = freqs[pos]      # shape (N_freqs,)
+    U_pos = U_fft[:, pos]   # shape (n_dofs, N_freqs)
 
-    a0 = np.real(U_fft[0]) / norm_factor
-    a_coeffs = np.zeros(H+1)  # a0,..., aH; a0 has been computed already.
-    b_coeffs = np.zeros(H+1)  # here b_coeffs[0] is not used.
-    a_coeffs[0] = a0
+    # For each DoF, pick the base frequency f0 as that corresponding to maximum amplitude:
+    ref_dof = 0
+    amplitude_ref = np.abs(U_pos[ref_dof, :])
+    i0_ref = np.argmax(amplitude_ref)
+    f0 = f_pos[i0_ref]
+    omega0 = 2 * np.pi * f0  # Base angular frequency (scalar).
+    print(f"Base frequency: {omega0:.3f} rad/s")
+    
+    coeffs = np.zeros((n_dofs, 2*H+1))
+    coeffs[:, 0] = np.real(U_fft[:, 0]) / norm_factor
 
-    for h in range(1, H+1):
-        target = h * f0
-        # Find index among positive frequencies closest to target
-        i = np.argmin(np.abs(f_pos - target))
-        Y = U_pos[i]
-        # Multiply by 2 as usual since you’re using a one-sided spectrum.
-        a_coeffs[h] = 2 * np.real(Y) / norm_factor
-        b_coeffs[h] = -2 * np.imag(Y) / norm_factor
-
-    X0_list = [a_coeffs[0]]
     for h in range(1, H + 1):
-        X0_list.append(a_coeffs[h])
-        X0_list.append(b_coeffs[h])
-    X0_list.append(param_start)
-    X0_list.append(omega0)
-    X0 = np.array(X0_list)
+        target = h * f0  # shape (n_dofs,)
+        idx = np.argmin(np.abs(f_pos - target))
+        Y = U_pos[:, idx]
+        # Multiply by 2 because we are using a one-sided FFT (except the DC term).
+        coeffs[:, 2*h-1] = 2 * np.real(Y) / norm_factor
+        coeffs[:, 2*h] = -2 * np.imag(Y) / norm_factor
 
-    assert X0.shape[0] == (2*H+1)+2 # continuation param + HB omega
+    X0 = np.zeros(n_dofs * (2*H+1) + 2)
+    X0[:-2] = coeffs.T.reshape(-1)
+    X0[-2] = param_start
+    X0[-1] = omega0
 
     if (getenv("PLOT")):
-        fig = plot_hb_timedomain(t_tr[0], t_tr[-1], 0.1, 1, X0[:-2], X0[-1], H)
+        fig = go.Figure()
+        fig.update_layout(title=f"Van der Pol Oscillator (omega={omega0})")
+        plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, X0[:-2], X0[-1], H)
+
         fig.add_trace(
             go.Scatter(
                 x=t_tr,  # x values for new line
-                y=u_tr,  # y values for new line
+                y=u_tr[0, :],  # y values for new line
                 name='Time integration',  # legend label
                 line=dict(color='red')  # optional: customize line color
             )
