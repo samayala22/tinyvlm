@@ -8,6 +8,7 @@
 #include "tinypbar.hpp"
 #include "tinytimer.hpp"
 #include "tinytest.hpp"
+#include "npy.hpp"
 
 #include "vlm.hpp"
 #include "vlm_backend.hpp"
@@ -18,11 +19,13 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
+#define EXTERNAL_KINEMATICS 1
+
 class HBVLM final: public Simulation {
     public:
         HBVLM(const std::string& backend_name, const Assembly& assembly, const i32 harmonics);
         ~HBVLM() = default;
-        void run(f32 t_final, f32 omega);
+        void run(f32 t_final, f32 omega, f32 vars_b);
 
         MultiTensor3fD colloc_d{backend->memory.get()};
         MultiTensor3fH colloc_h{backend->memory.get()};
@@ -277,11 +280,25 @@ void anderson_acceleration(
     std::printf("Anderson fixed point converged in %d iterations\n", k);
 }
 
-void HBVLM::run(f32 t_start, f32 omega) {
+// TODO: replace this garbage with blas->scal
+void nondimensionalize_verts(TensorView3fH& verts, const f32 b) {
+    for (i64 j = 0; j < verts.shape(1); j++) {
+        for (i64 i = 0; i < verts.shape(0); i++) {
+            verts(i, j, 0) /= b;
+            verts(i, j, 1) /= b;
+            verts(i, j, 2) /= b;
+        }
+    }
+}
+
+void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
     const tiny::ScopedTimer timer("HBVLM::run");
     const f32 period = 2.0f * PI_f / omega;
 
-    for (const auto& [wing_init, wing] : zip(verts_wing_init.views(), verts_wing.views())) wing_init.to(wing);
+    for (const auto& [vwing_init_d, vwing_init_h] : zip(verts_wing_init.views(), verts_wing_init_h.views())) {
+        nondimensionalize_verts(vwing_init_h, vars_b);
+        vwing_init_h.to(vwing_init_d);
+    }
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
     for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
 
@@ -501,8 +518,25 @@ void HBVLM::run(f32 t_start, f32 omega) {
             ).y;
         }
         coeffs_h.view().to(coeffs_d.view());
+        {
+            npy::npy_data_ptr<f32> bin_tdata;
+            bin_tdata.data_ptr = coeffs_h.ptr();
+            bin_tdata.shape = {(npy::ndarray_len_t)coeffs_h.view().shape(0), (npy::ndarray_len_t)coeffs_h.view().shape(1)};
+            bin_tdata.fortran_order = true;
+            npy::write_npy("hbvlm_t.npy", bin_tdata);
+        }
+
+        std::cout << coeffs_h.view() << std::endl;
         backend->blas->gemm(1.0f, coeffs_d.view(), dft_d.view(), 0.0f, coeffs_c_d.view());
         coeffs_c_d.view().to(coeffs_h.view());
+    }
+
+    {
+        npy::npy_data_ptr<f32> bin_data;
+        bin_data.data_ptr = coeffs_h.ptr();
+        bin_data.shape = {(npy::ndarray_len_t)coeffs_h.view().shape(0), (npy::ndarray_len_t)coeffs_h.view().shape(1)};
+        bin_data.fortran_order = true;
+        npy::write_npy("hbvlm.npy", bin_data);
     }
 
     // Compute time domain solution from the obtained fourier coeffs
@@ -538,45 +572,92 @@ void HBVLM::run(f32 t_start, f32 omega) {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
     const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_20x5.x"};
-    const std::vector<std::string> backends = get_available_backends();
+    // const std::vector<std::string> backends = get_available_backends();
+    const std::vector<std::string> backends = {"cpu"};
 
     auto solvers = tiny::make_combination(meshes, backends);
  
     // Geometry
     const f32 b = 0.5f; // half chord
 
-    // Define simulation length
+    #ifndef EXTERNAL_KINEMATICS
+    Define simulation length
     const f32 cycles = 9.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 k = 0.25f; // reduced frequency
     const f32 omega = k * u_inf / b;
+    const i32 harmonics = 5;
     const f32 t_final = cycles * 2.0f * PI_f / omega;
-    const i32 harmonics = 10;
-
-    std::printf("t_final: %f\n", t_final);
-    std::printf("omega: %f\n", omega);
-
-    KinematicsTree kinematics_tree;
-
     // Periodic pitching
     const f32 amplitude = 3.f; // amplitude in degrees
+    KinematicsTree kinematics_tree;
     auto fs = kinematics_tree.add([=](const fwd::Float& t) {
         return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
     });
+    auto heave = kinematics_tree.add([=](const fwd::Float& t) {
+        return translation_matrix<fwd::Float>({0.f, 0.f, 0.0f * t});
+    })->after(fs);
     auto pitch = kinematics_tree.add([=](const fwd::Float& t) {
         return rotation_matrix<fwd::Float>(
             {0.25f, 0.0f, 0.0f},
             {0.0f, 1.0f, 0.0f},
             to_radians(amplitude) * fwd::sin(omega * t) + to_radians(2.f) * fwd::sin(3.f * omega * t));
-    })->after(fs);
+    })->after(heave);
+    #else
+    if (argc != 3) { // hbvlm <omega> <harmonics>
+        return 0;
+    }
+    const f32 cycles = 9.0f;
+    const f32 u_inf = 1.0f; // freestream velocity
+    const f32 omega = std::stof(argv[1]);
+    const i32 H = std::stoi(argv[2]);
+    const f32 t_final = cycles * 2.0f * PI_f / omega;
+    const f32 a_h = -0.5f;
 
+    std::printf("t_final: %f, omega: %f, harmonics: %i\n", t_final, omega, H);
+
+    npy::npy_data kin_coeffs_npy = npy::read_npy<f64>("kin_coeffs.npy");
+    TINY_ASSERT_EQ(kin_coeffs_npy.fortran_order, false);
+    TINY_ASSERT_EQ(kin_coeffs_npy.shape[0], (npy::ndarray_len_t)(2));
+    TINY_ASSERT_EQ(kin_coeffs_npy.shape[1], (npy::ndarray_len_t)(2*H+1));
+
+    f64* h_ptr = kin_coeffs_npy.data.data();
+    f64* alpha_ptr = h_ptr + 2*H+1;
+
+    KinematicsTree kinematics_tree;
+    auto fs = kinematics_tree.add([=](const fwd::Float& t) {
+        return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
+    });
+    auto heave = kinematics_tree.add([=](const fwd::Float& t) {
+        fwd::Float z = (f32)h_ptr[0];
+        for (i32 h = 0; h < H; h++) {
+            f32 k = (f32)(h+1);
+            z += fwd::cos(omega * t * k) * (f32)h_ptr[2*h+1];
+            z += fwd::sin(omega * t * k) * (f32)h_ptr[2*h+2];
+        }
+        return translation_matrix<fwd::Float>({0.f, 0.f, -z});
+    })->after(fs);
+    auto pitch = kinematics_tree.add([=](const fwd::Float& t) {
+        fwd::Float alpha = (f32)alpha_ptr[0];
+        for (i32 h = 0; h < H; h++) {
+            f32 k = (f32)(h+1);
+            alpha += fwd::cos(omega * t * k) * (f32)alpha_ptr[2*h+1];
+            alpha += fwd::sin(omega * t * k) * (f32)alpha_ptr[2*h+2];
+        }
+        return rotation_matrix<fwd::Float>(
+            {1.f + a_h, 0.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f}, 
+            alpha);
+    })->after(heave);
+    #endif
+ 
     for (const auto& [mesh_name, backend_name] : solvers) {
         Assembly assembly(fs);
         assembly.add(mesh_name, pitch);
-        HBVLM simulation{backend_name, assembly, harmonics};
-        simulation.run(t_final, omega);
+        HBVLM simulation{backend_name, assembly, H};
+        simulation.run(t_final, omega, b);
     }
     return 0;
 }

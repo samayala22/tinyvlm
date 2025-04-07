@@ -9,33 +9,33 @@ from pathlib import Path
 
 @dataclass
 class Vars:
-    a: float = 0.0  # Dimensionless distance between mid-chord and EA (-0.5)
-    b: float = 0.0  # Semi-chord (0.127 m)
-    c: float = 0.0  # Dimensionless distance between flap hinge and mid-chord (0.5)
-    I_alpha: float = 0.0  # Mass moment of inertia of the wing-flap about wing EA per unit span
-    I_beta: float = 0.0  # Mass moment of inertia of the flap about flap hinge line
-    k_h: float = 0.0  # linear structural stiffness coefficient of plunging
-    k_alpha: float = 0.0  # Linear structural stiffness coefficient of plunging
-    k_beta: float = 0.0  # Linear structural stiffness coefficient of pitching
-    m: float = 0.0  # Mass of wing-aileron per span
-    m_t: float = 0.0  # Mass of wing-aileron and the supports per span
-    r_alpha: float = 0.0  # dimensionless radius of gyration around elastic axis
-    r_beta: float = 0.0  # dimensionless radius of gyration around flap hinge axis
-    S_alpha: float = 0.0  # static mass moment of wing-flap about wing EA per unit span
-    S_beta: float = 0.0  # static mass moment of flap about flap hinge line per unit span
-    x_alpha: float = 0.0  # dimensionless distance between airfoil EA and the center of gravity
-    x_beta: float = 0.0  # dimensionless distance between flap center of gravity and flap hinge axis
-    omega_h: float = 0.0  # uncoupled plunge natural frequency
-    omega_alpha: float = 0.0  # uncoupled pitch natural frequency
-    omega_beta: float = 0.0  # uncoupled flap natural frequency
-    rho: float = 0.0  # fluid density
-    zeta_h: float = 0.0  # plunge damping ratio
-    zeta_alpha: float = 0.0  # pitch damping ratio
-    zeta_beta: float = 0.0  # flap damping ratio
-    U: float = 0.0  # velocity
-    sigma: float = 0.0
-    V: float = 0.0
-    mu: float = 0.0
+    a: float # Dimensionless distance between mid-chord and EA (-0.5)
+    b: float # Semi-chord (0.127 m)
+    c: float # Dimensionless distance between flap hinge and mid-chord (0.5)
+    I_alpha: float # Mass moment of inertia of the wing-flap about wing EA per unit span
+    I_beta: float # Mass moment of inertia of the flap about flap hinge line
+    k_h: float # linear structural stiffness coefficient of plunging
+    k_alpha: float # Linear structural stiffness coefficient of plunging
+    k_beta: float # Linear structural stiffness coefficient of pitching
+    m: float # Mass of wing-aileron per span
+    m_t: float # Mass of wing-aileron and the supports per span
+    r_alpha: float # dimensionless radius of gyration around elastic axis
+    r_beta: float # dimensionless radius of gyration around flap hinge axis
+    S_alpha: float # static mass moment of wing-flap about wing EA per unit span
+    S_beta: float # static mass moment of flap about flap hinge line per unit span
+    x_alpha: float # dimensionless distance between airfoil EA and the center of gravity
+    x_beta: float # dimensionless distance between flap center of gravity and flap hinge axis
+    omega_h: float # uncoupled plunge natural frequency
+    omega_alpha: float # uncoupled pitch natural frequency
+    omega_beta: float # uncoupled flap natural frequency
+    rho: float # fluid density
+    zeta_h: float # plunge damping ratio
+    zeta_alpha: float # pitch damping ratio
+    zeta_beta: float # flap damping ratio
+    U: float # velocity
+    sigma: float
+    V: float
+    mu: float
 
 # def alpha_freeplay(alpha, M0 = 0.0, Mf = 0.0, delta = np.radians(4.24), a_f = np.radians(-2.12)):
 #     if (alpha < a_f):
