@@ -2,6 +2,7 @@ import numpy as np
 import scipy as sp
 import plotly.graph_objects as go
 import os
+import subprocess
 
 # local imports
 import dof2
@@ -44,21 +45,41 @@ def create_fourier_basis(omega, harmonics, t):
 
     return basis, dbasis, ddbasis
 
-def create_motion_system(mu=5):
-    theta = 1.0
-    kappa = 1.0
+def create_motion_system(omega, U_param):
     # NLvib params
-    def nonlinear_func(t, u, v):
+    def func_nl(t, u, v):
         return np.array([
-            - mu * u[0]**2 * v[0],
-            - mu * u[1]**2 * v[1]
+            - (ndv.omega / U_param)**2 * u[0],
+            - 1/(U_param**2) * torsional_func(u[1])
         ])
     
-    M = np.array([[theta, 0.0], [0.0, theta]])
-    C = np.array([[-mu, 0.0], [0.0, -mu]])
-    K = np.array([[1 + kappa, - kappa], [- kappa, 1 + kappa]])
+    def func_nl_freq(X):
+        np.save("build/windows/x64/release/kin_coeffs.npy", X)
+        subprocess.run(
+            ["./build/windows/x64/release/hbvlm.exe", f"{omega}", f"{H}"],
+            cwd="./build/windows/x64/release/"
+        )
+        coeffs = np.load("build/windows/x64/release/hbvlm_t.npy")
+        coeffs[0, :] = - coeffs[0, :] / (np.pi * ndv.mu)
+        coeffs[1, :] = (2.0 * coeffs[1, :]) / (np.pi * ndv.mu * ndv.r_a**2)
+        # coeffs = np.zeros_like(coeffs)
+        return coeffs
+    
+    M = np.array([
+        [1.0, ndv.x_a],
+        [ndv.x_a / (ndv.r_a**2), 1.0]
+    ])
+    C = np.array([
+        [2.0*ndv.zeta_h*(ndv.omega/U_param), 0],
+        [0, 2.0*ndv.zeta_a/U_param]
+    ])
+    # K = np.array([
+    #     [(ndv.omega/U_param)**2, 0],
+    #     [0, 1/(U_param**2)]
+    # ])
+    K = np.zeros((2,2))
 
-    return M, C, K, nonlinear_func
+    return M, C, K, func_nl, func_nl_freq
 
 # TODO: improve this disgusting function
 def tangent_predictor(J, zref, Xref):
@@ -103,12 +124,16 @@ def numerical_jac(f, x):
     n = len(x)
     jac = np.zeros((n, n))
     for j in range(n):
-        h = max(fd.cd2_h(x[j]), np.finfo(np.float32).eps) # temporary limiter because hbvlm is in single precision
+        # h = max(fd.cd2_h(x[j]), np.finfo(np.float32).eps) # temporary limiter because hbvlm is in single precision
+        h = 1e-6
         xp, xm = x.copy(), x.copy()
         xp[j] += h
         xm[j] -= h
         delta = xp[j] - xm[j]
         jac[:, j] = (f(xp) - f(xm)) / delta
+        if np.allclose(jac[:, j], np.zeros(n)):
+            print("Jacobian zero problem")
+    
     return jac
 
 def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics):
@@ -154,13 +179,15 @@ def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
         ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
     return ext_res
 
+def extended_residual_jacobian(X, X_ref, z_ref, residual_func, init: bool):
+    return numerical_jac(lambda _X: extended_residual(_X, X_ref, z_ref, residual_func, init), X)
+
 def continuation(H, param_start, param_end, ds=.01, X0=None):
     """
     Continuation for autonomous systems using the harmonic balance method
     """
     samples = int(2*H+1)
-    M__, _, _, _ = create_motion_system(param_start)
-    dofs = M__.shape[0]
+    dofs = 2
 
     N = (H+1)*(2**3) # sampling points (needs to be power of 2)
     # N = 4*H+1
@@ -174,7 +201,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         """
         Om = X[-1]
         param = X[-2]
-        M, C, K, func_nl = create_motion_system(param)
+        M, C, K, func_nl, func_nl_freq = create_motion_system(Om, param)
         R_lin = np.zeros(X.shape[0]-2)
 
         # Compute the linear forces in Fourier domain
@@ -187,21 +214,37 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         # Optimized FFT version of AFT
         T = 2 * np.pi / Om      # period
         dt = T / N              # time step
-        Xc = vdp.X_to_complex(X[:-2].reshape(samples, dofs).T) # Each row for each dof, each col corresponds to the jth fourier coeffs (a0, a1, b1, ... aH, bH)
+        Xc_real = X[:-2].reshape(samples, dofs).T
+        Xc = vdp.X_to_complex(Xc_real) # Each row for each dof, each col corresponds to the jth fourier coeffs (a0, a1, b1, ... aH, bH)
         q = np.fft.irfft(Xc, N, axis=1, norm='forward') # no scaling
+        # for tidx in range(N):
+        #     t = tidx * dt
+        #     q2 = Xc_real[0, 0]
+        #     for h in range(0, H):
+        #         k = h+1
+        #         q2 += np.cos(Om * t * k) * Xc_real[0, 2*h+1]
+        #         q2 += np.sin(Om * t * k) * Xc_real[0, 2*h+2]
+        #     np.testing.assert_allclose(q2, q[0, tidx])
+
         k = np.arange(H+1)
         q_dot = np.fft.irfft(1j * Om * k * Xc, N, axis=1, norm='forward')
         # q_ddot = np.fft.ifft(- (w**2) * Q_fft).real
         R_nlt = np.zeros((dofs, N))
-        dt = T / N
         for s in range(N):
             t_n = s * dt
             R_nlt[:, s] = - func_nl(t_n, q[:, s], q_dot[:, s])
+        R_nlft = - func_nl_freq(Xc_real)
         
         R_nl_fft = np.fft.rfft(R_nlt, N, axis=1, norm='backward') # no scaling
-        R_nl = vdp.X_to_real(R_nl_fft[:, :H+1] / N).T.reshape(-1)
-
-        return R_lin + R_nl
+        R_nlf_fft = np.fft.rfft(R_nlft, samples, axis=1, norm='backward') # no scaling
+        R_nl = vdp.X_to_real((R_nl_fft[:, :H+1]) / N).T.reshape(-1)
+        R_nlf = vdp.X_to_real(R_nlf_fft / samples).T.reshape(-1)
+        # R_nlft2 = np.fft.irfft(vdp.X_to_complex(vdp.X_to_real(R_nlf_fft / samples)), samples, axis=1, norm='forward')
+        # R_nlft3 = np.fft.irfft(vdp.X_to_complex(vdp.X_to_real(np.fft.rfft(R_nlft, N, axis=1, norm='backward') / N)), N, axis=1, norm='forward') # no scaling
+        # print(R_nlft.shape, R_nlft2.shape)
+        # np.testing.assert_allclose(R_nlft3, R_nlft)
+        # np.testing.assert_allclose(R_nlft2, R_nlft)
+        return R_lin + R_nl + R_nlf
     
     print("Initial guess X0:", X0)
 
@@ -224,13 +267,14 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     res0 = hb_residual(X0)
     print("Initial spectral residual norm:", np.linalg.norm(res0))
     # print(np.concatenate(([res0[0]], res0[1::2]/2, res0[2::2]/2)))
-    
     Xp, info, ier, mesg = sp.optimize.fsolve(
         extended_residual,
         X0,
         args=(X_ref, z_ref, hb_residual,True),
+        fprime=extended_residual_jacobian,
+        # epsfcn=1e-5,
         full_output=True,
-        xtol = 1e-6
+        xtol = 1e-6,
     ) # initial step
     if ier != 1:
         print(f"Initial step failed: {mesg}")
@@ -245,9 +289,11 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
 
     if getenv("PLOT"):
         fig2 = go.Figure()
-        fig2.update_layout(title=f"Van der Pol Oscillator (omega={X_mat[-1, 0]})")
+        fig2.update_layout(title=f"2 dof (omega={X_mat[-1, 0]})")
         plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, 0], 0.02, dofs, X_mat[:-2, 0], X_mat[-1, 0], H)
         fig2.show()
+
+    return
     
     iteration = 1
     while iteration < max_continuation_steps:
@@ -270,6 +316,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
                 extended_residual,
                 Xp,
                 args=(X_ref, z_ref, hb_residual,False),
+                fprime=extended_residual_jacobian,
                 full_output=True,
                 xtol = 1e-6
             )
@@ -309,7 +356,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         fig.show()
 
         fig2 = go.Figure()
-        fig2.update_layout(title=f"Van der Pol Oscillator (omega={X_mat[-1, iteration-1]})")
+        fig2.update_layout(title=f"2 dof (omega={X_mat[-1, iteration-1]})")
         plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, iteration-1], 0.02, dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H)
         fig2.show()
 
@@ -352,46 +399,61 @@ if __name__ == "__main__":
 
     idx_start = int(0.75 * len(sol.t))
     t_tr = sol.t[idx_start:]
-    u_tr = sol.y[0:2, idx_start:]
+    u_tr = sol.y[0:2, idx_start:]   # shape = (n_dofs, N_tr)
     N_tr = len(t_tr)
     n_dofs = 2
 
-    # Apply Hann window to reduce spectral leakage:
-    window = np.hanning(N_tr)             # shape (N_tr,)
-    u_tr_windowed = u_tr * window[None, :]  # shape (n_dofs, N_tr)
+    # ----- 1. Apply Hann Window -----
+    # Create a Hann (Hanning) window to taper the data and reduce spectral leakage
+    window = np.hanning(N_tr)       # shape = (N_tr,)
+    u_tr_windowed = u_tr * window[None, :]  # Multiply each DoF by the window
 
-    # Compute the Fourier transform along the time axis:
-    U_fft = np.fft.fft(u_tr_windowed, axis=1)
+    # ----- 2. Zero Padding -----
+    # Zero-pad the windowed signal to increase frequency resolution.
+    zp_factor = 4                   # Adjust the zero-padding factor as desired
+    N_fft = zp_factor * N_tr        # New FFT length after padding
+
+    # Compute the FFT on the windowed and zero-padded data along the time axis.
+    U_fft = np.fft.fft(u_tr_windowed, n=N_fft, axis=1)
+
+    # Normalization factor.
+    # You may include a dt scaling if necessary, e.g., norm_factor = dt * window.sum()
     norm_factor = window.sum()
 
-    # Frequency vector (same for all DoFs):
-    freqs = np.fft.fftfreq(N_tr, dt)
-
-    # Restrict to positive frequencies (excluding 0):
+    # ----- 3. Compute the Frequency Vector -----
+    # Use N_fft so that the frequency resolution is improved.
+    freqs = np.fft.fftfreq(N_fft, dt)
+    # Restrict to positive frequencies (excluding 0 if desired)
     pos = freqs > 0
-    f_pos = freqs[pos]      # shape (N_freqs,)
-    U_pos = U_fft[:, pos]   # shape (n_dofs, N_freqs)
+    f_pos = freqs[pos]             # Array of positive frequencies
+    U_pos = U_fft[:, pos]          # FFT coefficients corresponding to positive frequencies
 
-    # For each DoF, pick the base frequency f0 as that corresponding to maximum amplitude:
+    # ----- 4. Identify the Base Frequency -----
+    # Use a reference degree of freedom (here, dof 0) to pick the base frequency.
     ref_dof = 0
     amplitude_ref = np.abs(U_pos[ref_dof, :])
     i0_ref = np.argmax(amplitude_ref)
     f0 = f_pos[i0_ref]
-    omega0 = 2 * np.pi * f0  # Base angular frequency (scalar).
-    print(f"Base frequency: {omega0:.3f} rad/s")
-    
-    coeffs = np.zeros((n_dofs, 2*H+1))
-    coeffs[:, 0] = np.real(U_fft[:, 0]) / norm_factor
+    omega0 = 2 * np.pi * f0        # Base angular frequency
+    print("Base frequency: {:.3f} rad/s".format(omega0))
+
+    # ----- 5. Extract Fourier Coefficients -----
+    # Arrange the Fourier coefficients into an array.
+    # The 0 index holds the DC term. Then (2*h-1) and (2*h) hold cosine and sine terms respectively.
+    coeffs = np.zeros((n_dofs, 2 * H + 1))
+    coeffs[:, 0] = np.real(U_fft[:, 0]) / norm_factor  # DC term
 
     for h in range(1, H + 1):
-        target = h * f0  # shape (n_dofs,)
-        idx = np.argmin(np.abs(f_pos - target))
+        target = h * f0
+        idx = np.argmin(np.abs(f_pos - target))  # Find the closest frequency bin
         Y = U_pos[:, idx]
-        # Multiply by 2 because we are using a one-sided FFT (except the DC term).
-        coeffs[:, 2*h-1] = 2 * np.real(Y) / norm_factor
-        coeffs[:, 2*h] = -2 * np.imag(Y) / norm_factor
+        # Multiply by 2 because of the use of a one-sided FFT (except the DC term)
+        coeffs[:, 2 * h - 1] = 2 * np.real(Y) / norm_factor   # cosine coefficient
+        coeffs[:, 2 * h]     = -2 * np.imag(Y) / norm_factor   # sine coefficient
 
-    X0 = np.zeros(n_dofs * (2*H+1) + 2)
+    # ----- 6. Assemble the Initial Guess Vector -----
+    # For example, combining Fourier coefficients with additional parameters.
+    X0 = np.zeros(n_dofs * (2 * H + 1) + 2)
     X0[:-2] = coeffs.T.reshape(-1)
     X0[-2] = param_start
     X0[-1] = omega0
@@ -411,4 +473,4 @@ if __name__ == "__main__":
                 )
             )
         fig.show()
-    # continuation(H, param_start, param_end, ds, X0)
+    continuation(H, param_start, param_end, ds, X0)

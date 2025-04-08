@@ -2,6 +2,7 @@
 #include <string>
 #include <functional> // std::function
 #include <fstream>
+#include <filesystem>
 
 #include "tinycombination.hpp"
 #include "tinyad.hpp"
@@ -18,6 +19,7 @@
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
+namespace fs = std::filesystem;
 
 #define EXTERNAL_KINEMATICS 1
 
@@ -295,9 +297,10 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
     const tiny::ScopedTimer timer("HBVLM::run");
     const f32 period = 2.0f * PI_f / omega;
 
-    for (const auto& [vwing_init_d, vwing_init_h] : zip(verts_wing_init.views(), verts_wing_init_h.views())) {
+    for (const auto& [vwing, vwing_init_d, vwing_init_h] : zip(verts_wing.views(), verts_wing_init.views(), verts_wing_init_h.views())) {
         nondimensionalize_verts(vwing_init_h, vars_b);
         vwing_init_h.to(vwing_init_d);
+        vwing_init_d.to(vwing);
     }
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
     for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
@@ -308,7 +311,7 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
     const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
     const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
     const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
-    const f32 dt = last_panel_chord / linalg::length(m_assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f}));
+    const f32 dt = last_panel_chord;
     const i64 max_t_steps = static_cast<i64>((t_start+period+dt) / dt);
 
     // Allocate the wake geometry
@@ -348,7 +351,7 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
         }
     }
 
-    // Assemble DFT matrix (TODO: move to a standalone function)
+    // Assemble orthogonal DFT matrix (TODO: move to a standalone function)
     {
         const i32 unknowns = 2 * m_harmonics + 1;
         const f32 sqrt_unknowns = 1.f / std::sqrt(static_cast<f32>(unknowns));
@@ -525,13 +528,13 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
             bin_tdata.fortran_order = true;
             npy::write_npy("hbvlm_t.npy", bin_tdata);
         }
-
-        std::cout << coeffs_h.view() << std::endl;
-        backend->blas->gemm(1.0f, coeffs_d.view(), dft_d.view(), 0.0f, coeffs_c_d.view());
-        coeffs_c_d.view().to(coeffs_h.view());
     }
 
+    #ifndef EXTERNAL_KINEMATICS
     {
+        backend->blas->gemm(1.0f, coeffs_d.view(), dft_d.view(), 0.0f, coeffs_c_d.view());
+        coeffs_c_d.view().to(coeffs_h.view());
+
         npy::npy_data_ptr<f32> bin_data;
         bin_data.data_ptr = coeffs_h.ptr();
         bin_data.shape = {(npy::ndarray_len_t)coeffs_h.view().shape(0), (npy::ndarray_len_t)coeffs_h.view().shape(1)};
@@ -570,10 +573,11 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
             hb_data << t << " " << gamma << " " << cl << " " << cm << "\n";
         }
     }
+    #endif
 }
 
 int main(int argc, char** argv) {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_20x5.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x5.x"};
     // const std::vector<std::string> backends = get_available_backends();
     const std::vector<std::string> backends = {"cpu"};
 
@@ -583,12 +587,12 @@ int main(int argc, char** argv) {
     const f32 b = 0.5f; // half chord
 
     #ifndef EXTERNAL_KINEMATICS
-    Define simulation length
+    // Define simulation length
     const f32 cycles = 9.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 k = 0.25f; // reduced frequency
     const f32 omega = k * u_inf / b;
-    const i32 harmonics = 5;
+    const i32 H = 5;
     const f32 t_final = cycles * 2.0f * PI_f / omega;
     // Periodic pitching
     const f32 amplitude = 3.f; // amplitude in degrees
@@ -607,7 +611,7 @@ int main(int argc, char** argv) {
     })->after(heave);
     #else
     if (argc != 3) { // hbvlm <omega> <harmonics>
-        return 0;
+        return 1;
     }
     const f32 cycles = 9.0f;
     const f32 u_inf = 1.0f; // freestream velocity
@@ -617,14 +621,15 @@ int main(int argc, char** argv) {
     const f32 a_h = -0.5f;
 
     std::printf("t_final: %f, omega: %f, harmonics: %i\n", t_final, omega, H);
-
-    npy::npy_data kin_coeffs_npy = npy::read_npy<f64>("kin_coeffs.npy");
-    TINY_ASSERT_EQ(kin_coeffs_npy.fortran_order, false);
+    
+    fs::path npy_path = fs::path(R"(C:\Users\samay\Documents\GitHub\tinyvlm\build\windows\x64\release\kin_coeffs.npy)");
+    npy::npy_data kin_coeffs_npy = npy::read_npy<f64>(npy_path.string());
+    TINY_ASSERT_EQ(kin_coeffs_npy.fortran_order, true);
     TINY_ASSERT_EQ(kin_coeffs_npy.shape[0], (npy::ndarray_len_t)(2));
     TINY_ASSERT_EQ(kin_coeffs_npy.shape[1], (npy::ndarray_len_t)(2*H+1));
 
     f64* h_ptr = kin_coeffs_npy.data.data();
-    f64* alpha_ptr = h_ptr + 2*H+1;
+    f64* alpha_ptr = h_ptr + 1;
 
     KinematicsTree kinematics_tree;
     auto fs = kinematics_tree.add([=](const fwd::Float& t) {
@@ -634,8 +639,8 @@ int main(int argc, char** argv) {
         fwd::Float z = (f32)h_ptr[0];
         for (i32 h = 0; h < H; h++) {
             f32 k = (f32)(h+1);
-            z += fwd::cos(omega * t * k) * (f32)h_ptr[2*h+1];
-            z += fwd::sin(omega * t * k) * (f32)h_ptr[2*h+2];
+            z += fwd::cos(omega * t * k) * (f32)h_ptr[2*(h+1)];
+            z += fwd::sin(omega * t * k) * (f32)h_ptr[2*(h+2)];
         }
         return translation_matrix<fwd::Float>({0.f, 0.f, -z});
     })->after(fs);
@@ -643,8 +648,8 @@ int main(int argc, char** argv) {
         fwd::Float alpha = (f32)alpha_ptr[0];
         for (i32 h = 0; h < H; h++) {
             f32 k = (f32)(h+1);
-            alpha += fwd::cos(omega * t * k) * (f32)alpha_ptr[2*h+1];
-            alpha += fwd::sin(omega * t * k) * (f32)alpha_ptr[2*h+2];
+            alpha += fwd::cos(omega * t * k) * (f32)alpha_ptr[2*(h+1)];
+            alpha += fwd::sin(omega * t * k) * (f32)alpha_ptr[2*(h+2)];
         }
         return rotation_matrix<fwd::Float>(
             {1.f + a_h, 0.0f, 0.0f},

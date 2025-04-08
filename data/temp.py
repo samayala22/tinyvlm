@@ -46,22 +46,23 @@ hbvlm_coeffs_complex = X_to_complex(hbvlm_coeffs)
 q = np.fft.irfft(hbvlm_coeffs_complex, N, axis=1, norm='forward') # no scaling
 
 hbvlm_coeffs2 = np.fft.rfft(hbvlm_coeffs_t, N, axis=1, norm='backward') # no scaling
-hbvlm_coeffs2 = X_to_real(hbvlm_coeffs2[:, :H+1] / N)
-q2 = np.fft.irfft(X_to_complex(hbvlm_coeffs2), N, axis=1, norm='forward') # no scaling
+q2 = np.fft.irfft(X_to_complex(X_to_real(np.fft.rfft(hbvlm_coeffs_t, N, axis=1, norm='backward') / N)), N, axis=1, norm='forward') # no scaling
 
-print(hbvlm_coeffs)
-print(hbvlm_coeffs2)
+np.testing.assert_allclose(hbvlm_coeffs_t, q2, rtol=1e-5)
 
-gt = np.array([
-    [0.19405, 0.252967, 0.0455411, 0.179768, 0.332238, 0.0207069, -0.289905, -0.13586, -0.0773092, -0.332283, -0.235856],
-    [-0.0141577, 0.0632901, 0.0432724, 0.024986, 0.071175, 0.0577027, -0.0350097, -0.0632378, -0.0244726, -0.046118, -0.0814341]
-])
+# print(hbvlm_coeffs)
+# print(hbvlm_coeffs2)
 
-print(np.linalg.norm(q - gt))
-print(np.abs(q - gt))
+# gt = np.array([
+#     [0.19405, 0.252967, 0.0455411, 0.179768, 0.332238, 0.0207069, -0.289905, -0.13586, -0.0773092, -0.332283, -0.235856],
+#     [-0.0141577, 0.0632901, 0.0432724, 0.024986, 0.071175, 0.0577027, -0.0350097, -0.0632378, -0.0244726, -0.046118, -0.0814341]
+# ])
 
-print(np.linalg.norm(q2 - gt))
-print(np.abs(q2 - gt))
+# print(np.linalg.norm(q - gt))
+# print(np.abs(q - gt))
 
-print("cl: ", q[0, :])
-print("cm: ", q[1, :])
+# print(np.linalg.norm(q2 - gt))
+# print(np.abs(q2 - gt))
+
+# print("cl: ", q[0, :])
+# print("cm: ", q[1, :])

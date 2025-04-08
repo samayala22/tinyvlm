@@ -450,7 +450,7 @@ if __name__ == "__main__":
 
     # Dimensionless params
     flutter_speed = 6.285
-    flutter_ratio = 0.8
+    flutter_ratio = 0.3
     # vec_U = np.linspace(1.0, 7, 50)
     vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     newton_err_thresh = 1e-7
