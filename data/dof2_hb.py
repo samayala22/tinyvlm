@@ -217,14 +217,6 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         Xc_real = X[:-2].reshape(samples, dofs).T
         Xc = vdp.X_to_complex(Xc_real) # Each row for each dof, each col corresponds to the jth fourier coeffs (a0, a1, b1, ... aH, bH)
         q = np.fft.irfft(Xc, N, axis=1, norm='forward') # no scaling
-        # for tidx in range(N):
-        #     t = tidx * dt
-        #     q2 = Xc_real[0, 0]
-        #     for h in range(0, H):
-        #         k = h+1
-        #         q2 += np.cos(Om * t * k) * Xc_real[0, 2*h+1]
-        #         q2 += np.sin(Om * t * k) * Xc_real[0, 2*h+2]
-        #     np.testing.assert_allclose(q2, q[0, tidx])
 
         k = np.arange(H+1)
         q_dot = np.fft.irfft(1j * Om * k * Xc, N, axis=1, norm='forward')
@@ -239,11 +231,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         R_nlf_fft = np.fft.rfft(R_nlft, samples, axis=1, norm='backward') # no scaling
         R_nl = vdp.X_to_real((R_nl_fft[:, :H+1]) / N).T.reshape(-1)
         R_nlf = vdp.X_to_real(R_nlf_fft / samples).T.reshape(-1)
-        # R_nlft2 = np.fft.irfft(vdp.X_to_complex(vdp.X_to_real(R_nlf_fft / samples)), samples, axis=1, norm='forward')
-        # R_nlft3 = np.fft.irfft(vdp.X_to_complex(vdp.X_to_real(np.fft.rfft(R_nlft, N, axis=1, norm='backward') / N)), N, axis=1, norm='forward') # no scaling
-        # print(R_nlft.shape, R_nlft2.shape)
-        # np.testing.assert_allclose(R_nlft3, R_nlft)
-        # np.testing.assert_allclose(R_nlft2, R_nlft)
+
         return R_lin + R_nl + R_nlf
     
     print("Initial guess X0:", X0)
@@ -393,10 +381,11 @@ if __name__ == "__main__":
         r_a = 0.5,
         U = param_start
     )
+
     y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
     system = dof2.create_monolithic_system(y0, ndv, torsional_func)
     sol = sp.integrate.solve_ivp(system, (0, t_final), y0, t_eval=np.arange(0, t_final, dt), method='RK45')
-
+    
     idx_start = int(0.75 * len(sol.t))
     t_tr = sol.t[idx_start:]
     u_tr = sol.y[0:2, idx_start:]   # shape = (n_dofs, N_tr)
@@ -473,4 +462,5 @@ if __name__ == "__main__":
                 )
             )
         fig.show()
+
     continuation(H, param_start, param_end, ds, X0)

@@ -282,24 +282,16 @@ void anderson_acceleration(
     std::printf("Anderson fixed point converged in %d iterations\n", k);
 }
 
-// TODO: replace this garbage with blas->scal
-void nondimensionalize_verts(TensorView3fH& verts, const f32 b) {
-    for (i64 j = 0; j < verts.shape(1); j++) {
-        for (i64 i = 0; i < verts.shape(0); i++) {
-            verts(i, j, 0) /= b;
-            verts(i, j, 1) /= b;
-            verts(i, j, 2) /= b;
-        }
-    }
-}
-
 void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
     const tiny::ScopedTimer timer("HBVLM::run");
     const f32 period = 2.0f * PI_f / omega;
+    const f32 period_interval = period / (f32)m_coeffs;
+    const f32 rho = 1.0f; // TODO: take this as input
 
     for (const auto& [vwing, vwing_init_d, vwing_init_h] : zip(verts_wing.views(), verts_wing_init.views(), verts_wing_init_h.views())) {
-        nondimensionalize_verts(vwing_init_h, vars_b);
-        vwing_init_h.to(vwing_init_d);
+        // Nondimensionalize the coordinates
+        backend->blas->scal(1.0f / vars_b, vwing_init_d.slice(All, All, Range{0, 3}).reshape(3*vwing_init_d.shape(0)*vwing_init_d.shape(1)));
+        vwing_init_d.to(vwing_init_h);
         vwing_init_d.to(vwing);
     }
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
@@ -311,7 +303,11 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
     const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
     const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
     const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
-    const f32 dt = last_panel_chord;
+    // const f32 dt = last_panel_chord; // ideal chord
+    TINY_ASSERT_GT(period_interval, last_panel_chord); // TODO: check what happens if this is not the case
+    const f32 dt = period_interval / std::ceil(period_interval / last_panel_chord); // period interval must be a multiple of dt
+    std::printf("period_interval: %f | chord: %f | dt: %f\n", period_interval, last_panel_chord, dt);
+
     const i64 max_t_steps = static_cast<i64>((t_start+period+dt) / dt);
 
     // Allocate the wake geometry
@@ -442,7 +438,14 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
     auto& gamma_coeffs_v = gamma_coeffs.view();
     gamma_coeffs_v.fill(0.f);
 
-    anderson_acceleration(backend.get(), gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)), hb_vlm_iter, 100, 1e-5, 5);
+    anderson_acceleration(
+        backend.get(),
+        gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)),
+        hb_vlm_iter,
+        100, // max iterations
+        1e-6, // tolerance
+        5 // history
+    );
     
     // Compute the forces coefficients
     {
@@ -506,7 +509,7 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
                 aero_forces.views(),
                 areas_d.views(),
                 freestream,
-                1.0f // TODO: remove hardcoded rho
+                rho
             );
             const auto transform_node0 = m_assembly.surface_kinematics()[0];
             const auto transform_mat = transform_node0->transform(t);
@@ -517,7 +520,7 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
                 areas_d.views(),
                 {ref_pt.x, ref_pt.y, ref_pt.z},
                 freestream,
-                1.0f // TODO: remove hardcoded rho
+                rho
             ).y;
         }
         coeffs_h.view().to(coeffs_d.view());
@@ -559,18 +562,21 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
             f32 gamma = gamma_coeffs_hv(0,0) * sqrt_unknowns;
             f32 cl = coeffs_cl_v(0) * sqrt_unknowns;
             f32 cm = coeffs_cm_v(0) * sqrt_unknowns;
+            f32 dgamma = 0.f;
             for (i64 j = 0; j < m_harmonics; j++) {
                 const f32 k = (f32)(j+1);
                 const f32 c = std::cos(omega * t * k) * sqrt_unknowns_2;
                 const f32 s = std::sin(omega * t * k) * sqrt_unknowns_2;
                 gamma += gamma_coeffs_hv(0, 2*j+1) * c;
                 gamma += gamma_coeffs_hv(0, 2*j+2) * s;
+                dgamma += - gamma_coeffs_hv(0, 2*j+1) * omega * k * s;
+                dgamma += gamma_coeffs_hv(0, 2*j+2) * omega * k * c;
                 cl += coeffs_cl_v(2*j+1) * c;
                 cl += coeffs_cl_v(2*j+2) * s;
                 cm += coeffs_cm_v(2*j+1) * c;
                 cm += coeffs_cm_v(2*j+2) * s;
             }
-            hb_data << t << " " << gamma << " " << cl << " " << cm << "\n";
+            hb_data << t << " " << gamma << " " << cl << " " << cm << " " << dgamma << "\n";
         }
     }
     #endif
@@ -590,12 +596,14 @@ int main(int argc, char** argv) {
     // Define simulation length
     const f32 cycles = 9.0f;
     const f32 u_inf = 1.0f; // freestream velocity
-    const f32 k = 0.25f; // reduced frequency
-    const f32 omega = k * u_inf / b;
-    const i32 H = 5;
+    // const f32 k = 0.25f; // reduced frequency
+    // const f32 omega = k * u_inf / b;
+    const f32 omega = 0.145;
+    const i32 H = 15;
     const f32 t_final = cycles * 2.0f * PI_f / omega;
     // Periodic pitching
-    const f32 amplitude = 3.f; // amplitude in degrees
+    // const f32 amplitude = to_radians(3.f); // amplitude in radians
+    const f32 amplitude = 0.05f;
     KinematicsTree kinematics_tree;
     auto fs = kinematics_tree.add([=](const fwd::Float& t) {
         return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
@@ -604,10 +612,12 @@ int main(int argc, char** argv) {
         return translation_matrix<fwd::Float>({0.f, 0.f, 0.0f * t});
     })->after(fs);
     auto pitch = kinematics_tree.add([=](const fwd::Float& t) {
+        fwd::Float alpha = amplitude * fwd::sin(omega * t);
         return rotation_matrix<fwd::Float>(
-            {0.25f, 0.0f, 0.0f},
+            {0.5f, 0.0f, 0.0f},
             {0.0f, 1.0f, 0.0f},
-            to_radians(amplitude) * fwd::sin(omega * t) + to_radians(2.f) * fwd::sin(3.f * omega * t));
+            alpha
+        );
     })->after(heave);
     #else
     if (argc != 3) { // hbvlm <omega> <harmonics>
@@ -630,6 +640,7 @@ int main(int argc, char** argv) {
 
     f64* h_ptr = kin_coeffs_npy.data.data();
     f64* alpha_ptr = h_ptr + 1;
+    i32 ld = 2;
 
     KinematicsTree kinematics_tree;
     auto fs = kinematics_tree.add([=](const fwd::Float& t) {
@@ -639,8 +650,8 @@ int main(int argc, char** argv) {
         fwd::Float z = (f32)h_ptr[0];
         for (i32 h = 0; h < H; h++) {
             f32 k = (f32)(h+1);
-            z += fwd::cos(omega * t * k) * (f32)h_ptr[2*(h+1)];
-            z += fwd::sin(omega * t * k) * (f32)h_ptr[2*(h+2)];
+            z += fwd::cos(omega * t * k) * (f32)h_ptr[(2*h+1)*ld];
+            z += fwd::sin(omega * t * k) * (f32)h_ptr[(2*h+2)*ld];
         }
         return translation_matrix<fwd::Float>({0.f, 0.f, -z});
     })->after(fs);
@@ -648,9 +659,10 @@ int main(int argc, char** argv) {
         fwd::Float alpha = (f32)alpha_ptr[0];
         for (i32 h = 0; h < H; h++) {
             f32 k = (f32)(h+1);
-            alpha += fwd::cos(omega * t * k) * (f32)alpha_ptr[2*(h+1)];
-            alpha += fwd::sin(omega * t * k) * (f32)alpha_ptr[2*(h+2)];
+            alpha += fwd::cos(omega * t * k) * (f32)alpha_ptr[(2*h+1)*ld];
+            alpha += fwd::sin(omega * t * k) * (f32)alpha_ptr[(2*h+2)*ld];
         }
+
         return rotation_matrix<fwd::Float>(
             {1.f + a_h, 0.0f, 0.0f},
             {0.0f, 1.0f, 0.0f}, 

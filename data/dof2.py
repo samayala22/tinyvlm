@@ -363,6 +363,7 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         showgrid=True,
         gridwidth=1,
         gridcolor='rgba(128, 128, 128, 0.2)',
+        tickformat='.2e'        
     )
 
 def plot_uvlm(fig):
@@ -388,21 +389,21 @@ def plot_uvlm(fig):
     add_data_and_psd(fig, uvlm_t, uvlm_h, "UVLM", 1, 1, mode='markers')
     add_data_and_psd(fig, uvlm_t, uvlm_hd, "UVLM", 1, 2, mode='markers')
     add_data_and_psd(fig, uvlm_t, uvlm_f_h, "UVLM", 1, 3, mode='markers')
-    add_data_and_psd(fig, uvlm_t, np.degrees(uvlm_a), "UVLM", 3, 1, mode='markers')
+    add_data_and_psd(fig, uvlm_t, uvlm_a, "UVLM", 3, 1, mode='markers')
     add_data_and_psd(fig, uvlm_t, uvlm_ad, "UVLM", 3, 2, mode='markers')
     add_data_and_psd(fig, uvlm_t, uvlm_f_a, "UVLM", 3, 3, mode='markers')
 
 def plot_monolithic(fig, monolithic_sol):
     add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[0, :], "Monolithic", 1, 1)
     add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[2, :], "Monolithic", 1, 2)
-    add_data_and_psd(fig, monolithic_sol.t, np.degrees(monolithic_sol.y[1, :]), "Monolithic", 3, 1)
+    add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[1, :], "Monolithic", 3, 1)
     add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[3, :], "Monolithic", 3, 2)
 
 def plot_iterative(fig, vec_t_nd, u, v, a, F):
     add_data_and_psd(fig, vec_t_nd, u[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 1)
     add_data_and_psd(fig, vec_t_nd, v[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 2)
     add_data_and_psd(fig, vec_t_nd, F[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 3)
-    add_data_and_psd(fig, vec_t_nd, np.degrees(u[1, :]), f"Iterative (ε = {newton_err_thresh})", 3, 1)
+    add_data_and_psd(fig, vec_t_nd, u[1, :], f"Iterative (ε = {newton_err_thresh})", 3, 1)
     add_data_and_psd(fig, vec_t_nd, v[1, :], f"Iterative (ε = {newton_err_thresh})", 3, 2)
     add_data_and_psd(fig, vec_t_nd, F[1, :], f"Iterative (ε = {newton_err_thresh})", 3, 3)
 
@@ -492,7 +493,7 @@ if __name__ == "__main__":
         dt_nd = 0.2
         t_final_nd = 2000.0
 
-        # vec_t, u, v, a, F = solve_iterative(ndv, t_final_nd, dt_nd)
+        vec_t, u, v, a, F = solve_iterative(ndv, t_final_nd, dt_nd)
         y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
         system = create_monolithic_system(y0, ndv, torsional_func)
         monolithic_sol = solve_ivp(system, (0, t_final_nd), y0, t_eval=np.arange(0, t_final_nd, dt_nd), method='RK45')
@@ -501,9 +502,9 @@ if __name__ == "__main__":
             fig = make_subplots(
                 rows=4, cols=3,
                 subplot_titles=(
-                    'Heave', 'Heave Velocity', 'Heave Force',
+                    'Heave', 'Heave Velocity', 'Aero Heave Force',
                     'Heave PSD', 'Heave Velocity PSD', 'Heave Force PSD',
-                    'Pitch', 'Pitch Velocity', 'Pitch Force',
+                    'Pitch', 'Pitch Velocity', 'Aero Pitch Force',
                     'Pitch PSD', 'Pitch Velocity PSD', 'Pitch Force PSD'
                 ),
                 vertical_spacing=0.1,
@@ -511,7 +512,7 @@ if __name__ == "__main__":
             )
             # plot_uvlm(fig)
             plot_monolithic(fig, monolithic_sol)
-            # plot_iterative(fig, vec_t, u, v, a, F)
+            plot_iterative(fig, vec_t, u, v, a, F)
             format_fig(fig)
             fig.write_html("build/2dof.html", include_mathjax='cdn')
 
