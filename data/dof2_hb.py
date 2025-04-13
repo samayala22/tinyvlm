@@ -45,6 +45,31 @@ def create_fourier_basis(omega, harmonics, t):
 
     return basis, dbasis, ddbasis
 
+def run_hbvlm(omega, H, reset_logfile=False):
+        executable_path = "./build/windows/x64/release/hbvlm.exe"
+        cwd_path = "./build/windows/x64/release/"
+        logfile_path = "build/windows/x64/release/dof2_hbvlm.log"
+        # subprocess.run(
+        #     ["./build/windows/x64/release/hbvlm.exe", f"{omega:.9f}", f"{H}"],
+        #     cwd="./build/windows/x64/release/"
+        # )
+        if reset_logfile:
+            with open(logfile_path, 'w') as logfile:
+                pass
+            return
+
+        with open(logfile_path, 'a') as logfile:
+            result = subprocess.run(
+                [executable_path, f"{omega:.9f}", f"{H}"],
+                cwd=cwd_path,
+                stdout=logfile,
+                stderr=subprocess.STDOUT,  # Combine stderr with stdout
+                text=True
+            )
+        
+        if result.returncode != 0:
+            print(f"Command failed (return code {result.returncode}), see {logfile_path}")
+
 def create_motion_system(omega, U_param):
     # NLvib params
     def func_nl(t, u, v):
@@ -55,11 +80,8 @@ def create_motion_system(omega, U_param):
     
     def func_nl_freq(X):
         np.save("build/windows/x64/release/kin_coeffs.npy", X)
-        subprocess.run(
-            ["./build/windows/x64/release/hbvlm.exe", f"{omega}", f"{H}"],
-            cwd="./build/windows/x64/release/"
-        )
-        coeffs = np.load("build/windows/x64/release/hbvlm_t.npy")
+        run_hbvlm(omega, H)
+        coeffs = np.load("build/windows/x64/release/hbvlm_t.npy").astype(np.float64)
         coeffs[0, :] = - coeffs[0, :] / (np.pi * ndv.mu)
         coeffs[1, :] = (2.0 * coeffs[1, :]) / (np.pi * ndv.mu * ndv.r_a**2)
         # coeffs = np.zeros_like(coeffs)
@@ -124,8 +146,8 @@ def numerical_jac(f, x):
     n = len(x)
     jac = np.zeros((n, n))
     for j in range(n):
-        # h = max(fd.cd2_h(x[j]), np.finfo(np.float32).eps) # temporary limiter because hbvlm is in single precision
-        h = 1e-6
+        h = max(fd.cd2_h(x[j]), 1e-5) # limiter because hbvlm is in single precision
+        # print(f"{j}| h: {h:.5e}")
         xp, xm = x.copy(), x.copy()
         xp[j] += h
         xm[j] -= h
@@ -252,25 +274,27 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     z_ref = np.zeros_like(X0)
     z_ref[-2] = 1
 
+    run_hbvlm(0, 0, reset_logfile=True) # only reset logfile
     res0 = hb_residual(X0)
     print("Initial spectral residual norm:", np.linalg.norm(res0))
-    # print(np.concatenate(([res0[0]], res0[1::2]/2, res0[2::2]/2)))
+
+    xtol = 1e-5
     Xp, info, ier, mesg = sp.optimize.fsolve(
         extended_residual,
         X0,
         args=(X_ref, z_ref, hb_residual,True),
         fprime=extended_residual_jacobian,
-        # epsfcn=1e-5,
         full_output=True,
-        xtol = 1e-6,
+        xtol = xtol,
     ) # initial step
     if ier != 1:
         print(f"Initial step failed: {mesg}")
         return
-    
+
     print(Xp)
     # X0[:-1] = Xp.x[:-1] # TODO: check if we cant just copy the whole thing
     X0 = Xp.copy()
+    print(f"param: {X0[-2]:.3f}, omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}, njev: {info['njev']}")
 
     X_mat = np.zeros((X0.shape[0], max_continuation_steps))
     X_mat[:, 0] = X0
@@ -280,9 +304,9 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         fig2.update_layout(title=f"2 dof (omega={X_mat[-1, 0]})")
         plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, 0], 0.02, dofs, X_mat[:-2, 0], X_mat[-1, 0], H)
         fig2.show()
-
-    return
     
+    return
+
     iteration = 1
     while iteration < max_continuation_steps:
         J = numerical_jac(lambda X: extended_residual(X, X_ref, z_ref, hb_residual, False), X0)
@@ -306,7 +330,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
                 args=(X_ref, z_ref, hb_residual,False),
                 fprime=extended_residual_jacobian,
                 full_output=True,
-                xtol = 1e-6
+                xtol = xtol
             )
             if ier == 1:
                 break
@@ -320,7 +344,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         X_old = X0.copy()
         X0 = Xtmp.copy()
 
-        print(f"param: {X0[-2]:.3f}, omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}")
+        print(f"param: {X0[-2]:.3f}, omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}, njev: {info['njev']}")
 
         # history
         X_mat[:, iteration] = X0
@@ -329,9 +353,11 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
             print("Continuation reached the end")
             break
 
+    np.save("build/windows/x64/release/dof2_continuation.npy", X_mat[:, :iteration])
+
     if getenv("PLOT"):
         fig = go.Figure()
-        fig.update_layout(title="Continuation")
+        fig.update_layout(title=f"2DOF Aeroelasticd Response ({torsional_spring_names[torsional_spring]} Pitch)")
         for h in range(1, H+1):
             fig.add_trace(
                 go.Scattergl(
@@ -341,6 +367,8 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
                     mode = "lines+markers"
                 )
             )
+        fig.update_xaxes(title_text=r"$\bar{U}$", showgrid=True)
+        fig.update_yaxes(title_text=r"$||H_{j}||^{2}$", showgrid=True)
         fig.show()
 
         fig2 = go.Figure()
@@ -363,11 +391,12 @@ if __name__ == "__main__":
     H = 7
     assert ((H+1) & H) == 0 # H+1 should be a power of 2
     flutter_speed = 6.285
-    flutter_ratio_start = 0.3
-    flutter_ratio_end = 0.5
+    flutter_ratio_start = 0.8
+    flutter_ratio_end = 0.8
     param_start = flutter_speed * flutter_ratio_start
+    # param_start = 4.0
     param_end = flutter_speed * flutter_ratio_end
-    ds = 0.02
+    ds = 0.05
     # Time integration
     t_final = 2000.0
     dt = 0.2

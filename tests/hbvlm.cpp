@@ -630,7 +630,7 @@ int main(int argc, char** argv) {
     const f32 t_final = cycles * 2.0f * PI_f / omega;
     const f32 a_h = -0.5f;
 
-    std::printf("t_final: %f, omega: %f, harmonics: %i\n", t_final, omega, H);
+    std::printf("t_final: %f, omega: %.8f, harmonics: %i\n", t_final, omega, H);
     
     fs::path npy_path = fs::path(R"(C:\Users\samay\Documents\GitHub\tinyvlm\build\windows\x64\release\kin_coeffs.npy)");
     npy::npy_data kin_coeffs_npy = npy::read_npy<f64>(npy_path.string());

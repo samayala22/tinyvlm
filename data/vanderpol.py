@@ -243,6 +243,9 @@ def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
         ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
     return ext_res
 
+def extended_residual_jacobian(X, X_ref, z_ref, residual_func, init: bool):
+    return numerical_jac(lambda _X: extended_residual(_X, X_ref, z_ref, residual_func, init), X)
+
 def X_to_complex(X):
     """
     Converts a dofs * (2H+1) real array [A0, A1, B1, ... A_H, B_H] to a dofs * (H+1) comlex array
@@ -276,6 +279,16 @@ def X_to_real(X):
     
     return Xr
 
+def reconstruct_jacobian(fjac, r_flat):
+    n = fjac.shape[0]
+    # Create empty matrix
+    R = np.zeros((n, n))
+    # Get indices for upper triangle (including diagonal)
+    rows, cols = np.triu_indices(n)
+    # Fill upper triangle with flattened r values
+    R[rows, cols] = r_flat
+    return fjac @ R
+
 def continuation(H, param_start, param_end, ds=.01, X0=None):
     """
     Continuation for autonomous systems using the harmonic balance method
@@ -287,8 +300,6 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     N = (H+1)*(2**3) # sampling points (needs to be power of 2)
     # N = 4*H+1
     print("Sampling points:", N)
-    def hb_residual2(x, param, om):
-        return hb_residual(np.concatenate((x, [param, om])))
     def hb_residual(X):
         """
         X[:-2]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
@@ -353,6 +364,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         extended_residual,
         X0,
         args=(X_ref, z_ref, hb_residual,True),
+        fprime=extended_residual_jacobian,
         full_output=True,
         xtol = 1e-6
     ) # initial step
@@ -373,7 +385,6 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     
     # print(Xp2)
 
-    print(Xp)
     # X0[:-1] = Xp.x[:-1] # TODO: check if we cant just copy the whole thing
     X0 = Xp.copy()
 
@@ -407,6 +418,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
                 extended_residual,
                 Xp,
                 args=(X_ref, z_ref, hb_residual,False),
+                fprime=extended_residual_jacobian,
                 full_output=True,
                 xtol = 1e-6
             )
@@ -422,7 +434,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         X_old = X0.copy()
         X0 = Xtmp.copy()
 
-        print(f"param: {X0[-2]:.3f}, omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}")
+        print(f"param: {X0[-2]:.3f}, omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}, njev: {info['njev']}")
 
         # history
         X_mat[:, iteration] = X0
