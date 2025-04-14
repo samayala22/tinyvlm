@@ -623,7 +623,7 @@ int main(int argc, char** argv) {
     if (argc != 3) { // hbvlm <omega> <harmonics>
         return 1;
     }
-    const f32 cycles = 9.0f;
+    const f32 cycles = 5.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 omega = std::stof(argv[1]);
     const i32 H = std::stoi(argv[2]);

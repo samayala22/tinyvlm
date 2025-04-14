@@ -1,6 +1,7 @@
 import numpy as np
 import scipy as sp
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import os
 import subprocess
 
@@ -8,6 +9,7 @@ import subprocess
 import dof2
 import vanderpol as vdp
 import finite_diff as fd
+import helpers
 
 np.set_printoptions(formatter={'float': '{:.4e}'.format}) # format shortE
 
@@ -16,15 +18,6 @@ def getenv(key):
     if int(var) == 0:
         return False
     return True
-
-def create_lanczos_filter(N, m=1):
-    L = np.zeros(N)
-    L[0] = 1
-    def sinc(x): return np.sin(np.pi * x) / (np.pi*x)
-    for i in range(1, N+1):
-        xi = i / (N+1)
-        L[i-1] = sinc(xi) ** m
-    return L
 
 def create_fourier_basis(omega, harmonics, t):
     unknowns = 2 * harmonics + 1
@@ -45,14 +38,12 @@ def create_fourier_basis(omega, harmonics, t):
 
     return basis, dbasis, ddbasis
 
+# @helpers.Timing(prefix="HBVLM: ")
 def run_hbvlm(omega, H, reset_logfile=False):
         executable_path = "./build/windows/x64/release/hbvlm.exe"
         cwd_path = "./build/windows/x64/release/"
         logfile_path = "build/windows/x64/release/dof2_hbvlm.log"
-        # subprocess.run(
-        #     ["./build/windows/x64/release/hbvlm.exe", f"{omega:.9f}", f"{H}"],
-        #     cwd="./build/windows/x64/release/"
-        # )
+
         if reset_logfile:
             with open(logfile_path, 'w') as logfile:
                 pass
@@ -69,6 +60,7 @@ def run_hbvlm(omega, H, reset_logfile=False):
         
         if result.returncode != 0:
             print(f"Command failed (return code {result.returncode}), see {logfile_path}")
+            exit(1)
 
 def create_motion_system(omega, U_param):
     # NLvib params
@@ -158,7 +150,7 @@ def numerical_jac(f, x):
     
     return jac
 
-def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics):
+def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics, label="HB"):
     if not getenv("PLOT"): 
         return
     # Plot the result in time domain
@@ -178,8 +170,10 @@ def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics):
             go.Scatter(
                 x=vec_t,
                 y=sol[dof, :],
-                name=f"HB dof {dof}"
-            )
+                name=f"{label} dof #{dof} (omega={omega:.3f})"
+            ),
+            row=(dof+1),
+            col=1
         )
 
 def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
@@ -204,58 +198,62 @@ def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
 def extended_residual_jacobian(X, X_ref, z_ref, residual_func, init: bool):
     return numerical_jac(lambda _X: extended_residual(_X, X_ref, z_ref, residual_func, init), X)
 
+def hb_residual(X):
+    """
+    X[:-2]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
+    where Xx is [xx_0, xx_1, ... xx_M] with M = n_dofs
+    X[-2]: Continuation parameter
+    X[-1]: Fourier series base frequency
+    """
+    Om = X[-1]
+    param = X[-2]
+    M, C, K, func_nl, func_nl_freq = create_motion_system(Om, param)
+    R_lin = np.zeros(X.shape[0]-2)
+
+    # Compute the linear forces in Fourier domain
+    R_lin[0:n_dofs] = K @ X[0:n_dofs]
+    for k in range(1, H+1):
+        i = (2*k-1) * n_dofs
+        R_lin[i:i+n_dofs] = (K - (k*Om)**2 * M) @ X[i:i+n_dofs] + k * Om * C @ X[i+n_dofs:i+2*n_dofs]
+        R_lin[i+n_dofs:i+2*n_dofs] = - k * Om * C @ X[i:i+n_dofs] + (K - (k*Om)**2 * M) @ X[i+n_dofs:i+2*n_dofs]
+
+    # Optimized FFT version of AFT
+    T = 2 * np.pi / Om      # period
+    dt = T / n_samples              # time step
+    Xc_real = X[:-2].reshape(n_coeffs, n_dofs).T
+    Xc = vdp.X_to_complex(Xc_real) # Each row for each dof, each col corresponds to the jth fourier coeffs (a0, a1, b1, ... aH, bH)
+    q = np.fft.irfft(Xc, n_samples, axis=1, norm='forward') # no scaling
+
+    k = np.arange(H+1)
+    q_dot = np.fft.irfft(1j * Om * k * Xc, n_samples, axis=1, norm='forward')
+    # q_ddot = np.fft.ifft(- (w**2) * Q_fft).real
+    R_nlt = np.zeros((n_dofs, n_samples))
+    for s in range(n_samples):
+        t_n = s * dt
+        R_nlt[:, s] = - func_nl(t_n, q[:, s], q_dot[:, s])
+    R_nlft = - func_nl_freq(Xc_real)
+    
+    R_nl_fft = np.fft.rfft(R_nlt, n_samples, axis=1, norm='backward') # no scaling
+    R_nlf_fft = np.fft.rfft(R_nlft, n_coeffs, axis=1, norm='backward') # no scaling
+    R_nl = vdp.X_to_real((R_nl_fft[:, :H+1]) / n_samples).T.reshape(-1)
+    R_nlf = vdp.X_to_real(R_nlf_fft / n_coeffs, 0).T.reshape(-1)
+
+    return R_lin + R_nl + R_nlf
+
+def solve_nonlinear_system(X0, X_ref, z_ref, init: bool, xtol=1e-5):
+    return sp.optimize.fsolve(
+        extended_residual,
+        X0,
+        args=(X_ref, z_ref, hb_residual, init),
+        fprime=extended_residual_jacobian,
+        full_output=True,
+        xtol = xtol,
+    )
+
 def continuation(H, param_start, param_end, ds=.01, X0=None):
     """
     Continuation for autonomous systems using the harmonic balance method
     """
-    samples = int(2*H+1)
-    dofs = 2
-
-    N = (H+1)*(2**3) # sampling points (needs to be power of 2)
-    # N = 4*H+1
-    print("Sampling points:", N)
-    def hb_residual(X):
-        """
-        X[:-2]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
-        where Xx is [xx_0, xx_1, ... xx_M] with M = dofs
-        X[-2]: Continuation parameter
-        X[-1]: Fourier series base frequency
-        """
-        Om = X[-1]
-        param = X[-2]
-        M, C, K, func_nl, func_nl_freq = create_motion_system(Om, param)
-        R_lin = np.zeros(X.shape[0]-2)
-
-        # Compute the linear forces in Fourier domain
-        R_lin[0:dofs] = K @ X[0:dofs]
-        for k in range(1, H+1):
-            i = (2*k-1) * dofs
-            R_lin[i:i+dofs] = (K - (k*Om)**2 * M) @ X[i:i+dofs] + k * Om * C @ X[i+dofs:i+2*dofs]
-            R_lin[i+dofs:i+2*dofs] = - k * Om * C @ X[i:i+dofs] + (K - (k*Om)**2 * M) @ X[i+dofs:i+2*dofs]
-
-        # Optimized FFT version of AFT
-        T = 2 * np.pi / Om      # period
-        dt = T / N              # time step
-        Xc_real = X[:-2].reshape(samples, dofs).T
-        Xc = vdp.X_to_complex(Xc_real) # Each row for each dof, each col corresponds to the jth fourier coeffs (a0, a1, b1, ... aH, bH)
-        q = np.fft.irfft(Xc, N, axis=1, norm='forward') # no scaling
-
-        k = np.arange(H+1)
-        q_dot = np.fft.irfft(1j * Om * k * Xc, N, axis=1, norm='forward')
-        # q_ddot = np.fft.ifft(- (w**2) * Q_fft).real
-        R_nlt = np.zeros((dofs, N))
-        for s in range(N):
-            t_n = s * dt
-            R_nlt[:, s] = - func_nl(t_n, q[:, s], q_dot[:, s])
-        R_nlft = - func_nl_freq(Xc_real)
-        
-        R_nl_fft = np.fft.rfft(R_nlt, N, axis=1, norm='backward') # no scaling
-        R_nlf_fft = np.fft.rfft(R_nlft, samples, axis=1, norm='backward') # no scaling
-        R_nl = vdp.X_to_real((R_nl_fft[:, :H+1]) / N).T.reshape(-1)
-        R_nlf = vdp.X_to_real(R_nlf_fft / samples).T.reshape(-1)
-
-        return R_lin + R_nl + R_nlf
-    
     print("Initial guess X0:", X0)
 
     # Continuation framework
@@ -278,15 +276,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     res0 = hb_residual(X0)
     print("Initial spectral residual norm:", np.linalg.norm(res0))
 
-    xtol = 1e-5
-    Xp, info, ier, mesg = sp.optimize.fsolve(
-        extended_residual,
-        X0,
-        args=(X_ref, z_ref, hb_residual,True),
-        fprime=extended_residual_jacobian,
-        full_output=True,
-        xtol = xtol,
-    ) # initial step
+    Xp, info, ier, mesg = solve_nonlinear_system(X0, X_ref, z_ref, True)
     if ier != 1:
         print(f"Initial step failed: {mesg}")
         return
@@ -299,13 +289,11 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     X_mat = np.zeros((X0.shape[0], max_continuation_steps))
     X_mat[:, 0] = X0
 
-    if getenv("PLOT"):
-        fig2 = go.Figure()
-        fig2.update_layout(title=f"2 dof (omega={X_mat[-1, 0]})")
-        plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, 0], 0.02, dofs, X_mat[:-2, 0], X_mat[-1, 0], H)
-        fig2.show()
-    
-    return
+    # if getenv("PLOT"):
+    #     fig2 = go.Figure()
+    #     fig2.update_layout(title=f"2 dof (omega={X_mat[-1, 0]})")
+    #     plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, 0], 0.02, n_dofs, X_mat[:-2, 0], X_mat[-1, 0], H)
+    #     fig2.show()
 
     iteration = 1
     while iteration < max_continuation_steps:
@@ -324,14 +312,7 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         z_ref = z.copy()
         while 1:
             Xp = X0 + direction*ds*z
-            Xtmp, info, ier, mesg = sp.optimize.fsolve(
-                extended_residual,
-                Xp,
-                args=(X_ref, z_ref, hb_residual,False),
-                fprime=extended_residual_jacobian,
-                full_output=True,
-                xtol = xtol
-            )
+            Xtmp, info, ier, mesg = solve_nonlinear_system(Xp, X_ref, z_ref, False)
             if ier == 1:
                 break
             else:
@@ -371,10 +352,10 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
         fig.update_yaxes(title_text=r"$||H_{j}||^{2}$", showgrid=True)
         fig.show()
 
-        fig2 = go.Figure()
-        fig2.update_layout(title=f"2 dof (omega={X_mat[-1, iteration-1]})")
-        plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, iteration-1], 0.02, dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H)
-        fig2.show()
+        # fig2 = go.Figure()
+        # fig2.update_layout(title=f"2 dof (omega={X_mat[-1, iteration-1]})")
+        # plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, iteration-1], 0.02, n_dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H)
+        # fig2.show()
 
 if __name__ == "__main__":
     torsional_spring = 1
@@ -387,16 +368,23 @@ if __name__ == "__main__":
     else:
         torsional_func = dof2.alpha_linear
 
-    # HB Continuation
-    H = 7
-    assert ((H+1) & H) == 0 # H+1 should be a power of 2
+    # Independent params
+    H = 15
+    n_dofs = 2
+    n_coeffs = 2*H+1
+    n_samples = (H+1)*(2**4) # sampling points (needs to be power of 2)
     flutter_speed = 6.285
-    flutter_ratio_start = 0.8
+    flutter_ratio_start = 0.5
     flutter_ratio_end = 0.8
-    param_start = flutter_speed * flutter_ratio_start
-    # param_start = 4.0
-    param_end = flutter_speed * flutter_ratio_end
     ds = 0.05
+
+    # assert ((H+1) & H) == 0 # H+1 should be a power of 2
+
+    # Dependent params
+    # param_start = flutter_speed * flutter_ratio_start
+    # param_end = flutter_speed * flutter_ratio_end
+    param_start = 3.5
+    param_end = 4.5
     # Time integration
     t_final = 2000.0
     dt = 0.2
@@ -419,8 +407,7 @@ if __name__ == "__main__":
     t_tr = sol.t[idx_start:]
     u_tr = sol.y[0:2, idx_start:]   # shape = (n_dofs, N_tr)
     N_tr = len(t_tr)
-    n_dofs = 2
-
+    
     # ----- 1. Apply Hann Window -----
     # Create a Hann (Hanning) window to taper the data and reduce spectral leakage
     window = np.hanning(N_tr)       # shape = (N_tr,)
@@ -477,9 +464,32 @@ if __name__ == "__main__":
     X0[-1] = omega0
 
     if (getenv("PLOT")):
-        fig = go.Figure()
-        fig.update_layout(title=f"2 dof (omega={omega0})")
-        plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, X0[:-2], X0[-1], H)
+        fig2 = make_subplots(
+            rows=n_dofs, cols=1,
+            subplot_titles=[f"Dof {i+1}" for i in range(n_dofs)],
+        )
+        fig2.update_layout(title="2 DOF Force Response")
+        _, _, _, _, hbvlm_func = create_motion_system(omega0, param_start)
+        R_nlft = hbvlm_func(X0[:-2].reshape(n_coeffs, n_dofs).T)
+        R_nlf_fft = np.fft.rfft(R_nlft, n_coeffs, axis=1, norm='backward')
+        R_nlf = vdp.X_to_real(R_nlf_fft / n_coeffs, 0).T.reshape(-1)
+        plot_hb_timedomain(fig2, t_tr[0], t_tr[-1], 0.1, n_dofs, R_nlf, omega0, H, "HB")
+        fig2.update_yaxes(tickformat='.2e')
+        fig2.show()
+
+        fig = make_subplots(
+            rows=n_dofs, cols=1,
+            subplot_titles=[f"Dof {i+1}" for i in range(n_dofs)],
+            vertical_spacing=0.1,
+            horizontal_spacing=0.08
+        )
+        fig.update_layout(title="2 DOF Aeroelastic Response")
+        plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, X0[:-2], X0[-1], H, "FFT")
+        
+        z_ref = np.zeros_like(X0)
+        z_ref[-2] = 1
+        Xpp, info, ier, mesg = solve_nonlinear_system(X0, X0.copy(), z_ref, True)
+        plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, Xpp[:-2], Xpp[-1], H, "HB")
 
         for dof in range(n_dofs):
             fig.add_trace(
@@ -488,7 +498,9 @@ if __name__ == "__main__":
                     y=u_tr[dof, :],  # y values for new line
                     name=f"Time integration dof {dof}",  # legend label
                     line=dict(color='red')  # optional: customize line color
-                )
+                ),
+                row=(dof+1),
+                col=1
             )
         fig.show()
 

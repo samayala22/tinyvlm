@@ -261,14 +261,14 @@ def X_to_complex(X):
             Xc[d, h] = (X[d, 2*h-1] - 1j * X[d, 2*h])/2
     return Xc
 
-def X_to_real(X):
+def X_to_real(X, lanczos_m=1.0):
     """
     Converts a dofs * N complex array to a dofs * (2*N-1) real array
     """
     assert len(X.shape) == 2 # matrix form
     dofs = X.shape[0]
     N = X.shape[1]
-    L = create_lanczos_filter(N, 1)
+    L = create_lanczos_filter(N, lanczos_m)
     Xr = np.zeros((dofs, 2*N-1), dtype=np.float64)
     for d in range(dofs):
         Xr[d, 0] = X[d, 0].real
