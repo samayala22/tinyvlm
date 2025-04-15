@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
 import subprocess
+from enum import Enum
 
 # local imports
 import dof2
@@ -148,6 +149,7 @@ def numerical_jac(f, x):
         if np.allclose(jac[:, j], np.zeros(n)):
             print("Jacobian zero problem")
     
+    print("Condition number: ", np.linalg.cond(jac))
     return jac
 
 def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics, label="HB"):
@@ -176,8 +178,19 @@ def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics, label
             col=1
         )
 
+class Parametrisation(Enum):
+    Local = 1
+    ArcLength = 2
+
 @helpers.Timing(prefix="Residual: ")
-def extended_residual(X, X_ref, z_ref, residual_func, init: bool, *args):
+def extended_residual(
+    X,
+    X_ref,
+    z_ref,
+    residual_func,
+    parametrisation: Parametrisation,
+    *args
+):
     ext_res = np.zeros_like(X)
     ext_res[:-2] = residual_func(X, *args)
 
@@ -188,16 +201,17 @@ def extended_residual(X, X_ref, z_ref, residual_func, init: bool, *args):
     for k in range(1, H+1):
         orthogonality += k * (np.dot(X_mat_ref[:, 2*k], X_mat[:, 2*k-1]) - np.dot(X_mat_ref[:, 2*k-1], X_mat[:, 2*k]))
     ext_res[-2] = orthogonality
-    # ext_res[-2] = X[2] # phase fixing condition
 
-    if init: # local parametrization
-        ext_res[-1] = np.dot(z_ref, X - X_ref)
-    else: # arc-length parametrization
-        ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
+    match parametrisation:
+        case Parametrisation.Local:
+            ext_res[-1] = np.dot(z_ref, X - X_ref)
+        case Parametrisation.ArcLength:
+            ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
+
     return ext_res
 
-def extended_residual_jacobian(X, X_ref, z_ref, residual_func, init: bool, *args):
-    return numerical_jac(lambda _X: extended_residual(_X, X_ref, z_ref, residual_func, init, True, False), X)
+def extended_residual_jacobian(X, X_ref, z_ref, residual_func, parametrisation, *args):
+    return numerical_jac(lambda _X: extended_residual(_X, X_ref, z_ref, residual_func, parametrisation, True, False), X)
 
 def hb_residual(X, *args):
     """
@@ -242,7 +256,7 @@ def hb_residual(X, *args):
     return R_lin + R_nl + R_nlf
 
 @helpers.Timing(prefix="Solver:")
-def solve_nonlinear_system(X0, X_ref, z_ref, init: bool, xtol=1e-5):
+def solve_nonlinear_system(X0, X_ref, z_ref, parametrisation, xtol=1e-5):
     # Xp, info, ier, mesg =  sp.optimize.fsolve(
     #     extended_residual,
     #     X0,
@@ -262,7 +276,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, init: bool, xtol=1e-5):
     sol = sp.optimize.root(
         extended_residual,
         X0,
-        args=(X_ref, z_ref, hb_residual, init, True, True),
+        args=(X_ref, z_ref, hb_residual, parametrisation, True, True),
         method='hybr',
         jac=extended_residual_jacobian,
         tol = xtol
@@ -273,15 +287,14 @@ def solve_nonlinear_system(X0, X_ref, z_ref, init: bool, xtol=1e-5):
 
     return sol.x
 
-def continuation(H, param_start, param_end, ds, X0):
+def continuation(param_start, param_end, ds, X0):
     """
     Continuation for autonomous systems using the harmonic balance method
     """
     print("Initial guess X0:", X0)
 
-    # Continuation framework
+    X_mat = np.zeros((X0.shape[0], max_continuation_steps))
     max_continuation_steps = 5000
-    ds_min = 1e-5
 
     if param_end > param_start:
         param_direction = 1
@@ -295,29 +308,14 @@ def continuation(H, param_start, param_end, ds, X0):
     z_ref = np.zeros_like(X0)
     z_ref[-2] = 1
 
-    res0 = hb_residual(X0)
-    print("Initial spectral residual norm:", np.linalg.norm(res0))
-
-    Xp = solve_nonlinear_system(X0, X_ref, z_ref, True)
-
-    print(Xp)
-    # X0[:-1] = Xp.x[:-1] # TODO: check if we cant just copy the whole thing
+    # Initial step
+    Xp = solve_nonlinear_system(X0, X_ref, z_ref, Parametrisation.Local)
     X0 = Xp.copy()
-    print(f"param: {X0[-2]:.3f}, omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}, njev: {info['njev']}")
-
-    X_mat = np.zeros((X0.shape[0], max_continuation_steps))
     X_mat[:, 0] = X0
-
-    # if getenv("PLOT"):
-    #     fig2 = go.Figure()
-    #     fig2.update_layout(title=f"2 dof (omega={X_mat[-1, 0]})")
-    #     plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, 0], 0.02, n_dofs, X_mat[:-2, 0], X_mat[-1, 0], H)
-    #     fig2.show()
 
     iteration = 1
     while iteration < max_continuation_steps:
-        J = extended_residual_jacobian(X0, X_ref, z_ref, hb_residual, False, True, False)
-
+        J = extended_residual_jacobian(X0, X_ref, z_ref, hb_residual, Parametrisation.ArcLength, True, False)
         z = tangent_predictor(J, z_ref, X_ref)
 
         # Take a step in the tangent direction ensuring to stay along the solution path
@@ -327,53 +325,24 @@ def continuation(H, param_start, param_end, ds, X0):
         # Parametrizaton params
         X_ref = X0.copy()
         z_ref = z.copy()
-        while 1:
-            Xp = X0 + direction*ds*z
-            Xtmp = solve_nonlinear_system(Xp, X_ref, z_ref, False)
-            break
-            # if ier == 1:
-            #     break
-            # else:
-            #     print(f"Solver failed: {mesg}")
-            #     ds = ds * 0.5
-            #     if (ds < ds_min):
-            #         print("Continuation failed, exiting") 
-            #         return
+
+        # Predictor step
+        Xp = X0 + direction*ds*z
+        # Corrector step
+        Xtmp = solve_nonlinear_system(Xp, X_ref, z_ref, Parametrisation.ArcLength)
 
         X_old = X0.copy()
         X0 = Xtmp.copy()
 
-        print(f"param: {X0[-2]:.3f}, omega: {X0[-1]:.3f}, ds: {ds:.2e}, nfev: {info['nfev']}, njev: {info['njev']}")
-
-        # history
+        # History
         X_mat[:, iteration] = X0
         iteration += 1
         if (X0[-2] - param_end) * param_direction >= 0:
             print("Continuation reached the end")
             break
 
-    np.save("build/windows/x64/release/dof2_continuation.npy", X_mat[:, :iteration])
-
-    if getenv("PLOT"):
-        fig = go.Figure()
-        fig.update_layout(title=f"2DOF Aeroelasticd Response ({torsional_spring_names[torsional_spring]} Pitch)")
-        for h in range(1, H+1):
-            fig.add_trace(
-                go.Scattergl(
-                    x = X_mat[-2, :iteration],
-                    y = np.sqrt(X_mat[2*h-1, :iteration]**2 + X_mat[2*h, :iteration]**2),
-                    name = f"Harmonic {h}",
-                    mode = "lines+markers"
-                )
-            )
-        fig.update_xaxes(title_text=r"$\bar{U}$", showgrid=True)
-        fig.update_yaxes(title_text=r"$||H_{j}||^{2}$", showgrid=True)
-        fig.show()
-
-        # fig2 = go.Figure()
-        # fig2.update_layout(title=f"2 dof (omega={X_mat[-1, iteration-1]})")
-        # plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, iteration-1], 0.02, n_dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H)
-        # fig2.show()
+    np.save("build/continuation.npy", X_mat[:, :iteration])
+    return X_mat[:, :iteration]
 
 def truncated_series_approximation(u_tr, H):
     N_tr = u_tr.shape[1]  # Number of time samples
@@ -430,7 +399,7 @@ def truncated_series_approximation(u_tr, H):
     return coeffs, omega0
 
 if __name__ == "__main__":
-    torsional_spring = 0
+    torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
     if (torsional_spring == 0):
@@ -532,4 +501,21 @@ if __name__ == "__main__":
             )
         fig.show()
 
-    # continuation(H, param_start, param_end, ds, X0)
+    X_mat = continuation(param_start, param_end, ds, X0)
+    
+    if getenv("PLOT"):
+        fig = go.Figure()
+        fig.update_layout(title=f"2DOF Aeroelasticd Response ({torsional_spring_names[torsional_spring]} Pitch)")
+        for h in range(1, H+1):
+            fig.add_trace(
+                go.Scattergl(
+                    x = X_mat[-2, :],
+                    y = np.sqrt(X_mat[2*h-1, :]**2 + X_mat[2*h, :]**2),
+                    name = f"Harmonic {h}",
+                    mode = "lines+markers"
+                )
+            )
+        fig.update_xaxes(title_text=r"$\bar{U}$", showgrid=True)
+        fig.update_yaxes(title_text=r"$||H_{j}||^{2}$", showgrid=True)
+        fig.write_html("build/continuation.html", include_mathjax='cdn')
+        fig.show()
