@@ -38,8 +38,7 @@ def create_fourier_basis(omega, harmonics, t):
 
     return basis, dbasis, ddbasis
 
-# @helpers.Timing(prefix="HBVLM: ")
-def run_hbvlm(omega, H, reset_logfile=False):
+def run_hbvlm(omega, H, read_gamma, write_gamma, reset_logfile=False):
         executable_path = "./build/windows/x64/release/hbvlm.exe"
         cwd_path = "./build/windows/x64/release/"
         logfile_path = "build/windows/x64/release/dof2_hbvlm.log"
@@ -51,7 +50,7 @@ def run_hbvlm(omega, H, reset_logfile=False):
 
         with open(logfile_path, 'a') as logfile:
             result = subprocess.run(
-                [executable_path, f"{omega:.9f}", f"{H}"],
+                [executable_path, f"{omega:.9f}", f"{H}", f"{int(read_gamma)}", f"{int(write_gamma)}"],
                 cwd=cwd_path,
                 stdout=logfile,
                 stderr=subprocess.STDOUT,  # Combine stderr with stdout
@@ -62,7 +61,7 @@ def run_hbvlm(omega, H, reset_logfile=False):
             print(f"Command failed (return code {result.returncode}), see {logfile_path}")
             exit(1)
 
-def create_motion_system(omega, U_param):
+def create_motion_system(omega: float, U_param: float, read_gamma: bool=False, write_gamma: bool=False):
     # NLvib params
     def func_nl(t, u, v):
         return np.array([
@@ -70,9 +69,10 @@ def create_motion_system(omega, U_param):
             - 1/(U_param**2) * torsional_func(u[1])
         ])
     
+    # @helpers.Timing(prefix="HBVLM: ")
     def func_nl_freq(X):
         np.save("build/windows/x64/release/kin_coeffs.npy", X)
-        run_hbvlm(omega, H)
+        run_hbvlm(omega, H, read_gamma, write_gamma)
         coeffs = np.load("build/windows/x64/release/hbvlm_t.npy").astype(np.float64)
         coeffs[0, :] = - coeffs[0, :] / (np.pi * ndv.mu)
         coeffs[1, :] = (2.0 * coeffs[1, :]) / (np.pi * ndv.mu * ndv.r_a**2)
@@ -176,9 +176,9 @@ def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics, label
             col=1
         )
 
-def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
+def extended_residual(X, X_ref, z_ref, residual_func, init: bool, *args):
     ext_res = np.zeros_like(X)
-    ext_res[:-2] = residual_func(X)
+    ext_res[:-2] = residual_func(X, *args)
 
     # Integral orthogonality phase condition
     X_mat = X[:-2].reshape(2*H+1, n_dofs).T
@@ -195,10 +195,10 @@ def extended_residual(X, X_ref, z_ref, residual_func, init: bool):
         ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
     return ext_res
 
-def extended_residual_jacobian(X, X_ref, z_ref, residual_func, init: bool):
-    return numerical_jac(lambda _X: extended_residual(_X, X_ref, z_ref, residual_func, init), X)
+def extended_residual_jacobian(X, X_ref, z_ref, residual_func, init: bool, *args):
+    return numerical_jac(lambda _X: extended_residual(_X, X_ref, z_ref, residual_func, init, True, False), X)
 
-def hb_residual(X):
+def hb_residual(X, *args):
     """
     X[:-2]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
     where Xx is [xx_0, xx_1, ... xx_M] with M = n_dofs
@@ -207,7 +207,7 @@ def hb_residual(X):
     """
     Om = X[-1]
     param = X[-2]
-    M, C, K, func_nl, func_nl_freq = create_motion_system(Om, param)
+    M, C, K, func_nl, func_nl_freq = create_motion_system(Om, param, *args)
     R_lin = np.zeros(X.shape[0]-2)
 
     # Compute the linear forces in Fourier domain
@@ -240,17 +240,18 @@ def hb_residual(X):
 
     return R_lin + R_nl + R_nlf
 
+@helpers.Timing(prefix="Solver:")
 def solve_nonlinear_system(X0, X_ref, z_ref, init: bool, xtol=1e-5):
     return sp.optimize.fsolve(
         extended_residual,
         X0,
-        args=(X_ref, z_ref, hb_residual, init),
+        args=(X_ref, z_ref, hb_residual, init, True, True),
         fprime=extended_residual_jacobian,
         full_output=True,
         xtol = xtol,
     )
 
-def continuation(H, param_start, param_end, ds=.01, X0=None):
+def continuation(H, param_start, param_end, ds, X0):
     """
     Continuation for autonomous systems using the harmonic balance method
     """
@@ -272,7 +273,6 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
     z_ref = np.zeros_like(X0)
     z_ref[-2] = 1
 
-    run_hbvlm(0, 0, reset_logfile=True) # only reset logfile
     res0 = hb_residual(X0)
     print("Initial spectral residual norm:", np.linalg.norm(res0))
 
@@ -297,11 +297,9 @@ def continuation(H, param_start, param_end, ds=.01, X0=None):
 
     iteration = 1
     while iteration < max_continuation_steps:
-        J = numerical_jac(lambda X: extended_residual(X, X_ref, z_ref, hb_residual, False), X0)
+        J = extended_residual_jacobian(X0, X_ref, z_ref, hb_residual, False, True, False)
 
         z = tangent_predictor(J, z_ref, X_ref)
-        # print(np.concatenate(([z[0]], z[1:-1:2]/2, z[2:-1:2]/2, [z[-1]])))
-        # return
 
         # Take a step in the tangent direction ensuring to stay along the solution path
         if (iteration > 1) and np.dot(X0-X_old, direction*ds*z) < 0:
@@ -383,7 +381,7 @@ if __name__ == "__main__":
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = 3.5
+    param_start = 3.5 
     param_end = 4.5
     # Time integration
     t_final = 2000.0
@@ -463,13 +461,18 @@ if __name__ == "__main__":
     X0[-2] = param_start
     X0[-1] = omega0
 
+    # Initialize the gamma values
+    run_hbvlm(0, 0, False, False, reset_logfile=True) # only reset logfile
+    _, _, _, _, hbvlm_func = create_motion_system(omega0, param_start, False, True) 
+    _ = hbvlm_func(X0[:-2].reshape(n_coeffs, n_dofs).T)
+
     if (getenv("PLOT")):
         fig2 = make_subplots(
             rows=n_dofs, cols=1,
             subplot_titles=[f"Dof {i+1}" for i in range(n_dofs)],
         )
         fig2.update_layout(title="2 DOF Force Response")
-        _, _, _, _, hbvlm_func = create_motion_system(omega0, param_start)
+        _, _, _, _, hbvlm_func = create_motion_system(omega0, param_start, True, False)
         R_nlft = hbvlm_func(X0[:-2].reshape(n_coeffs, n_dofs).T)
         R_nlf_fft = np.fft.rfft(R_nlft, n_coeffs, axis=1, norm='backward')
         R_nlf = vdp.X_to_real(R_nlf_fft / n_coeffs, 0).T.reshape(-1)
@@ -504,4 +507,4 @@ if __name__ == "__main__":
             )
         fig.show()
 
-    continuation(H, param_start, param_end, ds, X0)
+    # continuation(H, param_start, param_end, ds, X0)

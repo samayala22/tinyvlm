@@ -468,7 +468,7 @@ struct npy_data {
 
 template <typename Scalar>
 struct npy_data_ptr {
-  const Scalar *data_ptr = nullptr;
+  Scalar *data_ptr = nullptr;
   shape_t shape = {};
   bool fortran_order = false;
 };
@@ -504,6 +504,34 @@ inline npy_data<Scalar> read_npy(std::istream &in) {
 }
 
 template <typename Scalar>
+inline void read_npy2(std::istream &in, const npy_data_ptr<Scalar>& data_ptr) {
+  std::string header_s = read_header(in);
+
+  // parse header
+  header_t header = parse_header(header_s);
+
+  // check if the typestring matches the given one
+  const dtype_t dtype = dtype_map.at(std::type_index(typeid(Scalar)));
+
+  if (header.dtype.tie() != dtype.tie()) {
+    throw std::runtime_error("formatting error: typestrings not matching");
+  }
+
+  auto allocated_size = static_cast<size_t>(comp_size(data_ptr.shape));
+  auto size = static_cast<size_t>(comp_size(header.shape));
+
+  if (size != allocated_size) {
+    throw std::runtime_error("Allocated buffer size doesnt match the tensor size");
+  }
+  if (data_ptr.fortran_order != header.fortran_order) {
+    throw std::runtime_error("Allocated buffer order doesnt match the tensor order");
+  }
+  
+  // read the data
+  in.read(reinterpret_cast<char *>(data_ptr.data_ptr), sizeof(Scalar) * (long long)size);
+}
+
+template <typename Scalar>
 inline npy_data<Scalar> read_npy(const std::string &filename) {
   std::ifstream stream(filename, std::ifstream::binary);
   if (!stream) {
@@ -511,6 +539,15 @@ inline npy_data<Scalar> read_npy(const std::string &filename) {
   }
 
   return read_npy<Scalar>(stream);
+}
+
+template <typename Scalar>
+inline void read_npy(const std::string& filename, const npy_data_ptr<Scalar>& data_ptr) {
+  std::ifstream stream(filename, std::ifstream::binary);
+  if (!stream) {
+    throw std::runtime_error("io error: failed to open a file.");
+  }
+  read_npy2(stream, data_ptr);
 }
 
 template <typename Scalar>

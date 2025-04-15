@@ -21,13 +21,25 @@ using namespace vlm;
 using namespace linalg::ostream_overloads;
 namespace fs = std::filesystem;
 
+// Delete this ASAP
+#define TRY_CATCH_VOID_CALL(expr) \
+    try { \
+        expr; \
+    } catch (const std::exception& ex) { \
+        std::cerr << "Exception in " #expr ": " << ex.what() << std::endl; \
+        std::exit(1); \
+    } catch (...) { \
+        std::cerr << "Unknown exception in " #expr << std::endl; \
+        std::exit(1); \
+    }
+
 #define EXTERNAL_KINEMATICS 1
 
 class HBVLM final: public Simulation {
     public:
         HBVLM(const std::string& backend_name, const Assembly& assembly, const i32 harmonics);
         ~HBVLM() = default;
-        void run(f32 t_final, f32 omega, f32 vars_b);
+        void run(f32 t_final, f32 omega, f32 vars_b, bool read_gamma=false, bool write_gamma=false);
 
         MultiTensor3fD colloc_d{backend->memory.get()};
         MultiTensor3fH colloc_h{backend->memory.get()};
@@ -282,7 +294,7 @@ void anderson_acceleration(
     std::printf("Anderson fixed point converged in %d iterations\n", k);
 }
 
-void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
+void HBVLM::run(f32 t_start, f32 omega, f32 vars_b, bool read_gamma, bool write_gamma) {
     const tiny::ScopedTimer timer("HBVLM::run");
     const f32 period = 2.0f * PI_f / omega;
     const f32 period_interval = period / (f32)m_coeffs;
@@ -436,7 +448,19 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
     };
     
     auto& gamma_coeffs_v = gamma_coeffs.view();
-    gamma_coeffs_v.fill(0.f);
+    auto& gamma_coeffs_hv = gamma_coeffs_h.view();
+    
+    npy::npy_data_ptr<f32> gamma_coeff_bin;
+    gamma_coeff_bin.data_ptr = gamma_coeffs_h.ptr();
+    gamma_coeff_bin.shape = {(npy::ndarray_len_t)gamma_coeffs_hv.shape(0), (npy::ndarray_len_t)gamma_coeffs_hv.shape(1)};
+    gamma_coeff_bin.fortran_order = true;
+
+    if (read_gamma) {
+        TRY_CATCH_VOID_CALL(npy::read_npy("gamma0.npy", gamma_coeff_bin));
+        gamma_coeffs_hv.to(gamma_coeffs_v);
+    } else {
+        gamma_coeffs_v.fill(0.f);
+    }
 
     anderson_acceleration(
         backend.get(),
@@ -446,6 +470,11 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b) {
         1e-6, // tolerance
         5 // history
     );
+
+    if (write_gamma) {
+        gamma_coeffs_v.to(gamma_coeffs_hv);
+        TRY_CATCH_VOID_CALL(npy::write_npy("gamma0.npy", gamma_coeff_bin));
+    }
     
     // Compute the forces coefficients
     {
@@ -620,19 +649,27 @@ int main(int argc, char** argv) {
         );
     })->after(heave);
     #else
-    if (argc != 3) { // hbvlm <omega> <harmonics>
+    if (argc != 5) { // hbvlm <omega> <harmonics>
         return 1;
     }
     const f32 cycles = 5.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 omega = std::stof(argv[1]);
     const i32 H = std::stoi(argv[2]);
+    const bool read_gamma = (bool)std::stoi(argv[3]);
+    const bool write_gamma = (bool)std::stoi(argv[4]);
+    // const bool read_gamma = false;
+    // const bool write_gamma = false;
     const f32 t_final = cycles * 2.0f * PI_f / omega;
     const f32 a_h = -0.5f;
 
-    std::printf("t_final: %f, omega: %.8f, harmonics: %i\n", t_final, omega, H);
-    
+    std::printf("t_final: %f, omega: %.8f, harmonics: %i, read_gamma: %s, write_gamma %s\n", t_final, omega, H, read_gamma ? "true" : "false", write_gamma ? "true" : "false");
+
     fs::path npy_path = fs::path(R"(C:\Users\samay\Documents\GitHub\tinyvlm\build\windows\x64\release\kin_coeffs.npy)");
+    if (!fs::exists(npy_path)) {
+        std::cerr << "File not found: " << npy_path << std::endl;
+        return 1;
+    }
     npy::npy_data kin_coeffs_npy = npy::read_npy<f64>(npy_path.string());
     TINY_ASSERT_EQ(kin_coeffs_npy.fortran_order, true);
     TINY_ASSERT_EQ(kin_coeffs_npy.shape[0], (npy::ndarray_len_t)(2));
@@ -674,7 +711,7 @@ int main(int argc, char** argv) {
         Assembly assembly(fs);
         assembly.add(mesh_name, pitch);
         HBVLM simulation{backend_name, assembly, H};
-        simulation.run(t_final, omega, b);
+        simulation.run(t_final, omega, b, read_gamma, write_gamma);
     }
     return 0;
 }
