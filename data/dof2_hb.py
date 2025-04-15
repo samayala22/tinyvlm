@@ -176,6 +176,7 @@ def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics, label
             col=1
         )
 
+@helpers.Timing(prefix="Residual: ")
 def extended_residual(X, X_ref, z_ref, residual_func, init: bool, *args):
     ext_res = np.zeros_like(X)
     ext_res[:-2] = residual_func(X, *args)
@@ -242,14 +243,35 @@ def hb_residual(X, *args):
 
 @helpers.Timing(prefix="Solver:")
 def solve_nonlinear_system(X0, X_ref, z_ref, init: bool, xtol=1e-5):
-    return sp.optimize.fsolve(
+    # Xp, info, ier, mesg =  sp.optimize.fsolve(
+    #     extended_residual,
+    #     X0,
+    #     args=(X_ref, z_ref, hb_residual, init, True, True),
+    #     fprime=extended_residual_jacobian,
+    #     full_output=True,
+    #     xtol = xtol,
+    # )
+    # if ier != 1:
+    #     print(f"Nonlinear solver failed: {mesg}")
+    #     exit(1)
+
+    # print(f"param: {Xp[-2]:.3f}, omega: {Xp[-1]:.3f}, nfev: {info['nfev']}, njev: {info['njev']}")
+
+    # return Xp
+
+    sol = sp.optimize.root(
         extended_residual,
         X0,
         args=(X_ref, z_ref, hb_residual, init, True, True),
-        fprime=extended_residual_jacobian,
-        full_output=True,
-        xtol = xtol,
+        method='hybr',
+        jac=extended_residual_jacobian,
+        tol = xtol
     )
+    if not sol.success:
+        print(f"Nonlinear solver failed: {sol.message}")
+        exit(1)
+
+    return sol.x
 
 def continuation(H, param_start, param_end, ds, X0):
     """
@@ -276,10 +298,7 @@ def continuation(H, param_start, param_end, ds, X0):
     res0 = hb_residual(X0)
     print("Initial spectral residual norm:", np.linalg.norm(res0))
 
-    Xp, info, ier, mesg = solve_nonlinear_system(X0, X_ref, z_ref, True)
-    if ier != 1:
-        print(f"Initial step failed: {mesg}")
-        return
+    Xp = solve_nonlinear_system(X0, X_ref, z_ref, True)
 
     print(Xp)
     # X0[:-1] = Xp.x[:-1] # TODO: check if we cant just copy the whole thing
@@ -310,15 +329,16 @@ def continuation(H, param_start, param_end, ds, X0):
         z_ref = z.copy()
         while 1:
             Xp = X0 + direction*ds*z
-            Xtmp, info, ier, mesg = solve_nonlinear_system(Xp, X_ref, z_ref, False)
-            if ier == 1:
-                break
-            else:
-                print(f"Solver failed: {mesg}")
-                ds = ds * 0.5
-                if (ds < ds_min):
-                    print("Continuation failed, exiting") 
-                    return
+            Xtmp = solve_nonlinear_system(Xp, X_ref, z_ref, False)
+            break
+            # if ier == 1:
+            #     break
+            # else:
+            #     print(f"Solver failed: {mesg}")
+            #     ds = ds * 0.5
+            #     if (ds < ds_min):
+            #         print("Continuation failed, exiting") 
+            #         return
 
         X_old = X0.copy()
         X0 = Xtmp.copy()
@@ -355,59 +375,13 @@ def continuation(H, param_start, param_end, ds, X0):
         # plot_hb_timedomain(fig2, 0.0, 4 * np.pi / X_mat[-1, iteration-1], 0.02, n_dofs, X_mat[:-2, iteration-1], X_mat[-1, iteration-1], H)
         # fig2.show()
 
-if __name__ == "__main__":
-    torsional_spring = 1
-    torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
-
-    if (torsional_spring == 0):
-        torsional_func = dof2.alpha_freeplay
-    elif (torsional_spring == 1):
-        torsional_func = dof2.alpha_cubic
-    else:
-        torsional_func = dof2.alpha_linear
-
-    # Independent params
-    H = 15
-    n_dofs = 2
-    n_coeffs = 2*H+1
-    n_samples = (H+1)*(2**4) # sampling points (needs to be power of 2)
-    flutter_speed = 6.285
-    flutter_ratio_start = 0.5
-    flutter_ratio_end = 0.8
-    ds = 0.05
-
-    # assert ((H+1) & H) == 0 # H+1 should be a power of 2
-
-    # Dependent params
-    # param_start = flutter_speed * flutter_ratio_start
-    # param_end = flutter_speed * flutter_ratio_end
-    param_start = 3.5 
-    param_end = 4.5
-    # Time integration
-    t_final = 2000.0
-    dt = 0.2
-    ndv = dof2.NDVars(
-        a_h = -0.5,
-        omega = 0.2,
-        zeta_a = 0.0,
-        zeta_h = 0.0,
-        x_a = 0.25,
-        mu = 100.0,
-        r_a = 0.5,
-        U = param_start
-    )
-
-    y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
-    system = dof2.create_monolithic_system(y0, ndv, torsional_func)
-    sol = sp.integrate.solve_ivp(system, (0, t_final), y0, t_eval=np.arange(0, t_final, dt), method='RK45')
-    
-    idx_start = int(0.75 * len(sol.t))
-    t_tr = sol.t[idx_start:]
-    u_tr = sol.y[0:2, idx_start:]   # shape = (n_dofs, N_tr)
-    N_tr = len(t_tr)
-    
-    # ----- 1. Apply Hann Window -----
+def truncated_series_approximation(u_tr, H):
+    N_tr = u_tr.shape[1]  # Number of time samples
+        # ----- 1. Apply Hann Window -----
     # Create a Hann (Hanning) window to taper the data and reduce spectral leakage
+    dc = np.mean(u_tr, axis=1)
+    u_tr = u_tr - dc[:, None]
+
     window = np.hanning(N_tr)       # shape = (N_tr,)
     u_tr_windowed = u_tr * window[None, :]  # Multiply each DoF by the window
 
@@ -420,7 +394,6 @@ if __name__ == "__main__":
     U_fft = np.fft.fft(u_tr_windowed, n=N_fft, axis=1)
 
     # Normalization factor.
-    # You may include a dt scaling if necessary, e.g., norm_factor = dt * window.sum()
     norm_factor = window.sum()
 
     # ----- 3. Compute the Frequency Vector -----
@@ -444,8 +417,8 @@ if __name__ == "__main__":
     # Arrange the Fourier coefficients into an array.
     # The 0 index holds the DC term. Then (2*h-1) and (2*h) hold cosine and sine terms respectively.
     coeffs = np.zeros((n_dofs, 2 * H + 1))
-    coeffs[:, 0] = np.real(U_fft[:, 0]) / norm_factor  # DC term
-
+    # coeffs[:, 0] = np.real(U_fft[:, 0]) / norm_factor  # DC term
+    coeffs[:, 0] = dc
     for h in range(1, H + 1):
         target = h * f0
         idx = np.argmin(np.abs(f_pos - target))  # Find the closest frequency bin
@@ -454,10 +427,62 @@ if __name__ == "__main__":
         coeffs[:, 2 * h - 1] = 2 * np.real(Y) / norm_factor   # cosine coefficient
         coeffs[:, 2 * h]     = -2 * np.imag(Y) / norm_factor   # sine coefficient
 
-    # ----- 6. Assemble the Initial Guess Vector -----
-    # For example, combining Fourier coefficients with additional parameters.
+    return coeffs, omega0
+
+if __name__ == "__main__":
+    torsional_spring = 0
+    torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
+
+    if (torsional_spring == 0):
+        torsional_func = dof2.alpha_freeplay
+    elif (torsional_spring == 1):
+        torsional_func = dof2.alpha_cubic
+    else:
+        torsional_func = dof2.alpha_linear
+
+    # Independent params
+    H = 15
+    n_dofs = 2
+    n_coeffs = 2*H+1
+    n_samples = (H+1)*(2**4) # sampling points (needs to be power of 2)
+    flutter_speed = 6.285
+    flutter_ratio_start = 0.6
+    flutter_ratio_end = 0.8
+    ds = 0.05
+
+    # assert ((H+1) & H) == 0 # H+1 should be a power of 2
+
+    # Dependent params
+    param_start = flutter_speed * flutter_ratio_start
+    # param_end = flutter_speed * flutter_ratio_end
+    # param_start = 2.0
+    param_end = 4.5
+    # Time integration
+    t_final = 2000.0
+    dt = 0.2
+    ndv = dof2.NDVars(
+        a_h = -0.5,
+        omega = 0.2,
+        zeta_a = 0.0,
+        zeta_h = 0.0,
+        x_a = 0.25,
+        mu = 100.0,
+        r_a = 0.5,
+        U = param_start
+    )
+
+    y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
+    system = dof2.create_monolithic_system(y0, ndv, torsional_func)
+    sol = sp.integrate.solve_ivp(system, (0, t_final), y0, t_eval=np.arange(0, t_final, dt), method='RK45')
+    
+    idx_start = int(0.75 * len(sol.t))
+    t_tr = sol.t[idx_start:]
+    u_tr = sol.y[0:2, idx_start:]   # shape = (n_dofs, N_tr)
+
+    u_coeffs, omega0 = truncated_series_approximation(u_tr, H)
+    
     X0 = np.zeros(n_dofs * (2 * H + 1) + 2)
-    X0[:-2] = coeffs.T.reshape(-1)
+    X0[:-2] = u_coeffs.T.reshape(-1)
     X0[-2] = param_start
     X0[-1] = omega0
 
@@ -491,7 +516,7 @@ if __name__ == "__main__":
         
         z_ref = np.zeros_like(X0)
         z_ref[-2] = 1
-        Xpp, info, ier, mesg = solve_nonlinear_system(X0, X0.copy(), z_ref, True)
+        Xpp = solve_nonlinear_system(X0, X0.copy(), z_ref, True)
         plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, Xpp[:-2], Xpp[-1], H, "HB")
 
         for dof in range(n_dofs):
