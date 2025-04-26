@@ -37,14 +37,6 @@ class Vars:
     V: float
     mu: float
 
-# def alpha_freeplay(alpha, M0 = 0.0, Mf = 0.0, delta = np.radians(4.24), a_f = np.radians(-2.12)):
-#     if (alpha < a_f):
-#         return M0 + alpha - a_f
-#     elif (alpha <= (a_f + delta)):
-#         return M0 + Mf * (alpha - a_f)
-#     else: # alpha > a_F + delta
-#         return M0 + alpha - a_f + delta * (Mf - 1)
-
 def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=np.radians(4.24), a_f=np.radians(-2.12)):
     return np.where(
         alpha < a_f,

@@ -1,8 +1,9 @@
 import numpy as np
+import autograd
+import autograd.numpy as anp
 import scipy as sp
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import autograd
 
 import os
 import subprocess
@@ -25,6 +26,23 @@ def getenv(key):
     if not var or int(var) == 0:
         return False
     return True
+
+# def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=anp.radians(4.24), a_f=anp.radians(-2.12)):
+#     return anp.where(
+#         alpha < a_f,
+#         M0 + alpha - a_f,
+#         anp.where(
+#             alpha <= (a_f + delta),
+#             M0 + Mf * (alpha - a_f),
+#             M0 + alpha - a_f + delta * (Mf - 1)
+#         )
+#     )
+
+# def alpha_cubic(alpha, beta0 = 0.0, beta1 = 0.1, beta2 = 0.0, beta3 = 40.0):
+#     return beta0 + beta1*alpha + beta2*alpha**2 + beta3*alpha**3
+
+# def alpha_linear(alpha):
+#     return alpha
 
 def create_fourier_basis(omega, harmonics, t):
     unknowns = 2 * harmonics + 1
@@ -70,60 +88,43 @@ def run_hbvlm(omega, H, read_gamma, write_gamma, reset_logfile=False):
 
 @dataclass
 class System:
-    M: np.ndarray
-    C: np.ndarray
-    K: np.ndarray
-    dMdU: np.ndarray
-    dCdU: np.ndarray
-    dKdU: np.ndarray
-    fnlt: callable # function nonlinear time domain input/time domain output
-    dfntldU: callable # function nonlinear time domain derivative
-    fnlf: callable # function nonlinear frequency domain input/time domain output
-    dfnlfdU: callable # function nonlinear frequency domain derivative
+    M      : callable
+    C      : callable
+    K      : callable
+    fnlt   : callable        # time‐domain NL force
+    fnlf   : callable        # frequency‐domain NL force
 
-def create_motion_system(omega: float, U_param: float, read_gamma: bool=False, write_gamma: bool=False):
-    # NLvib params
-    def fnlt(t, u, v):
+def create_motion_system() -> System:
+    def fnlt(u, v, omega, U):
         return np.array([
-            - (ndv.omega / U_param)**2 * u[0],
-            - 1/(U_param**2) * torsional_func(u[1])
+            - (ndv.omega / U)**2 * u[0],
+            - 1/(U**2) * torsional_func(u[1])
         ])
     
-    def dfntldU(t, u, v):
-        return np.array([
-            2.0 * (ndv.omega / U_param)**3 * u[0],
-            2.0 /(U_param**3) * torsional_func(u[1])
-        ])
-    
-    # @helpers.Timing(prefix="HBVLM: ")
-    def fnlf(X):
+    def fnlf(X, omega, U):
         np.save("build/windows/x64/release/kin_coeffs.npy", X)
-        run_hbvlm(omega, H, read_gamma, write_gamma)
+        run_hbvlm(omega, H, False, False)
         coeffs = np.load("build/windows/x64/release/hbvlm_t.npy").astype(np.float64)
         coeffs[0, :] = - coeffs[0, :] / (np.pi * ndv.mu)
         coeffs[1, :] = (2.0 * coeffs[1, :]) / (np.pi * ndv.mu * ndv.r_a**2)
-        # coeffs = np.zeros_like(coeffs)
         return coeffs
     
-    def dfnlfdU(X):
-        return np.zeros(2)
+    def M(U):
+        return anp.array([
+            [1.0, ndv.x_a],
+            [ndv.x_a / ndv.r_a**2, 1.0]
+        ])
     
-    M = np.array([
-        [1.0, ndv.x_a],
-        [ndv.x_a / (ndv.r_a**2), 1.0]
-    ])
-    dMdU = np.zeros_like(M)
-    C_ = np.array([[2.0 * ndv.zeta_h * ndv.omega, 0], [0, 2.0 * ndv.zeta_a]])
-    C = C_ / U_param
-    dCdU = - C_ / U_param**2
-    # K = np.array([
-    #     [(ndv.omega/U_param)**2, 0],
-    #     [0, 1/(U_param**2)]
-    # ])
-    K = np.zeros((2,2))
-    dKdU = np.zeros_like(K)
-
-    return System(M, C, K, dMdU, dCdU, dKdU, fnlt, dfntldU, fnlf, dfnlfdU)
+    def C(U):
+        return anp.array([
+            [2.0 * ndv.zeta_h * ndv.omega / U, 0.0],
+            [0.0, 2.0 * ndv.zeta_a / U]
+        ])
+    
+    def K(U):
+        return anp.zeros((2,2))
+    
+    return System(M, C, K, fnlt, fnlf)
 
 # TODO: improve this disgusting function
 def tangent_predictor(J, zref, Xref):
@@ -152,8 +153,8 @@ def tangent_predictor(J, zref, Xref):
             break
     
     # 6. Normalize tangent vector
-    z = ztmp / np.linalg.norm(ztmp) # length 1 vector
-    return z
+    # z = ztmp / np.linalg.norm(ztmp) # length 1 vector
+    return ztmp
 
 # def tangent_predictor(J, zref, Xref):
 #     Q, R = np.linalg.qr(J.T)
@@ -165,29 +166,8 @@ def numerical_jac(f, x):
     Numerical Jacobian using precise central differences
     Performs 2*N evaluations of the function
     """
+    m = len(f(x))
     n = len(x)
-    jac = np.zeros((n, n))
-    for j in range(n):
-        h = max(fd.cd2_h(x[j]), 1e-5) # limiter because hbvlm is in single precision
-        # print(f"{j}| h: {h:.5e}")
-        xp, xm = x.copy(), x.copy()
-        xp[j] += h
-        xm[j] -= h
-        delta = xp[j] - xm[j]
-        jac[:, j] = (f(xp) - f(xm)) / delta
-        if np.allclose(jac[:, j], np.zeros(n)):
-            print("Jacobian zero problem")
-    
-    print("Condition number: ", np.linalg.cond(jac))
-    return jac
-
-def numerical_jac2(f, x, m, n):
-    """
-    Numerical Jacobian using precise central differences
-    Performs 2*N evaluations of the function
-    """
-    assert n == len(x)
-    assert m == len(f(x))
 
     jac = np.zeros((m, n))
     for j in range(n):
@@ -199,7 +179,6 @@ def numerical_jac2(f, x, m, n):
         delta = xp[j] - xm[j] # delta representable fp number
         jac[:, j] = (f(xp) - f(xm)) / delta
     
-    print("Condition number: ", np.linalg.cond(jac))
     return jac
 
 def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics, label="HB"):
@@ -234,19 +213,22 @@ class Parametrisation(Enum):
 
 @helpers.Timing(prefix="Residual: ")
 def extended_residual(
-    X,
+    X, # scaled
     X_ref,
     z_ref,
     residual_func,
+    Dscale,
     parametrisation: Parametrisation,
     *args
 ):
+    X_unscaled = X * Dscale # unscaled X
     ext_res = np.zeros_like(X)
-    ext_res[:-2] = residual_func(X, *args)
+    ext_res[:-2] = residual_func(X_unscaled, *args)
 
     # Integral orthogonality phase condition
-    X_mat = X[:-2].reshape(2*H+1, n_dofs).T
-    X_mat_ref = X_ref[:-2].reshape(2*H+1, n_dofs).T
+    X_mat = X_unscaled[:-2].reshape(2*H+1, n_dofs).T
+    X_ref_unscaled = X_ref * Dscale
+    X_mat_ref = X_ref_unscaled[:-2].reshape(2*H+1, n_dofs).T
     orthogonality = 0
     for k in range(1, H+1):
         orthogonality += k * (np.dot(X_mat_ref[:, 2*k], X_mat[:, 2*k-1]) - np.dot(X_mat_ref[:, 2*k-1], X_mat[:, 2*k]))
@@ -260,9 +242,6 @@ def extended_residual(
 
     return ext_res
 
-def extended_residual_jacobian(X, X_ref, z_ref, residual_func, parametrisation, *args):
-    return numerical_jac(lambda _X: extended_residual(_X, X_ref, z_ref, residual_func, parametrisation, True, False), X)
-
 def nabla(H):
     nabla = np.zeros((2*H+1, 2*H+1))
     nabla_j = np.array([[0, 1], [-1, 0]])
@@ -271,75 +250,100 @@ def nabla(H):
     return nabla
 
 def hb_jacobian(X, *args):
-    Om = X[-1]
-    param = X[-2]
-    sys = create_motion_system(Om, param, *args)
+    Om = X[-2]
+    param = X[-1]
+    sys = create_motion_system()
+    M = sys.M(param)
+    C = sys.C(param)
+    K = sys.K(param)
+    dCdU = autograd.jacobian(sys.C)(param)
+    dMdU = autograd.jacobian(sys.M)(param)
+    dKdU = autograd.jacobian(sys.K)(param)
+
     nab = nabla(H)
 
-    J = np.zeros((X.shape[0]-2, X.shape[0]))
+    J_lin = np.zeros((X.shape[0]-2, X.shape[0]))
 
-    J[:, :-2] = np.kron(Om**2 * nab @ nab, sys.M) + np.kron(Om * nab, sys.C) + np.kron(np.eye(2*H+1), sys.K)
-    J[:, -2] = (np.kron(Om**2 * nab @ nab, sys.dMdU) + np.kron(Om * nab, sys.dCdU) + np.kron(np.eye(2*H+1), sys.dKdU)) @ X[:-2]
-    J[:, -1] = (np.kron(2*Om * nab @ nab, sys.M) + np.kron(nab, sys.C)) @ X[:-2]
+    J_lin[:, :-2] = np.kron(Om**2 * nab @ nab, M) + np.kron(Om * nab, C) + np.kron(np.eye(2*H+1), K)
+    J_lin[:, -2] = (np.kron(Om**2 * nab @ nab, dMdU) + np.kron(Om * nab, dCdU) + np.kron(np.eye(2*H+1), dKdU)) @ X[:-2]
+    J_lin[:, -1] = (np.kron(2*Om * nab @ nab, M) + np.kron(nab, C)) @ X[:-2]
     
-    nl_jacobian = jax.jacobian(hb_residual2)
-    J2 = nl_jacobian(X, *args)
-    assert J2.shape == J.shape, f"J2 shape: {J2.shape}, J shape: {J.shape}"
-    # J2 = numerical_jac2(hb_residual2, X, X.shape[0]-2, X.shape[0])
-    J += J2
-    return J
+    J_nlin = numerical_jac(hb_nonlinear_residual, X)
+    return J_lin + J_nlin
 
-def extended_residual_jacobian2(X, X_ref, z_ref, residual_func, parametrisation, *args):
+def extended_residual_jacobian_hybrid(X, X_ref, z_ref, residual_func, Dscale, parametrisation, *args):
     Jext = np.zeros((X.shape[0], X.shape[0]))
-    Jext[:-2, :] = hb_jacobian(X, *args)
+    Jext[:-2, :] = hb_jacobian(X * Dscale, *args)
     
-    X_mat_ref = X_ref[:-2].reshape(2*H+1, n_dofs).T
+    # Integral orthogonal phase condition
+    X_ref_unscaled = X_ref * Dscale
+    X_mat_ref = X_ref_unscaled[:-2].reshape(2*H+1, n_dofs).T
     for k in range(1, H + 1):
-        # Calculate indices for the vectorized X elements
         col_2k_minus_1 = int((2*k - 1) * n_dofs)
         col_2k = int(2*k * n_dofs)
-        
-        # Term 1: k * X_ref[:, 2k] for odd columns
         Jext[-2, col_2k_minus_1:col_2k_minus_1+n_dofs] = k * X_mat_ref[:, 2*k]
-        
-        # Term 2: -k * X_ref[:, 2k-1] for even columns
         Jext[-2, col_2k:col_2k + n_dofs] = - k * X_mat_ref[:, 2*k - 1]
-    
-    Jext[-2, -2:] = 0.0 # OIC doesnt take into account param or omega
+    Jext[-2, -2:] = 0.0
+
+    # Parametrisation
     match parametrisation:
         case Parametrisation.Local:
             Jext[-1, :] = z_ref
         case Parametrisation.ArcLength:
             Jext[-1, :] = 2 * (X - X_ref)
+
+    # Scaling
+    Jext[:-1, :] = Jext[:-1, :] @ np.diag(Dscale)
     
     return Jext
 
-def hb_residual(X, *args):
-    """
-    X[:-2]: dof*(2*H+1) Fourier coefficients of the system [X0, Xc1, Xs1, ... XcH, XsH]
-    where Xx is [xx_0, xx_1, ... xx_M] with M = n_dofs
-    X[-2]: Continuation parameter
-    X[-1]: Fourier series base frequency
-    """
-    Om = X[-1]
-    param = X[-2]
-    sys = create_motion_system(Om, param, *args)
+def extended_residual_jacobian(X, X_ref, z_ref, residual_func, Dscale, parametrisation, *args):
+    Jext = np.zeros((X.shape[0], X.shape[0]))
+    Jext[:-2, :] = numerical_jac(residual_func, X * Dscale)
+    
+    # Integral orthogonal phase condition
+    X_ref_unscaled = X_ref * Dscale
+    X_mat_ref = X_ref_unscaled[:-2].reshape(2*H+1, n_dofs).T
+    for k in range(1, H + 1):
+        col_2k_minus_1 = int((2*k - 1) * n_dofs)
+        col_2k = int(2*k * n_dofs)
+        Jext[-2, col_2k_minus_1:col_2k_minus_1+n_dofs] = k * X_mat_ref[:, 2*k]
+        Jext[-2, col_2k:col_2k + n_dofs] = - k * X_mat_ref[:, 2*k - 1]
+    Jext[-2, -2:] = 0.0
+
+    # Parametrisation
+    match parametrisation:
+        case Parametrisation.Local:
+            Jext[-1, :] = z_ref
+        case Parametrisation.ArcLength:
+            Jext[-1, :] = 2 * (X - X_ref)
+
+    # Scaling
+    Jext[:-1, :] = Jext[:-1, :] @ np.diag(Dscale)
+    
+    return Jext
+
+def hb_linear_residual(X, *args):
+    Om = X[-2]
+    param = X[-1]
+    sys = create_motion_system()
+    M = sys.M(param)
+    C = sys.C(param)
+    K = sys.K(param)
+
     R_lin = np.zeros(X.shape[0]-2)
-
-    # Compute the linear forces in Fourier domain (kroenecker free formula)
-    # R_lin[0:n_dofs] = K @ X[0:n_dofs]
-    # for k in range(1, H+1):
-    #     i = (2*k-1) * n_dofs
-    #     R_lin[i:i+n_dofs] = (K - (k*Om)**2 * M) @ X[i:i+n_dofs] + k * Om * C @ X[i+n_dofs:i+2*n_dofs]
-    #     R_lin[i+n_dofs:i+2*n_dofs] = - k * Om * C @ X[i:i+n_dofs] + (K - (k*Om)**2 * M) @ X[i+n_dofs:i+2*n_dofs]
-
     nab = nabla(H)
-    Z = np.kron(Om**2 * nab @ nab, sys.M) + np.kron(Om * nab, sys.C) + np.kron(np.eye(2*H+1), sys.K)
+    Z = np.kron(Om**2 * nab @ nab, M) + np.kron(Om * nab, C) + np.kron(np.eye(2*H+1), K)
     R_lin = Z @ X[:-2]
+    return R_lin
 
-    # Optimized FFT version of AFT
-    T = 2 * np.pi / Om      # period
-    dt = T / n_samples              # time step
+def hb_nonlinear_residual(X, *args):
+    Om = X[-2]
+    param = X[-1]
+    sys = create_motion_system()
+
+    # T = 2 * np.pi / Om      # period
+    # dt = T / n_samples              # time step
     Xc_real = X[:-2].reshape(n_coeffs, n_dofs).T
     Xc = vdp.X_to_complex(Xc_real) # Each row for each dof, each col corresponds to the jth fourier coeffs (a0, a1, b1, ... aH, bH)
     k = np.arange(H+1)
@@ -347,25 +351,30 @@ def hb_residual(X, *args):
     q_dot = np.fft.irfft(1j * Om * k * Xc, n_samples, axis=1, norm='forward')
     # q_ddot = np.fft.ifft(- (w**2) * Q_fft).real
     R_nlt = np.zeros((n_dofs, n_samples))
+    
     for s in range(n_samples):
-        t_n = s * dt
-        R_nlt[:, s] = - sys.fnlt(t_n, q[:, s], q_dot[:, s])
-    R_nlft = - sys.fnlf(Xc_real)
+        # t_n = s * dt
+        R_nlt[:, s] = - sys.fnlt(q[:, s], q_dot[:, s], Om, param)
     
     R_nl_fft = np.fft.rfft(R_nlt, n_samples, axis=1, norm='backward') # no scaling
-    R_nlf_fft = np.fft.rfft(R_nlft, n_coeffs, axis=1, norm='backward') # no scaling
     R_nl = vdp.X_to_real((R_nl_fft[:, :H+1]) / n_samples).T.reshape(-1)
+    
+    R_nlft = - sys.fnlf(Xc_real, Om, param)
+    R_nlf_fft = np.fft.rfft(R_nlft, n_coeffs, axis=1, norm='backward') # no scaling
     R_nlf = vdp.X_to_real(R_nlf_fft / n_coeffs, 0).T.reshape(-1)
 
-    return R_lin + R_nl + R_nlf
+    return R_nl + R_nlf
+
+def hb_residual(X, *args):
+    return hb_linear_residual(X, *args) + hb_nonlinear_residual(X, *args)
 
 @helpers.Timing(prefix="Solver:")
-def solve_nonlinear_system(X0, X_ref, z_ref, parametrisation, xtol=1e-5):
+def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, xtol=1e-5):
     Xp, info, ier, mesg =  sp.optimize.fsolve(
         extended_residual,
         X0,
-        args=(X_ref, z_ref, hb_residual, parametrisation, True, True),
-        fprime=extended_residual_jacobian,
+        args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True),
+        fprime=extended_residual_jacobian_hybrid,
         full_output=True,
         xtol = xtol,
     )
@@ -373,7 +382,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, parametrisation, xtol=1e-5):
         print(f"Nonlinear solver failed: {mesg}")
         exit(1)
 
-    print(f"param: {Xp[-2]:.3f}, omega: {Xp[-1]:.3f}, nfev: {info['nfev']}, njev: {info['njev']}")
+    print(f"param: {Xp[-1]:.3f}, omega: {Xp[-2]:.3f}, nfev: {info['nfev']}, njev: {info['njev']}")
 
     return Xp
 
@@ -391,7 +400,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, parametrisation, xtol=1e-5):
 
     # return sol.x
 
-def continuation(param_start, param_end, ds, X0):
+def continuation(param_start, param_end, ds, X0, scaling=True):
     """
     Continuation for autonomous systems using the harmonic balance method
     """
@@ -410,17 +419,30 @@ def continuation(param_start, param_end, ds, X0):
     X_ref = X0.copy()
     X_old = X0.copy()
     z_ref = np.zeros_like(X0)
-    z_ref[-2] = 1
+    z_ref[-1] = 1
+
+    Dscale = np.ones_like(X0)
+    Dscale_prev = Dscale.copy()
 
     # Initial step
-    Xp = solve_nonlinear_system(X0, X_ref, z_ref, Parametrisation.Local)
+    Xp = solve_nonlinear_system(X0, X_ref, z_ref, Dscale, Parametrisation.Local)
     X0 = Xp.copy()
     X_mat[:, 0] = X0
 
     iteration = 1
     while iteration < max_continuation_steps:
-        J = extended_residual_jacobian(X0, X_ref, z_ref, hb_residual, Parametrisation.ArcLength, True, False)
-        z = tangent_predictor(J, z_ref, X_ref)
+        if scaling:
+            Dscale_prev = Dscale.copy()
+            Dscale = np.maximum(np.abs(X0 * Dscale_prev), np.ones_like(X0))
+            Dscale[-2] = 1.0 # omega is not scaled
+            Dscale[-1] = 1.0 # param is not scaled
+            X_ref = X_ref * (Dscale_prev / Dscale)
+            X0 = X0 * (Dscale_prev / Dscale)
+            X_old = X_old * (Dscale_prev / Dscale)
+
+        J = extended_residual_jacobian_hybrid(X0, X_ref, z_ref * Dscale_prev, hb_residual, Parametrisation.ArcLength, True, False)
+        ztmp = tangent_predictor(J @ np.diag(1 / Dscale_prev), z_ref * Dscale_prev, X_ref) / Dscale
+        z = ztmp / np.linalg.norm(ztmp)
 
         # Take a step in the tangent direction ensuring to stay along the solution path
         if (iteration > 1) and np.dot(X0-X_old, direction*ds*z) < 0:
@@ -433,15 +455,15 @@ def continuation(param_start, param_end, ds, X0):
         # Predictor step
         Xp = X0 + direction*ds*z
         # Corrector step
-        Xtmp = solve_nonlinear_system(Xp, X_ref, z_ref, Parametrisation.ArcLength)
+        Xtmp = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, Parametrisation.ArcLength)
 
         X_old = X0.copy()
         X0 = Xtmp.copy()
 
         # History
-        X_mat[:, iteration] = X0
+        X_mat[:, iteration] = X0 * Dscale
         iteration += 1
-        if (X0[-2] - param_end) * param_direction >= 0:
+        if (X0[-1] - param_end) * param_direction >= 0:
             print("Continuation reached the end")
             break
 
@@ -450,35 +472,18 @@ def continuation(param_start, param_end, ds, X0):
 
 def truncated_series_approximation(u_tr, H):
     N_tr = u_tr.shape[1]  # Number of time samples
-        # ----- 1. Apply Hann Window -----
-    # Create a Hann (Hanning) window to taper the data and reduce spectral leakage
     dc = np.mean(u_tr, axis=1)
-    u_tr = u_tr - dc[:, None]
-
-    window = np.hanning(N_tr)       # shape = (N_tr,)
+    u_tr = u_tr - dc[:, None] # offset mean value to prevent spectral leakage
+    window = np.hanning(N_tr)
     u_tr_windowed = u_tr * window[None, :]  # Multiply each DoF by the window
-
-    # ----- 2. Zero Padding -----
-    # Zero-pad the windowed signal to increase frequency resolution.
-    zp_factor = 4                   # Adjust the zero-padding factor as desired
+    zp_factor = 4                   # zero padding factor
     N_fft = zp_factor * N_tr        # New FFT length after padding
-
-    # Compute the FFT on the windowed and zero-padded data along the time axis.
     U_fft = np.fft.fft(u_tr_windowed, n=N_fft, axis=1)
-
-    # Normalization factor.
     norm_factor = window.sum()
-
-    # ----- 3. Compute the Frequency Vector -----
-    # Use N_fft so that the frequency resolution is improved.
     freqs = np.fft.fftfreq(N_fft, dt)
-    # Restrict to positive frequencies (excluding 0 if desired)
     pos = freqs > 0
-    f_pos = freqs[pos]             # Array of positive frequencies
-    U_pos = U_fft[:, pos]          # FFT coefficients corresponding to positive frequencies
-
-    # ----- 4. Identify the Base Frequency -----
-    # Use a reference degree of freedom (here, dof 0) to pick the base frequency.
+    f_pos = freqs[pos]
+    U_pos = U_fft[:, pos]
     ref_dof = 0
     amplitude_ref = np.abs(U_pos[ref_dof, :])
     i0_ref = np.argmax(amplitude_ref)
@@ -486,11 +491,7 @@ def truncated_series_approximation(u_tr, H):
     omega0 = 2 * np.pi * f0        # Base angular frequency
     print("Base frequency: {:.3f} rad/s".format(omega0))
 
-    # ----- 5. Extract Fourier Coefficients -----
-    # Arrange the Fourier coefficients into an array.
-    # The 0 index holds the DC term. Then (2*h-1) and (2*h) hold cosine and sine terms respectively.
     coeffs = np.zeros((n_dofs, 2 * H + 1))
-    # coeffs[:, 0] = np.real(U_fft[:, 0]) / norm_factor  # DC term
     coeffs[:, 0] = dc
     for h in range(1, H + 1):
         target = h * f0
@@ -556,54 +557,46 @@ if __name__ == "__main__":
     
     X0 = np.zeros(n_dofs * (2 * H + 1) + 2)
     X0[:-2] = u_coeffs.T.reshape(-1)
-    X0[-2] = param_start
-    X0[-1] = omega0
+    X0[-2] = omega0
+    X0[-1] = param_start
 
-    # Initialize the gamma values
-    run_hbvlm(0, 0, False, False, reset_logfile=True) # only reset logfile
-
-    sys = create_motion_system(omega0, param_start, False, True) 
-    R_nlft = sys.fnlf(X0[:-2].reshape(n_coeffs, n_dofs).T)
+    # z_ref = np.zeros_like(X0)
+    # z_ref[-1] = 1.0
+    # J_fd = extended_residual_jacobian(X0, X0, z_ref, hb_residual, Parametrisation.Local)
+    # J_hy = extended_residual_jacobian_hybrid(X0, X0, z_ref, Parametrisation.Local)
     
-    # if (getenv("PLOT")):
-        # fig2 = make_subplots(
-        #     rows=n_dofs, cols=1,
-        #     subplot_titles=[f"Dof {i+1}" for i in range(n_dofs)],
-        # )
-        # fig2.update_layout(title="2 DOF Force Response")
-        
-        # R_nlf_fft = np.fft.rfft(R_nlft, n_coeffs, axis=1, norm='backward')
-        # R_nlf = vdp.X_to_real(R_nlf_fft / n_coeffs, 0).T.reshape(-1)
-        # plot_hb_timedomain(fig2, t_tr[0], t_tr[-1], 0.1, n_dofs, R_nlf, omega0, H, "HB")
-        # fig2.update_yaxes(tickformat='.2e')
-        # fig2.show()
+    # print("FD cond: ", np.linalg.cond(J_fd))
+    # print("Hybrid cond: ", np.linalg.cond(J_hy))
 
-        # fig = make_subplots(
-        #     rows=n_dofs, cols=1,
-        #     subplot_titles=[f"Dof {i+1}" for i in range(n_dofs)],
-        #     vertical_spacing=0.1,
-        #     horizontal_spacing=0.08
-        # )
-        # fig.update_layout(title="2 DOF Aeroelastic Response")
-        # plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, X0[:-2], X0[-1], H, "FFT")
-        
-        # z_ref = np.zeros_like(X0)
-        # z_ref[-2] = 1
-        # Xpp = solve_nonlinear_system(X0, X0.copy(), z_ref, True)
-        # plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, Xpp[:-2], Xpp[-1], H, "HB")
+    # np.testing.assert_allclose(J_fd, J_hy)
 
-        # for dof in range(n_dofs):
-        #     fig.add_trace(
-        #         go.Scatter(
-        #             x=t_tr,  # x values for new line
-        #             y=u_tr[dof, :],  # y values for new line
-        #             name=f"Time integration dof {dof}",  # legend label
-        #             line=dict(color='red')  # optional: customize line color
-        #         ),
-        #         row=(dof+1),
-        #         col=1
-        #     )
-        # fig.show()
+    if (getenv("PLOT")):
+        fig = make_subplots(
+            rows=n_dofs, cols=1,
+            subplot_titles=[f"Dof {i+1}" for i in range(n_dofs)],
+            vertical_spacing=0.1,
+            horizontal_spacing=0.08
+        )
+        fig.update_layout(title="2 DOF Aeroelastic Response")
+        plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, X0[:-2], X0[-2], H, "FFT")
+        
+        z_ref = np.zeros_like(X0)
+        z_ref[-2] = 1
+        Xpp = solve_nonlinear_system(X0, X0.copy(), z_ref, np.ones_like(X0), Parametrisation.Local)
+        plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, Xpp[:-2], Xpp[-2], H, "HB")
+
+        for dof in range(n_dofs):
+            fig.add_trace(
+                go.Scatter(
+                    x=t_tr,  # x values for new line
+                    y=u_tr[dof, :],  # y values for new line
+                    name=f"Time integration dof {dof}",  # legend label
+                    line=dict(color='red')  # optional: customize line color
+                ),
+                row=(dof+1),
+                col=1
+            )
+        fig.show()
 
     # X_mat = continuation(param_start, param_end, ds, X0)
     

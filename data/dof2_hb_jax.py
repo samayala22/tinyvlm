@@ -59,11 +59,11 @@ class System:
     K      : callable
     fnlt   : callable        # time‐domain NL force
 
-def create_motion_system3():
+def create_motion_system():
     def fnlt(u, v, U_param):
         return jnp.array([
-            - (ndv.omega / U_param)**2 * u[0] + v[1],
-            - 1/(U_param**2) * torsional_func(u[1]) - v[0]
+            - (ndv.omega / U_param)**2 * u[0],
+            - 1/(U_param**2) * torsional_func(u[1])
         ])
     
     def M(U_param):
@@ -104,7 +104,7 @@ def nabla(H):
 def hb_residual(X, *args):
     Omega = X[-1]
     param = X[-2]
-    sys   = create_motion_system3()
+    sys   = create_motion_system()
     M = sys.M(param)
     C = sys.C(param)
     K = sys.K(param)
@@ -127,7 +127,7 @@ def hb_residual(X, *args):
                           n_samples, axis=1, norm='forward')
     
     gamma, gamma_inv = build_gamma_op(Omega)
-    jax.debug.print("{}", jnp.allclose(q.T.reshape(-1), gamma @ X[:-2]))
+    jax.debug.print("{}", jnp.allclose(q.reshape(-1), gamma @ X[:-2]))
 
     t = jnp.arange(n_samples, dtype=X.dtype) * dt
 
@@ -150,7 +150,7 @@ def hb_residual(X, *args):
 def hb_residual2(X, *args):
     Omega = X[-1]
     param = X[-2]
-    sys   = create_motion_system3()
+    sys   = create_motion_system()
     M = sys.M(param)
     C = sys.C(param)
     K = sys.K(param)
@@ -188,7 +188,7 @@ def build_dft(H: int, N: int, omega: float) -> jnp.ndarray:
     T = 2 * jnp.pi / omega
     t = jnp.arange(N, dtype=jnp.float64) * (T / N)
 
-    rows = [jnp.full((N,), 0.5, dtype=jnp.float64)]
+    rows = [jnp.full((N,), 1.0, dtype=jnp.float64)]
 
     for m in range(1, H + 1):
         rows.append(jnp.cos(m * omega * t))
@@ -197,19 +197,20 @@ def build_dft(H: int, N: int, omega: float) -> jnp.ndarray:
     dft = jnp.stack(rows, axis=0)
     return dft
 
-# def build_gamma_op(omega):
-#     dft = build_dft(H, n_samples, omega)
-#     gamma = jnp.zeros((n_dofs * n_samples, n_dofs * n_coeffs))
-#     gamma_m1 = jnp.zeros((n_dofs * n_coeffs, n_dofs * n_samples))
-#     I_n = jnp.eye(n_dofs, dtype=jnp.float64)
+def build_gamma_op(omega):
+    dft = build_dft(H, n_samples, omega)
+    dft2 = dft.at[0, :].multiply(0.5)
 
-#     for i in range(n_dofs):
-#         gamma = gamma.at[:, i*n_dofs:(i+1)*n_dofs].set(jnp.kron(I_n, dft[i, :].reshape((n_samples, 1))))
-#         gamma_m1 = gamma_m1.at[i*n_dofs:(i+1)*n_dofs, :].set(jnp.kron(I_n, dft[i, :]))
+    gamma = jnp.zeros((n_dofs * n_samples, n_dofs * n_coeffs))
+    gamma_m1 = jnp.zeros((n_dofs * n_coeffs, n_dofs * n_samples))
+    I_n = jnp.eye(n_dofs, dtype=jnp.float64)
 
-#     gamma_m1 = gamma_m1.at[:n_dofs, :].set(gamma_m1[:n_dofs, :] * 2.0)
-#     gamma_m1 = (2 / n_samples) * gamma_m1
-#     return gamma, gamma_m1
+    for i in range(n_coeffs):
+        gamma = gamma.at[:, i*n_dofs:(i+1)*n_dofs].set(jnp.kron(I_n, dft[i, :].reshape((n_samples, 1))))
+        gamma_m1 = gamma_m1.at[i*n_dofs:(i+1)*n_dofs, :].set(jnp.kron(I_n, dft2[i, :]))
+
+    gamma_m1 = (2 / n_samples) * gamma_m1
+    return gamma, gamma_m1
 
 # def build_gamma_op(omega):
 #     # time samples
@@ -236,44 +237,44 @@ def build_dft(H: int, N: int, omega: float) -> jnp.ndarray:
 #     gamma_m1 = gamma_m1.at[:, 0:n_dofs].multiply(0.5)
 #     return gamma, gamma_m1
 
-def build_gamma_op(omega):
-    """
-    Returns
-      Γ        :  (n_dofs*N) × (n_dofs*(2H+1))   real  —  maps Fourier→time
-      Γ_inv    :  (n_dofs*(2H+1)) × (n_dofs*N)   real  —  maps time→Fourier
-    so that
-      q_time = Γ   @ x_coeff
-      x_coeff = Γ⁻¹ @ q_time
+# def build_gamma_op(omega):
+#     """
+#     Returns
+#       Γ        :  (n_dofs*N) × (n_dofs*(2H+1))   real  —  maps Fourier→time
+#       Γ_inv    :  (n_dofs*(2H+1)) × (n_dofs*N)   real  —  maps time→Fourier
+#     so that
+#       q_time = Γ   @ x_coeff
+#       x_coeff = Γ⁻¹ @ q_time
 
-    and so that these two are exactly the forward/inverse you get
-    from    irfft( rfft(·,n=N), n=N )   up to machine eps.
-    """
-    # 1) time‐grid over [0,2π)
-    N = n_samples
-    t = jnp.arange(N, dtype=jnp.float64) * (2*jnp.pi/N)
+#     and so that these two are exactly the forward/inverse you get
+#     from    irfft( rfft(·,n=N), n=N )   up to machine eps.
+#     """
+#     # 1) time‐grid over [0,2π)
+#     N = n_samples
+#     t = jnp.arange(N, dtype=jnp.float64) * (2*jnp.pi/N)
 
-    # 2) build the real‐Fourier basis TH  of size (2H+1)×N
-    #    row 0 =  constant ½
-    #    rows 1,2 = cos(1*t), sin(1*t)
-    #    rows 3,4 = cos(2*t), sin(2*t)
-    #       ...
-    TH_rows = [jnp.ones(N, dtype=jnp.float64)]
-    for k in range(1, H+1):
-        TH_rows.append(jnp.cos(k * t))
-        TH_rows.append(jnp.sin(k * t))
-    TH = jnp.stack(TH_rows, axis=0)   # shape = (2H+1, N)
+#     # 2) build the real‐Fourier basis TH  of size (2H+1)×N
+#     #    row 0 =  constant ½
+#     #    rows 1,2 = cos(1*t), sin(1*t)
+#     #    rows 3,4 = cos(2*t), sin(2*t)
+#     #       ...
+#     TH_rows = [jnp.ones(N, dtype=jnp.float64)]
+#     for k in range(1, H+1):
+#         TH_rows.append(jnp.cos(k * t))
+#         TH_rows.append(jnp.sin(k * t))
+#     TH = jnp.stack(TH_rows, axis=0)   # shape = (2H+1, N)
 
-    # 3) build Γ = Iₙ ⊗ THᵀ
-    #    so that if x_coeff is stacked as [dof0_coeffs; dof1_coeffs; ...],
-    #    then q_time = (I ⊗ THᵀ) x_coeff  has shape (n_dofs*N).
-    Gamma = jnp.kron(jnp.eye(n_dofs, dtype=jnp.float64), TH.T)
+#     # 3) build Γ = Iₙ ⊗ THᵀ
+#     #    so that if x_coeff is stacked as [dof0_coeffs; dof1_coeffs; ...],
+#     #    then q_time = (I ⊗ THᵀ) x_coeff  has shape (n_dofs*N).
+#     Gamma = jnp.kron(jnp.eye(n_dofs, dtype=jnp.float64), TH.T)
 
-    # 4) build Γ⁻¹ = Iₙ ⊗ TH  scaled by (2/N), then fix the DC lines back to (1/N)
-    #    so that the inverse reproduces exactly what a "rfft(...)/N" does.
-    InvTH = TH.at[0].set(0.5 * jnp.ones_like(TH[0]))   # temporarily set DC row=1
-    Gamma_inv = jnp.kron(jnp.eye(n_dofs, dtype=jnp.float64), InvTH) * (2.0 / N)
+#     # 4) build Γ⁻¹ = Iₙ ⊗ TH  scaled by (2/N), then fix the DC lines back to (1/N)
+#     #    so that the inverse reproduces exactly what a "rfft(...)/N" does.
+#     InvTH = TH.at[0].set(0.5 * jnp.ones_like(TH[0]))   # temporarily set DC row=1
+#     Gamma_inv = jnp.kron(jnp.eye(n_dofs, dtype=jnp.float64), InvTH) * (2.0 / N)
 
-    return Gamma, Gamma_inv
+#     return Gamma, Gamma_inv
 
 # @jax.jit
 def hb_jacobian(X, *args):
@@ -286,7 +287,7 @@ def hb_jacobian(X, *args):
     # unpack
     Om    = X[-1]
     param = X[-2]
-    sys   = create_motion_system3()
+    sys   = create_motion_system()
     M = sys.M(param)
     C = sys.C(param)
     K = sys.K(param)
@@ -344,8 +345,6 @@ def hb_jacobian(X, *args):
     Jac_fnl_xd_mat = jnp.zeros((n_dofs * n_samples, n_dofs * n_samples))
     Jac_fnl_param_mat = jnp.zeros((n_dofs * n_samples, n_samples))
     gamma, gamma_m1 = build_gamma_op(Om)
-    jax.debug.print("gamma {}", gamma)
-    jax.debug.print("gamma_m1 {}", gamma_m1 @ gamma)
 
     for i in range(n_dofs):
         Jac_fnl_param_mat = Jac_fnl_param_mat.at[i*n_samples:(i+1)*n_samples, :].set(jnp.diag(Jac_fnl_param[i,:]))
@@ -359,7 +358,7 @@ def hb_jacobian(X, *args):
     J_nl = J_nl.at[:, -1].set(gamma_m1 @ Jac_fnl_xd_mat @ gamma @ jnp.kron(nab, jnp.eye(n_dofs)) @ X[:-2])
     
     # J_nl = jax.jacobian(hb_residual2)(X, *args)
-    return J + J_nl
+    return J - J_nl
  
 
 # -----------------------------------------------------------------------------
@@ -480,7 +479,7 @@ if __name__ == "__main__":
         torsional_func = alpha_linear
 
     # Harmonic‐balance settings
-    H        = 3
+    H        = 1
     n_harmonics = H
     n_dofs   = 2
     n_coeffs = 2*H + 1
@@ -539,6 +538,7 @@ if __name__ == "__main__":
 
     print(j2)
     print(j3)
+    print(jnp.abs(j2 - j3) < 1e-8)
     np.testing.assert_allclose(j2, j3)
     np.testing.assert_allclose(j2, j4, atol=1e-7)
     np.testing.assert_allclose(j3, j4, atol=1e-7)
