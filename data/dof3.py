@@ -9,33 +9,33 @@ from pathlib import Path
 
 @dataclass
 class Vars:
-    a: float # Dimensionless distance between mid-chord and EA (-0.5)
-    b: float # Semi-chord (0.127 m)
-    c: float # Dimensionless distance between flap hinge and mid-chord (0.5)
-    I_alpha: float # Mass moment of inertia of the wing-flap about wing EA per unit span
-    I_beta: float # Mass moment of inertia of the flap about flap hinge line
-    k_h: float # linear structural stiffness coefficient of plunging
-    k_alpha: float # Linear structural stiffness coefficient of plunging
-    k_beta: float # Linear structural stiffness coefficient of pitching
-    m: float # Mass of wing-aileron per span
-    m_t: float # Mass of wing-aileron and the supports per span
-    r_alpha: float # dimensionless radius of gyration around elastic axis
-    r_beta: float # dimensionless radius of gyration around flap hinge axis
-    S_alpha: float # static mass moment of wing-flap about wing EA per unit span
-    S_beta: float # static mass moment of flap about flap hinge line per unit span
-    x_alpha: float # dimensionless distance between airfoil EA and the center of gravity
-    x_beta: float # dimensionless distance between flap center of gravity and flap hinge axis
-    omega_h: float # uncoupled plunge natural frequency
-    omega_alpha: float # uncoupled pitch natural frequency
-    omega_beta: float # uncoupled flap natural frequency
-    rho: float # fluid density
-    zeta_h: float # plunge damping ratio
-    zeta_alpha: float # pitch damping ratio
-    zeta_beta: float # flap damping ratio
-    U: float # velocity
-    sigma: float
-    V: float
-    mu: float
+    a: float = 0.0# Dimensionless distance between mid-chord and EA (-0.5)
+    b: float = 0.0# Semi-chord (0.127 m)
+    c: float = 0.0# Dimensionless distance between flap hinge and mid-chord (0.5)
+    I_alpha: float = 0.0# Mass moment of inertia of the wing-flap about wing EA per unit span
+    I_beta: float = 0.0# Mass moment of inertia of the flap about flap hinge line
+    k_h: float = 0.0# linear structural stiffness coefficient of plunging
+    k_alpha: float = 0.0# Linear structural stiffness coefficient of plunging
+    k_beta: float = 0.0# Linear structural stiffness coefficient of pitching
+    m: float = 0.0# Mass of wing-aileron per span
+    m_t: float = 0.0# Mass of wing-aileron and the supports per span
+    r_alpha: float = 0.0# dimensionless radius of gyration around elastic axis
+    r_beta: float = 0.0# dimensionless radius of gyration around flap hinge axis
+    S_alpha: float = 0.0# static mass moment of wing-flap about wing EA per unit span
+    S_beta: float = 0.0# static mass moment of flap about flap hinge line per unit span
+    x_alpha: float = 0.0# dimensionless distance between airfoil EA and the center of gravity
+    x_beta: float = 0.0# dimensionless distance between flap center of gravity and flap hinge axis
+    omega_h: float = 0.0# uncoupled plunge natural frequency
+    omega_alpha: float = 0.0# uncoupled pitch natural frequency
+    omega_beta: float = 0.0# uncoupled flap natural frequency
+    rho: float = 0.0# fluid density
+    zeta_h: float = 0.0# plunge damping ratio
+    zeta_alpha: float = 0.0# pitch damping ratio
+    zeta_beta: float = 0.0# flap damping ratio
+    U: float = 0.0 # velocity
+    sigma: float = 0.0
+    V: float = 0.0
+    mu: float = 0.0
 
 def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=np.radians(4.24), a_f=np.radians(-2.12)):
     return np.where(
@@ -242,7 +242,7 @@ class AeroelasticSystem:
         # force_structure = self.M_s @ self.coupled_accel(y) + self.D_s @ y[0:3, :] + self.K_s @ y[3:6, :] + self.yn_func(y)[3:6, :]
         # assert np.isclose(force_structure, forces_aero).all()
         return forces_aero
-    
+     
 def compute_psd(t, data):
     """Compute PSD with consistent parameters"""
     sampling_rate = 1 / np.mean(np.diff(t))
@@ -257,20 +257,24 @@ def compute_psd(t, data):
     return frequencies[mask], psd[mask]
     # return frequencies, psd
 
-def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', marker_size=4):
+def add_data_and_psd(fig, time, data, name, row, col, mode='lines', marker_size=4):
+    line = {"color": 'royalblue' if name == "Theodorsen" else 'red'}
     """Add time series and PSD data to plotly figure"""
     # Add time series data
+    start = int(0.75*len(data))
     fig.add_trace(
         go.Scattergl(
-            x=time, 
-            y=data, 
+            x=time[start:], 
+            y=data[start:], 
             name=name,
+            legendgroup=name,
             mode=mode,
             marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            showlegend=True
+            line = line,
+            showlegend=True if (row == 1 and col == 1) else False
         ),
-        row=row_data, 
-        col=col_data
+        row=row, 
+        col=col
     )
 
     # Plot peaks and valleys
@@ -294,12 +298,14 @@ def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', ma
             x=frequencies,
             y=psd,
             name=name,
+            legendgroup=name,
             mode=mode,
             marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            showlegend=True
+            line = line,
+            showlegend=False
         ),
-        row=row_data+1,
-        col=col_data
+        row=row+1,
+        col=col
     )
 
 def format_subplot(fig, row, col, xlabel, ylabel):
@@ -311,6 +317,7 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         showgrid=True,
         gridwidth=1,
         gridcolor='rgba(128, 128, 128, 0.2)',
+        matches= f"x{1 if row % 2 == 1 else 4}"
     )
     fig.update_yaxes(
         title_text=ylabel,
@@ -432,15 +439,15 @@ if __name__ == "__main__":
             fig = make_subplots(
                 rows=6, cols=3,
                 subplot_titles=(
-                    'Heave', 'Heave Velocity', 'Heave Force',
-                    'Heave PSD', 'Heave Velocity PSD', 'Heave Force PSD',
+                    'Wing Heave', 'Wing Heave Velocity', 'Wing Heave Force',
+                    'Wing Heave PSD', 'Wing Heave Velocity PSD', 'Wing Heave Force PSD',
                     'Wing Pitch', 'Wing Pitch Velocity', 'Wing Pitch Force',
                     'Pitch PSD', 'Pitch Velocity PSD', 'Pitch Force PSD',
-                    'Flap', 'Flap Velocity', 'Flap Force',
-                    'Flap PSD', 'Flap Velocity PSD' ,'Flap Force PSD'
+                    'Flap Pitch', 'Flap Pitch Velocity', 'Flap Pitch Force',
+                    'Flap Pitch PSD', 'Flap Pitch Velocity PSD' ,'Flap Pitch Force PSD'
                 ),
                 vertical_spacing=0.1,
-                horizontal_spacing=0.08
+                horizontal_spacing=0.1
             )
             add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1) # h
             add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2) # dh
@@ -492,11 +499,15 @@ if __name__ == "__main__":
             format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
             format_subplot(fig, 6, 3, "f", "Amplitude (dB)")
 
+
+            fig.update_annotations(font_size=20)
             fig.update_layout(
-                title="Theodorsen 3DOF Aeroelastic Response",
+                title=f"3DOF Aeroelastic Response (U = {v.U:.2f} m/s)",
                 title_x=0.5,
                 autosize=True,
-                showlegend=True,
+                # showlegend=True,
+                font_family="Times New Roman",
+                font_size=16,
                 template="plotly_white",
                 legend=dict(
                     yanchor="top",
