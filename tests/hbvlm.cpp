@@ -652,10 +652,10 @@ int main(int argc, char** argv) {
     if (argc != 5) { // hbvlm <omega> <harmonics>
         return 1;
     }
-    const f32 cycles = 5.0f;
+    const f32 cycles = 3.0f;
     const f32 u_inf = 1.0f; // freestream velocity
     const f32 omega = std::stof(argv[1]);
-    const i32 H = std::stoi(argv[2]);
+    const i32 H = std::stoi(argv[2]); 
     const bool read_gamma = (bool)std::stoi(argv[3]);
     const bool write_gamma = (bool)std::stoi(argv[4]);
     // const bool read_gamma = false;

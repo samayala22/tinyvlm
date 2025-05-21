@@ -211,7 +211,6 @@ class Parametrisation(Enum):
     Local = 1
     ArcLength = 2
 
-@helpers.Timing(prefix="Residual: ")
 def extended_residual(
     X, # scaled
     X_ref,
@@ -515,7 +514,7 @@ if __name__ == "__main__":
         torsional_func = dof2.alpha_linear
 
     # Independent params
-    H = 3
+    H = 10
     n_dofs = 2
     n_coeffs = 2*H+1
     n_samples = (H+1)*(2**4) # sampling points (needs to be power of 2)
@@ -527,10 +526,10 @@ if __name__ == "__main__":
     # assert ((H+1) & H) == 0 # H+1 should be a power of 2
 
     # Dependent params
-    param_start = flutter_speed * flutter_ratio_start
+    # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    # param_start = 2.0
-    param_end = 4.5
+    param_start = 4.0
+    param_end = 5.0
     # Time integration
     t_final = 2000.0
     dt = 0.2

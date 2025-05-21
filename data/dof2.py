@@ -400,12 +400,12 @@ def plot_monolithic(fig, monolithic_sol):
     add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[3, :], "Monolithic", 3, 2)
 
 def plot_iterative(fig, vec_t_nd, u, v, a, F):
-    add_data_and_psd(fig, vec_t_nd, u[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 1)
-    add_data_and_psd(fig, vec_t_nd, v[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 2)
-    add_data_and_psd(fig, vec_t_nd, F[0, :], f"Iterative (ε = {newton_err_thresh})", 1, 3)
-    add_data_and_psd(fig, vec_t_nd, u[1, :], f"Iterative (ε = {newton_err_thresh})", 3, 1)
-    add_data_and_psd(fig, vec_t_nd, v[1, :], f"Iterative (ε = {newton_err_thresh})", 3, 2)
-    add_data_and_psd(fig, vec_t_nd, F[1, :], f"Iterative (ε = {newton_err_thresh})", 3, 3)
+    add_data_and_psd(fig, vec_t_nd, u[0, :], "Iterative", 1, 1)
+    add_data_and_psd(fig, vec_t_nd, v[0, :], "Iterative", 1, 2)
+    add_data_and_psd(fig, vec_t_nd, F[0, :], "Iterative", 1, 3)
+    add_data_and_psd(fig, vec_t_nd, u[1, :], "Iterative", 3, 1)
+    add_data_and_psd(fig, vec_t_nd, v[1, :], "Iterative", 3, 2)
+    add_data_and_psd(fig, vec_t_nd, F[1, :], "Iterative", 3, 3)
 
 def format_fig(fig):
     # Time series plots - Row 1
@@ -414,9 +414,9 @@ def format_fig(fig):
     format_subplot(fig, 1, 3, r"$\bar{t}$", r"$F_{h}$")
     
     # PSD plots - Row 2
-    format_subplot(fig, 2, 1, r"$\bar{f}$", "Amplitude (dB)")
-    format_subplot(fig, 2, 2, r"$\bar{f}$", "Amplitude (dB)")
-    format_subplot(fig, 2, 3, r"$\bar{f}$", "Amplitude (dB)")
+    format_subplot(fig, 2, 1, r"$\bar{f}$", "Amplitude")
+    format_subplot(fig, 2, 2, r"$\bar{f}$", "Amplitude")
+    format_subplot(fig, 2, 3, r"$\bar{f}$", "Amplitude")
     
     # Time series plots - Row 3
     format_subplot(fig, 3, 1, r"$\bar{t}$", r"$\alpha$ (deg)")
@@ -424,9 +424,9 @@ def format_fig(fig):
     format_subplot(fig, 3, 3, r"$\bar{t}$", r"$F_{\alpha}$")
     
     # PSD plots - Row 4
-    format_subplot(fig, 4, 1, r"$\bar{f}$", "Amplitude (dB)")
-    format_subplot(fig, 4, 2, r"$\bar{f}$", "Amplitude (dB)")
-    format_subplot(fig, 4, 3, r"$\bar{f}$", "Amplitude (dB)")
+    format_subplot(fig, 4, 1, r"$\bar{f}$", "Amplitude")
+    format_subplot(fig, 4, 2, r"$\bar{f}$", "Amplitude")
+    format_subplot(fig, 4, 3, r"$\bar{f}$", "Amplitude")
 
     fig.update_layout(
         title=f"2 DOF Aeroelastic response at Ū = {round(U_vel, 3)} ({torsional_spring_names[torsional_spring]} Pitch Spring)",
@@ -453,10 +453,10 @@ if __name__ == "__main__":
     flutter_speed = 6.285
     flutter_ratio = 0.6
     # vec_U = np.linspace(1.0, 7, 50)
-    vec_U = [flutter_ratio * flutter_speed] # reduced velocity
-    # vec_U = [4.0] # reduced velocity
+    # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
+    vec_U = [4.0] # reduced velocity
     newton_err_thresh = 1e-7
-    torsional_spring = 0
+    torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
     if (torsional_spring == 0):
