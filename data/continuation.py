@@ -3,6 +3,12 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+style_dict = {
+    "layout.font.family": "Times New Roman",
+    "layout.font.size": 16,
+    "layout.template": "plotly_white",
+}
+
 def plot_hb_continuation(title, H, X_mat):
     assert len(X_mat.shape) == 2
     dofs = (X_mat.shape[0] - 2) / (2*H+1)
@@ -17,13 +23,15 @@ def plot_hb_continuation(title, H, X_mat):
         horizontal_spacing=0.1
     )
     fig.update_layout(title=title)
+    fig.update(**style_dict)
+
     X_mat_h = X_mat[:-2, :]
     for dof in range(dofs):
         X_h = X_mat_h[dof::dofs, :]
         for h in range(1, H+1):
             fig.add_trace(
                 go.Scattergl(
-                    x = X_mat[-2, :],
+                    x = X_mat[-1, :],
                     y = np.sqrt(X_h[2*h-1, :]**2 + X_h[2*h, :]**2),
                     name = f"Harmonic {h}",
                     mode = "lines+markers"

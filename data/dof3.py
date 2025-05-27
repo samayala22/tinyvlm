@@ -6,6 +6,9 @@ import scipy as sp
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
 from pathlib import Path
+import kaleido
+import plotting as plot
+from pathlib import Path
 
 @dataclass
 class Vars:
@@ -243,91 +246,6 @@ class AeroelasticSystem:
         # assert np.isclose(force_structure, forces_aero).all()
         return forces_aero
      
-def compute_psd(t, data):
-    """Compute PSD with consistent parameters"""
-    sampling_rate = 1 / np.mean(np.diff(t))
-    frequencies, psd = sp.signal.welch(
-        data, 
-        fs=sampling_rate,
-        nperseg=len(t)//2
-    )
-    mask = frequencies < 1.0
-    psd_db = 10 * np.log10(psd)
-
-    return frequencies[mask], psd[mask]
-    # return frequencies, psd
-
-def add_data_and_psd(fig, time, data, name, row, col, mode='lines', marker_size=4):
-    line = {"color": 'royalblue' if name == "Theodorsen" else 'red'}
-    """Add time series and PSD data to plotly figure"""
-    # Add time series data
-    start = int(0.75*len(data))
-    fig.add_trace(
-        go.Scattergl(
-            x=time[start:], 
-            y=data[start:], 
-            name=name,
-            legendgroup=name,
-            mode=mode,
-            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            line = line,
-            showlegend=True if (row == 1 and col == 1) else False
-        ),
-        row=row, 
-        col=col
-    )
-
-    # Plot peaks and valleys
-    # peaks_idx0, _ = sp.signal.find_peaks(data) # peaks
-    # peaks_idx1, _ = sp.signal.find_peaks(-data) # valleys
-    # peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
-    # fig.add_trace(
-    #     go.Scattergl(
-    #         x=time[peaks_idx], 
-    #         y=data[peaks_idx],
-    #         mode='markers',
-    #     ),
-    #     row=row_data, 
-    #     col=col_data
-    # )
-    
-    # Add PSD data
-    frequencies, psd = compute_psd(time, data)
-    fig.add_trace(
-        go.Scattergl(
-            x=frequencies,
-            y=psd,
-            name=name,
-            legendgroup=name,
-            mode=mode,
-            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            line = line,
-            showlegend=False
-        ),
-        row=row+1,
-        col=col
-    )
-
-def format_subplot(fig, row, col, xlabel, ylabel):
-    """Format a specific subplot with labels and grid"""
-    fig.update_xaxes(
-        title_text=xlabel,
-        row=row,
-        col=col,
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(128, 128, 128, 0.2)',
-        matches= f"x{1 if row % 2 == 1 else 4}"
-    )
-    fig.update_yaxes(
-        title_text=ylabel,
-        row=row,
-        col=col,
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(128, 128, 128, 0.2)',
-    )
-
 if __name__ == "__main__":
     # Darabseh 2022
     # v = Vars(
@@ -436,28 +354,16 @@ if __name__ == "__main__":
 
         if len(U_vec) == 1:
             # Plotting
-            fig = make_subplots(
-                rows=6, cols=3,
-                subplot_titles=(
-                    'Wing Heave', 'Wing Heave Velocity', 'Wing Heave Force',
-                    'Wing Heave PSD', 'Wing Heave Velocity PSD', 'Wing Heave Force PSD',
-                    'Wing Pitch', 'Wing Pitch Velocity', 'Wing Pitch Force',
-                    'Pitch PSD', 'Pitch Velocity PSD', 'Pitch Force PSD',
-                    'Flap Pitch', 'Flap Pitch Velocity', 'Flap Pitch Force',
-                    'Flap Pitch PSD', 'Flap Pitch Velocity PSD' ,'Flap Pitch Force PSD'
-                ),
-                vertical_spacing=0.1,
-                horizontal_spacing=0.1
-            )
-            add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1) # h
-            add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2) # dh
-            add_data_and_psd(fig, vec_t, aero_forces[0, :]/v.mu, "Theodorsen", 1, 3) # force h
-            add_data_and_psd(fig, vec_t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1) # alpha
-            add_data_and_psd(fig, vec_t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2) # dalpha
-            add_data_and_psd(fig, vec_t, aero_forces[1, :]/v.mu, "Theodorsen", 3, 3) # force alpha
-            add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1) # beta
-            add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
-            add_data_and_psd(fig, vec_t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
+            fig = plot.create_figure(["Wing Heave", "Wing Pitch", "Flap Pitch"])
+            plot.add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1) # h
+            plot.add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2) # dh
+            plot.add_data_and_psd(fig, vec_t, aero_forces[0, :]/v.mu, "Theodorsen", 1, 3) # force h
+            plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1) # alpha
+            plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2) # dalpha
+            plot.add_data_and_psd(fig, vec_t, aero_forces[1, :]/v.mu, "Theodorsen", 3, 3) # force alpha
+            plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1) # beta
+            plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
+            plot.add_data_and_psd(fig, vec_t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
 
             uvlm_file = Path("build/windows/x64/release/3dof.txt")
             if uvlm_file.exists():
@@ -470,54 +376,38 @@ if __name__ == "__main__":
                         i += 1
                     uvlm = uvlm[:, :i] # shrink in case the number of steps is not equal (stopped simulation)
 
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[1, :], "UVLM", 1, 1)
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[4, :], "UVLM", 1, 2)
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[7, :], "UVLM", 1, 3)
-                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[2, :]), "UVLM", 3, 1)
-                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[5, :]), "UVLM", 3, 2)
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[8, :], "UVLM", 3, 3)
-                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[3, :]), "UVLM", 5, 1)
-                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[6, :]), "UVLM", 5, 2)
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[9, :], "UVLM", 5, 3)
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[1, :], "UVLM", 1, 1)
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[4, :], "UVLM", 1, 2)
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[7, :], "UVLM", 1, 3)
+                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[2, :]), "UVLM", 3, 1)
+                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[5, :]), "UVLM", 3, 2)
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[8, :], "UVLM", 3, 3)
+                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[3, :]), "UVLM", 5, 1)
+                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[6, :]), "UVLM", 5, 2)
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[9, :], "UVLM", 5, 3)
                 
-            format_subplot(fig, 1, 1, "t", r"y")
-            format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
-            format_subplot(fig, 1, 3, "t", "Lift")
-            format_subplot(fig, 2, 1, "f", "Amplitude (dB)")
-            format_subplot(fig, 2, 2, "f", "Amplitude (dB)")
-            format_subplot(fig, 2, 3, "f", "Amplitude (dB)")
-            format_subplot(fig, 3, 1, "t", r"$\alpha$")
-            format_subplot(fig, 3, 2, "t", r"$\dot{\alpha}$")
-            format_subplot(fig, 3, 3, "t", "Moment")
-            format_subplot(fig, 4, 1, "f", "Amplitude (dB)")
-            format_subplot(fig, 4, 2, "f", "Amplitude (dB)")
-            format_subplot(fig, 4, 3, "f", "Amplitude (dB)")
-            format_subplot(fig, 5, 1, "t", r"$\beta$")
-            format_subplot(fig, 5, 2, "t", r"$\dot{\beta}$")
-            format_subplot(fig, 5, 3, "t", "Moment")
-            format_subplot(fig, 6, 1, "f", "Amplitude (dB)")
-            format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
-            format_subplot(fig, 6, 3, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 1, 1, "t", r"y")
+            plot.format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
+            plot.format_subplot(fig, 1, 3, "t", "Lift")
+            plot.format_subplot(fig, 2, 1, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 2, 2, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 2, 3, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 3, 1, "t", r"$\alpha$")
+            plot.format_subplot(fig, 3, 2, "t", r"$\dot{\alpha}$")
+            plot.format_subplot(fig, 3, 3, "t", "Moment")
+            plot.format_subplot(fig, 4, 1, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 4, 2, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 4, 3, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 5, 1, "t", r"$\beta$")
+            plot.format_subplot(fig, 5, 2, "t", r"$\dot{\beta}$")
+            plot.format_subplot(fig, 5, 3, "t", "Moment")
+            plot.format_subplot(fig, 6, 1, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
+            plot.format_subplot(fig, 6, 3, "f", "Amplitude (dB)")
 
-
-            fig.update_annotations(font_size=20)
-            fig.update_layout(
-                title=f"3DOF Aeroelastic Response (U = {v.U:.2f} m/s)",
-                title_x=0.5,
-                autosize=True,
-                # showlegend=True,
-                font_family="Times New Roman",
-                font_size=16,
-                template="plotly_white",
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=1.0
-                )
-            )
-
-            fig.write_html("build/3dof.html", include_mathjax='cdn')
+            Path("build/3dof/").mkdir(parents=True, exist_ok=True)
+            fig.write_html("build/3dof/3dof.html", include_mathjax='cdn')
+            kaleido.write_fig_sync(fig, path=f"build/3dof/3dof_{int(v.U)}.pdf")
 
     if len(U_vec) > 1:
         fig = make_subplots(

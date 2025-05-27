@@ -612,7 +612,7 @@ void HBVLM::run(f32 t_start, f32 omega, f32 vars_b, bool read_gamma, bool write_
 }
 
 int main(int argc, char** argv) {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x5.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x1.x"};
     // const std::vector<std::string> backends = get_available_backends();
     const std::vector<std::string> backends = {"cpu"};
 
@@ -704,7 +704,7 @@ int main(int argc, char** argv) {
             {1.f + a_h, 0.0f, 0.0f},
             {0.0f, 1.0f, 0.0f}, 
             alpha);
-    })->after(heave);
+    })->after(heave);  
     #endif
  
     for (const auto& [mesh_name, backend_name] : solvers) {

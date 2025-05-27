@@ -1,0 +1,129 @@
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+import numpy as np
+
+def fig_dims(fig):
+    rows_range, cols_range = fig._get_subplot_rows_columns()
+    return list(rows_range)[-1]+1, list(cols_range)[-1]+1
+
+def create_figure(dof_names: list[str]):
+    n_dofs = len(dof_names)
+    fig = make_subplots(
+        rows=n_dofs*2, cols=3,
+        subplot_titles=tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]),
+        vertical_spacing=0.1,
+        horizontal_spacing=0.1
+    )
+    
+    ratio = 4/3
+    height = 1000
+    width = int(ratio * height)
+    fig.update_layout(
+        # title=f"3DOF Aeroelastic Response (U = {v.U:.2f} m/s)",
+        title_x=0.5,
+        autosize=True,
+        width=width,
+        height=height,
+        # showlegend=True,
+        font_family="Times New Roman",
+        # font_size=16,
+        template="plotly_white",
+        legend=dict(
+            yanchor="top",
+            y=1.0,
+            xanchor="left",
+            x=1.0
+        )
+    )
+    return fig
+
+def format_subplot(fig, row, col, xlabel, ylabel):
+    """Format a specific subplot with labels and grid"""
+    fig.update_xaxes(
+        title_text=xlabel,
+        row=row,
+        col=col,
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='rgba(128, 128, 128, 0.2)',
+        matches= f"x{1 if row % 2 == 1 else 4}"
+    )
+    fig.update_yaxes(
+        title_text=ylabel,
+        row=row,
+        col=col,
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='rgba(128, 128, 128, 0.2)',
+        tickformat=".2e"
+    )
+
+def compute_psd(t, data):
+    sampling_rate = 1 / np.mean(np.diff(t))
+    data_sub = data[int(0.75 * len(data)):]
+    n = len(data_sub)
+    window = np.hanning(n)
+    fft_vals = np.fft.rfft(data_sub * window)
+    frequencies = np.fft.rfftfreq(n, d=1/sampling_rate)
+    U = np.sum(window**2)
+    psd = (np.abs(fft_vals) ** 2) / (sampling_rate * U)
+    if n % 2 == 0:
+        psd[1:-1] *= 2
+    else:
+        psd[1:] *= 2
+
+    # Mask to retain only frequencies below 1.0 Hz
+    mask = (frequencies > 0) & (frequencies < 0.5)
+
+    return frequencies[mask], psd[mask]
+
+def add_data_and_psd(fig, time, data, name, row, col, mode='lines', marker_size=4):
+    line = {"color": 'royalblue' if name == "Theodorsen" else 'red'}
+    """Add time series and PSD data to plotly figure"""
+    # Add time series data
+    start = int(0.75*len(data))
+    fig.add_trace(
+        go.Scatter(
+            x=time[start:], 
+            y=data[start:], 
+            name=name,
+            legendgroup=name,
+            mode=mode,
+            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
+            line = line,
+            showlegend=True if (row == 1 and col == 1) else False
+        ),
+        row=row, 
+        col=col
+    )
+
+    # Plot peaks and valleys
+    # peaks_idx0, _ = sp.signal.find_peaks(data) # peaks
+    # peaks_idx1, _ = sp.signal.find_peaks(-data) # valleys
+    # peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
+    # fig.add_trace(
+    #     go.Scattergl(
+    #         x=time[peaks_idx], 
+    #         y=data[peaks_idx],
+    #         mode='markers',
+    #     ),
+    #     row=row_data, 
+    #     col=col_data
+    # )
+
+    # Add PSD data
+    frequencies, psd = compute_psd(time, data)
+    fig.add_trace(
+        go.Scatter(
+            x=frequencies,
+            y=psd,
+            name=name,
+            legendgroup=name,
+            mode=mode,
+            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
+            line = line,
+            showlegend=False
+        ),
+        row=row+1,
+        col=col
+    )

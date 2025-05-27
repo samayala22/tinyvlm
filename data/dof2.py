@@ -1,16 +1,12 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import kaleido
 
 import scipy as sp
-from scipy.fft import fft, ifft, fftfreq
 from scipy.integrate import solve_ivp
 from scipy.signal import find_peaks
-from scipy.optimize import curve_fit
 from tqdm import tqdm
-from csaps import csaps
-from numpy import genfromtxt
 
 # Local imports
 import integrators
@@ -297,24 +293,28 @@ def compute_psd(t, data):
         psd[1:] *= 2
 
     # Mask to retain only frequencies below 1.0 Hz
-    mask = (frequencies > 0) & (frequencies < 1.0)
+    mask = (frequencies > 0) & (frequencies < 0.5)
 
     return frequencies[mask], psd[mask]
 
-def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', marker_size=4):
+def add_data_and_psd(fig, time, data, name, row, col, mode='lines', marker_size=4):
+    line = {"color": 'royalblue' if name == "Theodorsen" else 'red'}
     """Add time series and PSD data to plotly figure"""
     # Add time series data
+    start = int(0.75*len(data))
     fig.add_trace(
         go.Scattergl(
-            x=time, 
-            y=data, 
+            x=time[start:], 
+            y=data[start:], 
             name=name,
+            legendgroup=name,
             mode=mode,
             marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            showlegend=True
+            line = line,
+            showlegend=True if (row == 1 and col == 1) else False
         ),
-        row=row_data, 
-        col=col_data
+        row=row, 
+        col=col
     )
 
     # Plot peaks and valleys
@@ -338,12 +338,14 @@ def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', ma
             x=frequencies,
             y=psd,
             name=name,
+            legendgroup=name,
             mode=mode,
             marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
+            line = line,
             showlegend=False
         ),
-        row=row_data+1,
-        col=col_data
+        row=row+1,
+        col=col
     )
 
 def format_subplot(fig, row, col, xlabel, ylabel):
@@ -355,6 +357,7 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         showgrid=True,
         gridwidth=1,
         gridcolor='rgba(128, 128, 128, 0.2)',
+        matches= f"x{1 if row % 2 == 1 else 4}"
     )
     fig.update_yaxes(
         title_text=ylabel,
@@ -363,7 +366,7 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         showgrid=True,
         gridwidth=1,
         gridcolor='rgba(128, 128, 128, 0.2)',
-        tickformat='.2e'        
+        tickformat=".2e"
     )
 
 def plot_uvlm(fig):
@@ -386,12 +389,20 @@ def plot_uvlm(fig):
             uvlm_f_h.append(f_h)
             uvlm_f_a.append(f_a)
 
-    add_data_and_psd(fig, uvlm_t, uvlm_h, "UVLM", 1, 1, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_hd, "UVLM", 1, 2, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_f_h, "UVLM", 1, 3, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_a, "UVLM", 3, 1, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_ad, "UVLM", 3, 2, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_f_a, "UVLM", 3, 3, mode='markers')
+    uvlm_t = np.array(uvlm_t)
+    uvlm_h = np.array(uvlm_h)
+    uvlm_a = np.array(uvlm_a)
+    uvlm_hd = np.array(uvlm_hd)
+    uvlm_ad = np.array(uvlm_ad)
+    uvlm_f_h = np.array(uvlm_f_h)
+    uvlm_f_a = np.array(uvlm_f_a)
+
+    add_data_and_psd(fig, uvlm_t, uvlm_h, "HB-VLM", 1, 1, mode='markers')
+    add_data_and_psd(fig, uvlm_t, uvlm_hd, "HB-VLM", 1, 2, mode='markers')
+    add_data_and_psd(fig, uvlm_t, uvlm_f_h, "HB-VLM", 1, 3, mode='markers')
+    add_data_and_psd(fig, uvlm_t, uvlm_a, "HB-VLM", 3, 1, mode='markers')
+    add_data_and_psd(fig, uvlm_t, uvlm_ad, "HB-VLM", 3, 2, mode='markers')
+    add_data_and_psd(fig, uvlm_t, uvlm_f_a, "HB-VLM", 3, 3, mode='markers')
 
 def plot_monolithic(fig, monolithic_sol):
     add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[0, :], "Monolithic", 1, 1)
@@ -400,12 +411,12 @@ def plot_monolithic(fig, monolithic_sol):
     add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[3, :], "Monolithic", 3, 2)
 
 def plot_iterative(fig, vec_t_nd, u, v, a, F):
-    add_data_and_psd(fig, vec_t_nd, u[0, :], "Iterative", 1, 1)
-    add_data_and_psd(fig, vec_t_nd, v[0, :], "Iterative", 1, 2)
-    add_data_and_psd(fig, vec_t_nd, F[0, :], "Iterative", 1, 3)
-    add_data_and_psd(fig, vec_t_nd, u[1, :], "Iterative", 3, 1)
-    add_data_and_psd(fig, vec_t_nd, v[1, :], "Iterative", 3, 2)
-    add_data_and_psd(fig, vec_t_nd, F[1, :], "Iterative", 3, 3)
+    add_data_and_psd(fig, vec_t_nd, u[0, :], "Theodorsen", 1, 1)
+    add_data_and_psd(fig, vec_t_nd, v[0, :], "Theodorsen", 1, 2)
+    add_data_and_psd(fig, vec_t_nd, F[0, :], "Theodorsen", 1, 3)
+    add_data_and_psd(fig, vec_t_nd, u[1, :], "Theodorsen", 3, 1)
+    add_data_and_psd(fig, vec_t_nd, v[1, :], "Theodorsen", 3, 2)
+    add_data_and_psd(fig, vec_t_nd, F[1, :], "Theodorsen", 3, 3)
 
 def format_fig(fig):
     # Time series plots - Row 1
@@ -428,15 +439,21 @@ def format_fig(fig):
     format_subplot(fig, 4, 2, r"$\bar{f}$", "Amplitude")
     format_subplot(fig, 4, 3, r"$\bar{f}$", "Amplitude")
 
+    ratio = 4/3
+    height = 1000
+    width = int(ratio * height)
     fig.update_layout(
-        title=f"2 DOF Aeroelastic response at Ū = {round(U_vel, 3)} ({torsional_spring_names[torsional_spring]} Pitch Spring)",
+        # title=f"2 DOF Aeroelastic response at Ū = {round(U_vel, 3)} ({torsional_spring_names[torsional_spring]} Pitch Spring)",
         title_x=0.5,
         autosize=True,
-        showlegend=True,
+        width=width,
+        height=height,
+        # showlegend=True,
+        font_family="Times New Roman",
         template="plotly_white",
         legend=dict(
             yanchor="top",
-            y=0.99,
+            y=1.0,
             xanchor="left",
             x=1.0
         )
@@ -456,7 +473,7 @@ if __name__ == "__main__":
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     vec_U = [4.0] # reduced velocity
     newton_err_thresh = 1e-7
-    torsional_spring = 1
+    torsional_spring = 0
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
     if (torsional_spring == 0):
@@ -492,7 +509,7 @@ if __name__ == "__main__":
 
         # Dimensionless parameters
         dt_nd = 0.2
-        t_final_nd = 2000.0
+        t_final_nd = 1000.0
 
         vec_t, u, v, a, F = solve_iterative(ndv, t_final_nd, dt_nd)
         y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
@@ -511,11 +528,12 @@ if __name__ == "__main__":
                 vertical_spacing=0.1,
                 horizontal_spacing=0.08
             )
-            # plot_uvlm(fig)
-            plot_monolithic(fig, monolithic_sol)
+            plot_uvlm(fig)
+            # plot_monolithic(fig, monolithic_sol)
             plot_iterative(fig, vec_t, u, v, a, F)
             format_fig(fig)
             fig.write_html("build/2dof.html", include_mathjax='cdn')
+            kaleido.write_fig_sync(fig, path=f"build/2dof_{torsional_spring_names[torsional_spring]}_{int(ndv.U)}.pdf")
 
         # X = fft(u, axis=1)
         # X = fft(monolithic_sol.y[0:2, :], axis=1)
@@ -542,39 +560,39 @@ if __name__ == "__main__":
         # freqs[1, idx] = freq_ratio(peaks_a_t_i[-1] - peaks_a_t_i[0], len(peaks_a_t_i)-1)
         # freqs[0, idx] = freq_ratio(peaks_h_t_i[-1] - peaks_h_t_i[0], len(peaks_h_t_i)-1)
 
-    if (len(vec_U) > 1):
-        fig, axs = plt.subplot_mosaic(
-            [["damping"], ["freq"]],  # Disposition des graphiques
-            constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-            figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
-        )
-        # axs["damping"].plot(vec_U, damping_ratios[0, :], "o", label="Heave (Iterative)")
-        # axs["damping"].plot(vec_U, damping_ratios[1, :], "o", label="Pitch (Iterative)")
-        axs["damping"].plot(vec_U, damping_ratios_m[1, :], "o", label="Pitch (Monolithic)")
+    # if (len(vec_U) > 1):
+        # fig, axs = plt.subplot_mosaic(
+        #     [["damping"], ["freq"]],  # Disposition des graphiques
+        #     constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
+        #     figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
+        # )
+        # # axs["damping"].plot(vec_U, damping_ratios[0, :], "o", label="Heave (Iterative)")
+        # # axs["damping"].plot(vec_U, damping_ratios[1, :], "o", label="Pitch (Iterative)")
+        # axs["damping"].plot(vec_U, damping_ratios_m[1, :], "o", label="Pitch (Monolithic)")
 
-        xs = np.linspace(1, 7, 100)
-        ys0 = csaps(vec_U, freqs[0, :], xs, smooth=0.993)
-        ys1 = csaps(vec_U, freqs[1, :], xs, smooth=0.993)
+        # xs = np.linspace(1, 7, 100)
+        # ys0 = csaps(vec_U, freqs[0, :], xs, smooth=0.993)
+        # ys1 = csaps(vec_U, freqs[1, :], xs, smooth=0.993)
 
-        zhao_heave = genfromtxt('./data/zhao_heave.csv', delimiter=',')
-        zhao_pitch = genfromtxt('./data/zhao_pitch.csv', delimiter=',')
+        # zhao_heave = genfromtxt('./data/zhao_heave.csv', delimiter=',')
+        # zhao_pitch = genfromtxt('./data/zhao_pitch.csv', delimiter=',')
 
-        # axs["freq"].plot(vec_U, freqs[0, :], "o", label="Heave (Iterative)")
-        # axs["freq"].plot(vec_U, freqs[1, :], "o", label="Pitch (Iterative)")
-        axs["freq"].plot(xs, ys0, "o", markerfacecolor='none', mew=2, label="Heave")
-        axs["freq"].plot(xs, ys1, "o", markerfacecolor='none', mew=2, label="Pitch")
-        axs["freq"].plot(zhao_heave[:, 0], zhao_heave[:, 1], "D", markerfacecolor='none', mew=2, label="Zhao 2004")
-        axs["freq"].plot(zhao_pitch[:, 0], zhao_pitch[:, 1], "D", markerfacecolor='none', mew=2, label="Zhao 2004")
-        axs["freq"].axvline(x=flutter_speed, color='r', linestyle='--', label='Flutter Speed')
+        # # axs["freq"].plot(vec_U, freqs[0, :], "o", label="Heave (Iterative)")
+        # # axs["freq"].plot(vec_U, freqs[1, :], "o", label="Pitch (Iterative)")
+        # axs["freq"].plot(xs, ys0, "o", markerfacecolor='none', mew=2, label="Heave")
+        # axs["freq"].plot(xs, ys1, "o", markerfacecolor='none', mew=2, label="Pitch")
+        # axs["freq"].plot(zhao_heave[:, 0], zhao_heave[:, 1], "D", markerfacecolor='none', mew=2, label="Zhao 2004")
+        # axs["freq"].plot(zhao_pitch[:, 0], zhao_pitch[:, 1], "D", markerfacecolor='none', mew=2, label="Zhao 2004")
+        # axs["freq"].axvline(x=flutter_speed, color='r', linestyle='--', label='Flutter Speed')
 
-        axs["damping"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-        axs["damping"].legend()
-        axs["damping"].set_xlabel('U')
-        axs["damping"].set_ylabel(r"$\zeta$")
+        # axs["damping"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+        # axs["damping"].legend()
+        # axs["damping"].set_xlabel('U')
+        # axs["damping"].set_ylabel(r"$\zeta$")
 
-        axs["freq"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-        axs["freq"].legend()
-        axs["freq"].set_xlabel(r'Reduced Velocity $\bar{U}$')
-        axs["freq"].set_ylabel(r"Frequency ratio $\omega / \omega_{\alpha}$")
+        # axs["freq"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
+        # axs["freq"].legend()
+        # axs["freq"].set_xlabel(r'Reduced Velocity $\bar{U}$')
+        # axs["freq"].set_ylabel(r"Frequency ratio $\omega / \omega_{\alpha}$")
 
-        plt.show()
+        # plt.show()

@@ -2,6 +2,7 @@ import numpy as np
 import autograd
 import autograd.numpy as anp
 import scipy as sp
+import plotly.io as pio
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -13,19 +14,24 @@ from dataclasses import dataclass
 # local imports
 import dof2
 import vanderpol as vdp
-import finite_diff as fd
 import helpers
+import continuation as cont
 
 np.set_printoptions(
     linewidth=200, # max line width
     formatter={'float': '{:.3e}'.format} # format shortE
 ) 
 
+pio.renderers.default = "browser"
+
 def getenv(key):
     var = os.getenv(key)
     if not var or int(var) == 0:
         return False
     return True
+
+EPS = np.finfo(np.float64).eps
+def cd2_h(x0): return np.maximum(np.where(np.abs(x0) > 1, np.cbrt(EPS * np.abs(x0)), np.cbrt(EPS) * np.abs(x0)), EPS)
 
 # def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=anp.radians(4.24), a_f=anp.radians(-2.12)):
 #     return anp.where(
@@ -171,7 +177,7 @@ def numerical_jac(f, x):
 
     jac = np.zeros((m, n))
     for j in range(n):
-        h = max(fd.cd2_h(x[j]), 1e-5) # limiter because hbvlm is in single precision
+        h = max(cd2_h(x[j]), 1e-5) # limiter because hbvlm is in single precision
         # print(f"{j}| h: {h:.5e}")
         xp, xm = x.copy(), x.copy()
         xp[j] += h
@@ -373,7 +379,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, xtol=1e-5)
         extended_residual,
         X0,
         args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True),
-        fprime=extended_residual_jacobian_hybrid,
+        fprime=extended_residual_jacobian,
         full_output=True,
         xtol = xtol,
     )
@@ -399,14 +405,13 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, xtol=1e-5)
 
     # return sol.x
 
-def continuation(param_start, param_end, ds, X0, scaling=True):
+def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True):
     """
     Continuation for autonomous systems using the harmonic balance method
     """
-    print("Initial guess X0:", X0)
+    # print("Initial guess X0:", X0)
 
-    X_mat = np.zeros((X0.shape[0], max_continuation_steps))
-    max_continuation_steps = 5000
+    X_mat = np.zeros((X0.shape[0], max_steps))
 
     if param_end > param_start:
         param_direction = 1
@@ -429,7 +434,7 @@ def continuation(param_start, param_end, ds, X0, scaling=True):
     X_mat[:, 0] = X0
 
     iteration = 1
-    while iteration < max_continuation_steps:
+    while iteration < max_steps:
         if scaling:
             Dscale_prev = Dscale.copy()
             Dscale = np.maximum(np.abs(X0 * Dscale_prev), np.ones_like(X0))
@@ -439,7 +444,7 @@ def continuation(param_start, param_end, ds, X0, scaling=True):
             X0 = X0 * (Dscale_prev / Dscale)
             X_old = X_old * (Dscale_prev / Dscale)
 
-        J = extended_residual_jacobian_hybrid(X0, X_ref, z_ref * Dscale_prev, hb_residual, Parametrisation.ArcLength, True, False)
+        J = extended_residual_jacobian(X0, X_ref, z_ref * Dscale_prev, hb_residual, Dscale, Parametrisation.ArcLength, True, False)
         ztmp = tangent_predictor(J @ np.diag(1 / Dscale_prev), z_ref * Dscale_prev, X_ref) / Dscale
         z = ztmp / np.linalg.norm(ztmp)
 
@@ -461,12 +466,13 @@ def continuation(param_start, param_end, ds, X0, scaling=True):
 
         # History
         X_mat[:, iteration] = X0 * Dscale
+        np.save("build/continuation.npy", X_mat[:, :iteration]) # save every iteration
+
         iteration += 1
         if (X0[-1] - param_end) * param_direction >= 0:
             print("Continuation reached the end")
             break
 
-    np.save("build/continuation.npy", X_mat[:, :iteration])
     return X_mat[:, :iteration]
 
 def truncated_series_approximation(u_tr, H):
@@ -521,15 +527,15 @@ if __name__ == "__main__":
     flutter_speed = 6.285
     flutter_ratio_start = 0.3
     flutter_ratio_end = 0.8
-    ds = 0.05
+    ds = 0.1
 
     # assert ((H+1) & H) == 0 # H+1 should be a power of 2
 
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = 4.0
-    param_end = 5.0
+    param_start = 3.0
+    param_end = 6.0
     # Time integration
     t_final = 2000.0
     dt = 0.2
@@ -569,49 +575,55 @@ if __name__ == "__main__":
 
     # np.testing.assert_allclose(J_fd, J_hy)
 
-    if (getenv("PLOT")):
-        fig = make_subplots(
-            rows=n_dofs, cols=1,
-            subplot_titles=[f"Dof {i+1}" for i in range(n_dofs)],
-            vertical_spacing=0.1,
-            horizontal_spacing=0.08
-        )
-        fig.update_layout(title="2 DOF Aeroelastic Response")
-        plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, X0[:-2], X0[-2], H, "FFT")
-        
-        z_ref = np.zeros_like(X0)
-        z_ref[-2] = 1
-        Xpp = solve_nonlinear_system(X0, X0.copy(), z_ref, np.ones_like(X0), Parametrisation.Local)
-        plot_hb_timedomain(fig, t_tr[0], t_tr[-1], 0.1, n_dofs, Xpp[:-2], Xpp[-2], H, "HB")
-
-        for dof in range(n_dofs):
-            fig.add_trace(
-                go.Scatter(
-                    x=t_tr,  # x values for new line
-                    y=u_tr[dof, :],  # y values for new line
-                    name=f"Time integration dof {dof}",  # legend label
-                    line=dict(color='red')  # optional: customize line color
-                ),
-                row=(dof+1),
-                col=1
-            )
-        fig.show()
-
-    # X_mat = continuation(param_start, param_end, ds, X0)
+    # X0 = np.array([[ 1.31714943e-02],
+    #    [-1.01965586e-03],
+    #    [ 1.35262409e+00],
+    #    [ 1.04197553e-01],
+    #    [ 2.93703633e-01],
+    #    [ 8.87485049e-02],
+    #    [ 4.07959533e-03],
+    #    [ 2.33451922e-03],
+    #    [-1.25200217e-02],
+    #    [-6.56350402e-03],
+    #    [ 3.56808270e-02],
+    #    [ 9.04062063e-02],
+    #    [-1.73437507e-02],
+    #    [-3.14241987e-02],
+    #    [-1.76991642e-04],
+    #    [-3.04498176e-04],
+    #    [-1.09710236e-03],
+    #    [-3.96114844e-03],
+    #    [-8.87458356e-04],
+    #    [ 2.02743506e-02],
+    #    [-7.30822018e-04],
+    #    [ 1.01694374e-04],
+    #    [-2.26362820e-04],
+    #    [ 6.31483503e-04],
+    #    [-2.16201950e-05],
+    #    [-1.61312040e-03],
+    #    [-9.99292680e-04],
+    #    [ 6.10999735e-03],
+    #    [ 7.69486566e-05],
+    #    [-1.14004510e-03],
+    #    [-1.39860283e-05],
+    #    [ 1.57303148e-05],
+    #    [ 2.82632990e-05],
+    #    [-4.16910315e-04],
+    #    [-1.81086605e-04],
+    #    [ 7.84949337e-04],
+    #    [ 3.85088620e-05],
+    #    [-2.43267633e-04],
+    #    [-1.34750901e-05],
+    #    [ 1.93240683e-05],
+    #    [ 1.54316419e-05],
+    #    [-5.16621799e-05],
+    #    [ 5.15856915e-02],
+    #    [ 5.99999999e+00]]).flatten()
     
-    # if getenv("PLOT"):
-    #     fig = go.Figure()
-    #     fig.update_layout(title=f"2DOF Aeroelasticd Response ({torsional_spring_names[torsional_spring]} Pitch)")
-    #     for h in range(1, H+1):
-    #         fig.add_trace(
-    #             go.Scattergl(
-    #                 x = X_mat[-2, :],
-    #                 y = np.sqrt(X_mat[2*h-1, :]**2 + X_mat[2*h, :]**2),
-    #                 name = f"Harmonic {h}",
-    #                 mode = "lines+markers"
-    #             )
-    #         )
-    #     fig.update_xaxes(title_text=r"$\bar{U}$", showgrid=True)
-    #     fig.update_yaxes(title_text=r"$||H_{j}||^{2}$", showgrid=True)
-    #     fig.write_html("build/continuation.html", include_mathjax='cdn')
-    #     fig.show()
+    # print(hb_residual(X0, False, False))
+
+    X_mat = continuation(param_start, param_end, ds, X0, 1, True)
+    # X_mat = continuation(param_start, param_end, ds, X0, 5000, True)
+    
+    if getenv("PLOT"):
+        cont.plot_hb_continuation("2DOF HB-VLM Continuation", H, X_mat)

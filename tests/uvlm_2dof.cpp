@@ -854,12 +854,12 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
 int main(int argc, char **argv) {
     std::vector<std::vector<std::pair<std::string, bool>>> meshes;
     // TODO: add check that the values are valid !!
-    meshes.push_back({{"../../../../mesh/infinite_rectangular_10x5.x", true}});
-    meshes.push_back({{"../../../../mesh/infinite_rectangular_2x2_c.x", true}});
-    meshes.push_back({
-        {"../../../../mesh/infinite_rectangular_2x2_c0.x", false},
-        {"../../../../mesh/infinite_rectangular_2x2_c1.x", true}
-    });
+    meshes.push_back({{"../../../../mesh/infinite_rectangular_10x1.x", true}});
+    // meshes.push_back({{"../../../../mesh/infinite_rectangular_2x2_c.x", true}});
+    // meshes.push_back({
+    //     {"../../../../mesh/infinite_rectangular_2x2_c0.x", false},
+    //     {"../../../../mesh/infinite_rectangular_2x2_c1.x", true}
+    // });
     
     const std::vector<std::string> backends = get_available_backends();
 
@@ -867,7 +867,7 @@ int main(int argc, char **argv) {
 
     const f32 flutter_speed = 6.285f;
     const f32 flutter_ratio = 0.2f;
-    const f32 t_final_nd = 100.f;
+    const f32 t_final_nd = 1000.f;
 
     UVLM_2DOF_Vars vars;
     vars.b = 0.5f;
@@ -880,7 +880,8 @@ int main(int argc, char **argv) {
     vars.x_a = 0.25f;
     vars.mu = 100.0f;
     vars.r_a = 0.5f;
-    vars.U_a = flutter_ratio * flutter_speed;
+    // vars.U_a = flutter_ratio * flutter_speed;
+    vars.U_a = 4.0f;
 
     KinematicsTree kinematics_tree;
 
