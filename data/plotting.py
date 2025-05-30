@@ -1,29 +1,25 @@
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
+import kaleido
 import numpy as np
+import scipy as sp
+from pathlib import Path
 
 def fig_dims(fig):
     rows_range, cols_range = fig._get_subplot_rows_columns()
     return list(rows_range)[-1]+1, list(cols_range)[-1]+1
 
-def create_figure(dof_names: list[str]):
-    n_dofs = len(dof_names)
+def fig_create(rows, cols, subplot_titles: tuple[str], fig_title: str = ""):
     fig = make_subplots(
-        rows=n_dofs*2, cols=3,
-        subplot_titles=tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]),
+        rows=rows, cols=cols,
+        subplot_titles=subplot_titles,
         vertical_spacing=0.1,
         horizontal_spacing=0.1
     )
     
-    ratio = 4/3
-    height = 1000
-    width = int(ratio * height)
     fig.update_layout(
-        # title=f"3DOF Aeroelastic Response (U = {v.U:.2f} m/s)",
+        title=fig_title,
         title_x=0.5,
-        autosize=True,
-        width=width,
-        height=height,
         # showlegend=True,
         font_family="Times New Roman",
         # font_size=16,
@@ -36,6 +32,21 @@ def create_figure(dof_names: list[str]):
         )
     )
     return fig
+
+def create_dofs_figure(dof_names: list[str]):
+    return fig_create(len(dof_names)*2, 3, tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]))
+
+def fig_save(fig, filename, pdf=True):
+    Path(filename).parent.mkdir(parents=True, exist_ok=True)
+    ratio = 4/3
+    height = 1000
+    width = int(ratio * height)
+    fig.update_layout(autosize=True)
+    fig.write_html(f"{filename}.html", include_mathjax='cdn')
+    if not pdf:
+        return
+    fig.update_layout(width=width, height=height)
+    kaleido.write_fig_sync(fig, path=f"{filename}.pdf")
 
 def format_subplot(fig, row, col, xlabel, ylabel):
     """Format a specific subplot with labels and grid"""
@@ -58,6 +69,18 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         tickformat=".2e"
     )
 
+# def compute_psd(t, data):
+#     """Compute PSD with consistent parameters"""
+#     sampling_rate = 1 / np.mean(np.diff(t))
+#     frequencies, psd = sp.signal.welch(
+#         data[int(0.75*len(data)):], 
+#         fs=sampling_rate
+#     )
+#     mask = frequencies < 1.0
+#     psd_db = 10 * np.log10(psd)
+
+#     return frequencies[mask], psd[mask]
+
 def compute_psd(t, data):
     sampling_rate = 1 / np.mean(np.diff(t))
     data_sub = data[int(0.75 * len(data)):]
@@ -77,8 +100,18 @@ def compute_psd(t, data):
 
     return frequencies[mask], psd[mask]
 
-def add_data_and_psd(fig, time, data, name, row, col, mode='lines', marker_size=4):
-    line = {"color": 'royalblue' if name == "Theodorsen" else 'red'}
+def find_peak_idx(data):
+    """Find indices of peaks and valleys in data"""
+    peaks_idx0, _ = sp.signal.find_peaks(data)  # peaks
+    peaks_idx1, _ = sp.signal.find_peaks(-data)  # valleys
+    peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
+    return peaks_idx
+
+def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', marker_size=4):
+    colors = ['royalblue', 'red', 'green', 'orange', 'purple']
+    assert data_id < len(colors)
+    line = {"color": colors[data_id]}
+
     """Add time series and PSD data to plotly figure"""
     # Add time series data
     start = int(0.75*len(data))
@@ -97,10 +130,7 @@ def add_data_and_psd(fig, time, data, name, row, col, mode='lines', marker_size=
         col=col
     )
 
-    # Plot peaks and valleys
-    # peaks_idx0, _ = sp.signal.find_peaks(data) # peaks
-    # peaks_idx1, _ = sp.signal.find_peaks(-data) # valleys
-    # peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
+    # peaks_idx = find_peak_idx(data)
     # fig.add_trace(
     #     go.Scattergl(
     #         x=time[peaks_idx], 

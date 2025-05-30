@@ -258,14 +258,19 @@ void UVLM_2DOF::alloc_buffers() {
 // }
 
 // freeplay
-f32 torsional_func(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(0.5f), f32 a_f = to_radians(0.25f)) {
-    if (alpha < a_f) {
-        return M0 + alpha - a_f;
-    } else if (alpha >= a_f && alpha <= (a_f + delta)) {
-        return M0 + Mf * (alpha - a_f);
-    } else { // alpha > a_F + delta
-        return M0 + alpha - a_f + delta * (Mf - 1);
-    }
+// f32 torsional_func(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(0.5f), f32 a_f = to_radians(0.25f)) {
+//     if (alpha < a_f) {
+//         return M0 + alpha - a_f;
+//     } else if (alpha >= a_f && alpha <= (a_f + delta)) {
+//         return M0 + Mf * (alpha - a_f);
+//     } else { // alpha > a_F + delta
+//         return M0 + alpha - a_f + delta * (Mf - 1);
+//     }
+// }
+
+// Cubic polynomial
+f32 torsional_func(f32 alpha, f32 beta0 = 0.0f, f32 beta1 = 0.1f, f32 beta2 = 0.0f, f32 beta3 = 40.0f) {
+    return beta0 + beta1*alpha + beta2*alpha*alpha + beta3*alpha*alpha*alpha;
 }
 
 void UVLM_2DOF::update_wake_and_gamma(i64 iteration) {
@@ -854,7 +859,7 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
 int main(int argc, char **argv) {
     std::vector<std::vector<std::pair<std::string, bool>>> meshes;
     // TODO: add check that the values are valid !!
-    meshes.push_back({{"../../../../mesh/infinite_rectangular_10x1.x", true}});
+    meshes.push_back({{"../../../../mesh/infinite_rectangular_20x1.x", true}});
     // meshes.push_back({{"../../../../mesh/infinite_rectangular_2x2_c.x", true}});
     // meshes.push_back({
     //     {"../../../../mesh/infinite_rectangular_2x2_c0.x", false},
@@ -881,7 +886,7 @@ int main(int argc, char **argv) {
     vars.mu = 100.0f;
     vars.r_a = 0.5f;
     // vars.U_a = flutter_ratio * flutter_speed;
-    vars.U_a = 4.0f;
+    vars.U_a = 5.0f;
 
     KinematicsTree kinematics_tree;
 

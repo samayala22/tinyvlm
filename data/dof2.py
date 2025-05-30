@@ -1,12 +1,12 @@
 import numpy as np
+from pathlib import Path
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import kaleido
 
 import scipy as sp
 from scipy.integrate import solve_ivp
 from scipy.signal import find_peaks
 from tqdm import tqdm
+import plotting as plot
 
 # Local imports
 import integrators
@@ -267,108 +267,6 @@ def solve_iterative(ndv: NDVars, t_final_nd, dt_nd):
     
     return vec_t_nd, u, v, a, F
 
-# def compute_psd(t, data):
-#     """Compute PSD with consistent parameters"""
-#     sampling_rate = 1 / np.mean(np.diff(t))
-#     frequencies, psd = sp.signal.welch(
-#         data[int(0.75*len(data)):], 
-#         fs=sampling_rate
-#     )
-#     mask = frequencies < 1.0
-#     psd_db = 10 * np.log10(psd)
-
-#     return frequencies[mask], psd[mask]
-def compute_psd(t, data):
-    sampling_rate = 1 / np.mean(np.diff(t))
-    data_sub = data[int(0.75 * len(data)):]
-    n = len(data_sub)
-    window = np.hanning(n)
-    fft_vals = np.fft.rfft(data_sub * window)
-    frequencies = np.fft.rfftfreq(n, d=1/sampling_rate)
-    U = np.sum(window**2)
-    psd = (np.abs(fft_vals) ** 2) / (sampling_rate * U)
-    if n % 2 == 0:
-        psd[1:-1] *= 2
-    else:
-        psd[1:] *= 2
-
-    # Mask to retain only frequencies below 1.0 Hz
-    mask = (frequencies > 0) & (frequencies < 0.5)
-
-    return frequencies[mask], psd[mask]
-
-def add_data_and_psd(fig, time, data, name, row, col, mode='lines', marker_size=4):
-    line = {"color": 'royalblue' if name == "Theodorsen" else 'red'}
-    """Add time series and PSD data to plotly figure"""
-    # Add time series data
-    start = int(0.75*len(data))
-    fig.add_trace(
-        go.Scattergl(
-            x=time[start:], 
-            y=data[start:], 
-            name=name,
-            legendgroup=name,
-            mode=mode,
-            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            line = line,
-            showlegend=True if (row == 1 and col == 1) else False
-        ),
-        row=row, 
-        col=col
-    )
-
-    # Plot peaks and valleys
-    # peaks_idx0, _ = sp.signal.find_peaks(data) # peaks
-    # peaks_idx1, _ = sp.signal.find_peaks(-data) # valleys
-    # peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
-    # fig.add_trace(
-    #     go.Scattergl(
-    #         x=time[peaks_idx], 
-    #         y=data[peaks_idx],
-    #         mode='markers',
-    #     ),
-    #     row=row_data, 
-    #     col=col_data
-    # )
-    
-    # Add PSD data
-    frequencies, psd = compute_psd(time, data)
-    fig.add_trace(
-        go.Scattergl(
-            x=frequencies,
-            y=psd,
-            name=name,
-            legendgroup=name,
-            mode=mode,
-            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            line = line,
-            showlegend=False
-        ),
-        row=row+1,
-        col=col
-    )
-
-def format_subplot(fig, row, col, xlabel, ylabel):
-    """Format a specific subplot with labels and grid"""
-    fig.update_xaxes(
-        title_text=xlabel,
-        row=row,
-        col=col,
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(128, 128, 128, 0.2)',
-        matches= f"x{1 if row % 2 == 1 else 4}"
-    )
-    fig.update_yaxes(
-        title_text=ylabel,
-        row=row,
-        col=col,
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(128, 128, 128, 0.2)',
-        tickformat=".2e"
-    )
-
 def plot_uvlm(fig):
     uvlm_t = []
     uvlm_h = []
@@ -397,67 +295,49 @@ def plot_uvlm(fig):
     uvlm_f_h = np.array(uvlm_f_h)
     uvlm_f_a = np.array(uvlm_f_a)
 
-    add_data_and_psd(fig, uvlm_t, uvlm_h, "HB-VLM", 1, 1, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_hd, "HB-VLM", 1, 2, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_f_h, "HB-VLM", 1, 3, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_a, "HB-VLM", 3, 1, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_ad, "HB-VLM", 3, 2, mode='markers')
-    add_data_and_psd(fig, uvlm_t, uvlm_f_a, "HB-VLM", 3, 3, mode='markers')
+    plot.add_data_and_psd(fig, uvlm_t, uvlm_h, "UVLM", 1, 1, 0, mode='markers')
+    plot.add_data_and_psd(fig, uvlm_t, uvlm_hd, "UVLM", 1, 2, 0, mode='markers')
+    plot.add_data_and_psd(fig, uvlm_t, uvlm_f_h, "UVLM", 1, 3, 0, mode='markers')
+    plot.add_data_and_psd(fig, uvlm_t, uvlm_a, "UVLM", 3, 1, 0, mode='markers')
+    plot.add_data_and_psd(fig, uvlm_t, uvlm_ad, "UVLM", 3, 2, 0, mode='markers')
+    plot.add_data_and_psd(fig, uvlm_t, uvlm_f_a, "UVLM", 3, 3, 0, mode='markers')
 
 def plot_monolithic(fig, monolithic_sol):
-    add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[0, :], "Monolithic", 1, 1)
-    add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[2, :], "Monolithic", 1, 2)
-    add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[1, :], "Monolithic", 3, 1)
-    add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[3, :], "Monolithic", 3, 2)
+    plot.add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[0, :], "Theodorsen Monolithic", 1, 1, 1)
+    plot.add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[2, :], "Theodorsen Monolithic", 1, 2, 1)
+    plot.add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[1, :], "Theodorsen Monolithic", 3, 1, 1)
+    plot.add_data_and_psd(fig, monolithic_sol.t, monolithic_sol.y[3, :], "Theodorsen Monolithic", 3, 2, 1)
 
-def plot_iterative(fig, vec_t_nd, u, v, a, F):
-    add_data_and_psd(fig, vec_t_nd, u[0, :], "Theodorsen", 1, 1)
-    add_data_and_psd(fig, vec_t_nd, v[0, :], "Theodorsen", 1, 2)
-    add_data_and_psd(fig, vec_t_nd, F[0, :], "Theodorsen", 1, 3)
-    add_data_and_psd(fig, vec_t_nd, u[1, :], "Theodorsen", 3, 1)
-    add_data_and_psd(fig, vec_t_nd, v[1, :], "Theodorsen", 3, 2)
-    add_data_and_psd(fig, vec_t_nd, F[1, :], "Theodorsen", 3, 3)
+def plot_iterative(fig):
+    vec_t_nd, u, v, a, F = solve_iterative(ndv, t_final_nd, dt_nd)
+
+    plot.add_data_and_psd(fig, vec_t_nd, u[0, :], "Theodorsen Iterative", 1, 1, 2)
+    plot.add_data_and_psd(fig, vec_t_nd, v[0, :], "Theodorsen Iterative", 1, 2, 2)
+    plot.add_data_and_psd(fig, vec_t_nd, F[0, :], "Theodorsen Iterative", 1, 3, 2)
+    plot.add_data_and_psd(fig, vec_t_nd, u[1, :], "Theodorsen Iterative", 3, 1, 2)
+    plot.add_data_and_psd(fig, vec_t_nd, v[1, :], "Theodorsen Iterative", 3, 2, 2)
+    plot.add_data_and_psd(fig, vec_t_nd, F[1, :], "Theodorsen Iterative", 3, 3, 2)
 
 def format_fig(fig):
     # Time series plots - Row 1
-    format_subplot(fig, 1, 1, r"$\bar{t}$", r"$\bar{h}$")
-    format_subplot(fig, 1, 2, r"$\bar{t}$", r"$\bar{\dot{h}}$")
-    format_subplot(fig, 1, 3, r"$\bar{t}$", r"$F_{h}$")
+    plot.format_subplot(fig, 1, 1, r"$\bar{t}$", r"$\bar{h}$")
+    plot.format_subplot(fig, 1, 2, r"$\bar{t}$", r"$\bar{\dot{h}}$")
+    plot.format_subplot(fig, 1, 3, r"$\bar{t}$", r"$F_{h}$")
     
     # PSD plots - Row 2
-    format_subplot(fig, 2, 1, r"$\bar{f}$", "Amplitude")
-    format_subplot(fig, 2, 2, r"$\bar{f}$", "Amplitude")
-    format_subplot(fig, 2, 3, r"$\bar{f}$", "Amplitude")
+    plot.format_subplot(fig, 2, 1, r"$\bar{f}$", "Amplitude")
+    plot.format_subplot(fig, 2, 2, r"$\bar{f}$", "Amplitude")
+    plot.format_subplot(fig, 2, 3, r"$\bar{f}$", "Amplitude")
     
     # Time series plots - Row 3
-    format_subplot(fig, 3, 1, r"$\bar{t}$", r"$\alpha$ (deg)")
-    format_subplot(fig, 3, 2, r"$\bar{t}$", r"$\dot{\alpha}$")
-    format_subplot(fig, 3, 3, r"$\bar{t}$", r"$F_{\alpha}$")
+    plot.format_subplot(fig, 3, 1, r"$\bar{t}$", r"$\alpha$ (deg)")
+    plot.format_subplot(fig, 3, 2, r"$\bar{t}$", r"$\dot{\alpha}$")
+    plot.format_subplot(fig, 3, 3, r"$\bar{t}$", r"$F_{\alpha}$")
     
     # PSD plots - Row 4
-    format_subplot(fig, 4, 1, r"$\bar{f}$", "Amplitude")
-    format_subplot(fig, 4, 2, r"$\bar{f}$", "Amplitude")
-    format_subplot(fig, 4, 3, r"$\bar{f}$", "Amplitude")
-
-    ratio = 4/3
-    height = 1000
-    width = int(ratio * height)
-    fig.update_layout(
-        # title=f"2 DOF Aeroelastic response at Ū = {round(U_vel, 3)} ({torsional_spring_names[torsional_spring]} Pitch Spring)",
-        title_x=0.5,
-        autosize=True,
-        width=width,
-        height=height,
-        # showlegend=True,
-        font_family="Times New Roman",
-        template="plotly_white",
-        legend=dict(
-            yanchor="top",
-            y=1.0,
-            xanchor="left",
-            x=1.0
-        )
-    )
+    plot.format_subplot(fig, 4, 1, r"$\bar{f}$", "Amplitude")
+    plot.format_subplot(fig, 4, 2, r"$\bar{f}$", "Amplitude")
+    plot.format_subplot(fig, 4, 3, r"$\bar{f}$", "Amplitude")
 
 if __name__ == "__main__":
     # TODO: move these coefficients elsewhere
@@ -469,12 +349,14 @@ if __name__ == "__main__":
     # Dimensionless params
     flutter_speed = 6.285
     flutter_ratio = 0.6
-    # vec_U = np.linspace(1.0, 7, 50)
+    # vec_U = np.linspace(0.1, 5.5, 250) # for freeplay
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
-    vec_U = [4.0] # reduced velocity
-    newton_err_thresh = 1e-7
-    torsional_spring = 0
+    vec_U = [6.0] # reduced velocity
+    newton_err_thresh = 1e-8
+    torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
+    peaks_U = []
+    peaks_data = []
 
     if (torsional_spring == 0):
         torsional_func = alpha_freeplay
@@ -509,31 +391,29 @@ if __name__ == "__main__":
 
         # Dimensionless parameters
         dt_nd = 0.2
-        t_final_nd = 1000.0
+        t_final_nd = 2000.0
 
-        vec_t, u, v, a, F = solve_iterative(ndv, t_final_nd, dt_nd)
         y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
         system = create_monolithic_system(y0, ndv, torsional_func)
         monolithic_sol = solve_ivp(system, (0, t_final_nd), y0, t_eval=np.arange(0, t_final_nd, dt_nd), method='RK45')
 
+        # Find peaks for bifurcation plot
+        pitch_slice = monolithic_sol.y[1, int(0.75*monolithic_sol.y.shape[1]):]
+        peaks_idx = plot.find_peak_idx(pitch_slice)
+        peaks = pitch_slice[peaks_idx]
+        peaks_data.append(peaks)
+        peaks_U.append(np.array([U_vel] * len(peaks)))
+
         if (len(vec_U) == 1):
-            fig = make_subplots(
-                rows=4, cols=3,
-                subplot_titles=(
-                    'Heave', 'Heave Velocity', 'Aero Heave Force',
-                    'Heave PSD', 'Heave Velocity PSD', 'Heave Force PSD',
-                    'Pitch', 'Pitch Velocity', 'Aero Pitch Force',
-                    'Pitch PSD', 'Pitch Velocity PSD', 'Pitch Force PSD'
-                ),
-                vertical_spacing=0.1,
-                horizontal_spacing=0.08
-            )
-            plot_uvlm(fig)
-            # plot_monolithic(fig, monolithic_sol)
-            plot_iterative(fig, vec_t, u, v, a, F)
+            fig = plot.create_dofs_figure(["Heave", "Pitch"])
+            # plot_uvlm(fig)
+            plot_monolithic(fig, monolithic_sol)
+            plot_iterative(fig)
             format_fig(fig)
-            fig.write_html("build/2dof.html", include_mathjax='cdn')
-            kaleido.write_fig_sync(fig, path=f"build/2dof_{torsional_spring_names[torsional_spring]}_{int(ndv.U)}.pdf")
+
+            # param_str = f"{ndv.U:.1f}".replace('.', '_')
+            # plot.fig_save(fig, f"build/2dof/2dof_{torsional_spring_names[torsional_spring]}_{param_str}")
+            plot.fig_save(fig, f"build/2dof/2dof", pdf=False)
 
         # X = fft(u, axis=1)
         # X = fft(monolithic_sol.y[0:2, :], axis=1)
@@ -560,39 +440,17 @@ if __name__ == "__main__":
         # freqs[1, idx] = freq_ratio(peaks_a_t_i[-1] - peaks_a_t_i[0], len(peaks_a_t_i)-1)
         # freqs[0, idx] = freq_ratio(peaks_h_t_i[-1] - peaks_h_t_i[0], len(peaks_h_t_i)-1)
 
-    # if (len(vec_U) > 1):
-        # fig, axs = plt.subplot_mosaic(
-        #     [["damping"], ["freq"]],  # Disposition des graphiques
-        #     constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-        #     figsize=(11, 8),  # Ajuster la taille de la figure (x,y)
-        # )
-        # # axs["damping"].plot(vec_U, damping_ratios[0, :], "o", label="Heave (Iterative)")
-        # # axs["damping"].plot(vec_U, damping_ratios[1, :], "o", label="Pitch (Iterative)")
-        # axs["damping"].plot(vec_U, damping_ratios_m[1, :], "o", label="Pitch (Monolithic)")
-
-        # xs = np.linspace(1, 7, 100)
-        # ys0 = csaps(vec_U, freqs[0, :], xs, smooth=0.993)
-        # ys1 = csaps(vec_U, freqs[1, :], xs, smooth=0.993)
-
-        # zhao_heave = genfromtxt('./data/zhao_heave.csv', delimiter=',')
-        # zhao_pitch = genfromtxt('./data/zhao_pitch.csv', delimiter=',')
-
-        # # axs["freq"].plot(vec_U, freqs[0, :], "o", label="Heave (Iterative)")
-        # # axs["freq"].plot(vec_U, freqs[1, :], "o", label="Pitch (Iterative)")
-        # axs["freq"].plot(xs, ys0, "o", markerfacecolor='none', mew=2, label="Heave")
-        # axs["freq"].plot(xs, ys1, "o", markerfacecolor='none', mew=2, label="Pitch")
-        # axs["freq"].plot(zhao_heave[:, 0], zhao_heave[:, 1], "D", markerfacecolor='none', mew=2, label="Zhao 2004")
-        # axs["freq"].plot(zhao_pitch[:, 0], zhao_pitch[:, 1], "D", markerfacecolor='none', mew=2, label="Zhao 2004")
-        # axs["freq"].axvline(x=flutter_speed, color='r', linestyle='--', label='Flutter Speed')
-
-        # axs["damping"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-        # axs["damping"].legend()
-        # axs["damping"].set_xlabel('U')
-        # axs["damping"].set_ylabel(r"$\zeta$")
-
-        # axs["freq"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-        # axs["freq"].legend()
-        # axs["freq"].set_xlabel(r'Reduced Velocity $\bar{U}$')
-        # axs["freq"].set_ylabel(r"Frequency ratio $\omega / \omega_{\alpha}$")
-
-        # plt.show()
+    if (len(vec_U) > 1):
+        fig = plot.fig_create(1, 1, ("Pitch Bifurcations",))
+        fig.add_trace(
+            go.Scatter(
+                x=np.concatenate(peaks_U), 
+                y=np.concatenate(peaks_data), 
+                name="Pitch Peaks",
+                mode="markers"
+            ),
+            row=1, 
+            col=1
+        )
+        plot.format_subplot(fig, 1, 1, r"$\bar{U}$", r"$\alpha$ (rad)")
+        plot.fig_save(fig, f"build/2dof/2dof_{torsional_spring_names[torsional_spring]}_bifurcation")

@@ -354,7 +354,7 @@ if __name__ == "__main__":
 
         if len(U_vec) == 1:
             # Plotting
-            fig = plot.create_figure(["Wing Heave", "Wing Pitch", "Flap Pitch"])
+            fig = plot.create_dofs_figure(["Wing Heave", "Wing Pitch", "Flap Pitch"])
             plot.add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1) # h
             plot.add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2) # dh
             plot.add_data_and_psd(fig, vec_t, aero_forces[0, :]/v.mu, "Theodorsen", 1, 3) # force h
@@ -405,9 +405,7 @@ if __name__ == "__main__":
             plot.format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
             plot.format_subplot(fig, 6, 3, "f", "Amplitude (dB)")
 
-            Path("build/3dof/").mkdir(parents=True, exist_ok=True)
-            fig.write_html("build/3dof/3dof.html", include_mathjax='cdn')
-            kaleido.write_fig_sync(fig, path=f"build/3dof/3dof_{int(v.U)}.pdf")
+            plot.fig_save(fig, f"build/3dof/3dof_{int(v.U)}")
 
     if len(U_vec) > 1:
         fig = make_subplots(

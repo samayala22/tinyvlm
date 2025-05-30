@@ -42,7 +42,6 @@ def plot_hb_continuation(title, H, X_mat):
     fig.update_xaxes(title_text=r"$\bar{U}$", showgrid=True)
     fig.update_yaxes(title_text=r"$||H_{j}||^{2}$", showgrid=True)
     fig.write_html("build/continuation.html", include_mathjax='cdn')
-    fig.show()
 
 def parser():
     parser = argparse.ArgumentParser()

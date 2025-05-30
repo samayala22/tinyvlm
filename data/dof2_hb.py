@@ -2,9 +2,7 @@ import numpy as np
 import autograd
 import autograd.numpy as anp
 import scipy as sp
-import plotly.io as pio
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import plotting as plot
 
 import os
 import subprocess
@@ -22,8 +20,6 @@ np.set_printoptions(
     formatter={'float': '{:.3e}'.format} # format shortE
 ) 
 
-pio.renderers.default = "browser"
-
 def getenv(key):
     var = os.getenv(key)
     if not var or int(var) == 0:
@@ -32,6 +28,10 @@ def getenv(key):
 
 EPS = np.finfo(np.float64).eps
 def cd2_h(x0): return np.maximum(np.where(np.abs(x0) > 1, np.cbrt(EPS * np.abs(x0)), np.cbrt(EPS) * np.abs(x0)), EPS)
+
+class Parametrisation(Enum):
+    Local = 1
+    ArcLength = 2
 
 # def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=anp.radians(4.24), a_f=anp.radians(-2.12)):
 #     return anp.where(
@@ -132,7 +132,6 @@ def create_motion_system() -> System:
     
     return System(M, C, K, fnlt, fnlf)
 
-# TODO: improve this disgusting function
 def tangent_predictor(J, zref, Xref):
     """Compute tangent vector using Seydel's pivot strategy."""
     # 1. Determine pivot indices
@@ -187,9 +186,7 @@ def numerical_jac(f, x):
     
     return jac
 
-def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics, label="HB"):
-    if not getenv("PLOT"): 
-        return
+def hb_timedomain(t_begin, t_end, dt, dofs, X, omega, harmonics):
     # Plot the result in time domain
     samples = 2*harmonics+1
     vec_t = np.arange(t_begin, t_end + dt, dt)
@@ -201,21 +198,8 @@ def plot_hb_timedomain(fig, t_begin, t_end, dt, dofs, X, omega, harmonics, label
         sol[0:dofs, i] = uf_sol_ @ b
         sol[dofs:2*dofs, i] = uf_sol_ @ db
         sol[2*dofs:3*dofs, i] = uf_sol_ @ ddb
-    
-    for dof in range(dofs):
-        fig.add_trace(
-            go.Scatter(
-                x=vec_t,
-                y=sol[dof, :],
-                name=f"{label} dof #{dof} (omega={omega:.3f})"
-            ),
-            row=(dof+1),
-            col=1
-        )
 
-class Parametrisation(Enum):
-    Local = 1
-    ArcLength = 2
+    return vec_t, sol
 
 def extended_residual(
     X, # scaled
@@ -375,21 +359,21 @@ def hb_residual(X, *args):
 
 @helpers.Timing(prefix="Solver:")
 def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, xtol=1e-5):
-    Xp, info, ier, mesg =  sp.optimize.fsolve(
-        extended_residual,
-        X0,
-        args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True),
-        fprime=extended_residual_jacobian,
-        full_output=True,
-        xtol = xtol,
-    )
-    if ier != 1:
-        print(f"Nonlinear solver failed: {mesg}")
-        exit(1)
+    # Xp, info, ier, mesg =  sp.optimize.fsolve(
+    #     extended_residual,
+    #     X0,
+    #     args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True),
+    #     fprime=extended_residual_jacobian,
+    #     full_output=True,
+    #     xtol = xtol,
+    # )
+    # if ier != 1:
+    #     print(f"Nonlinear solver failed: {mesg}")
+    #     exit(1)
 
-    print(f"param: {Xp[-1]:.3f}, omega: {Xp[-2]:.3f}, nfev: {info['nfev']}, njev: {info['njev']}")
+    # print(f"param: {Xp[-1]:.3f}, omega: {Xp[-2]:.3f}, nfev: {info['nfev']}, njev: {info['njev']}")
 
-    return Xp
+    # return Xp
 
     # sol = sp.optimize.root(
     #     extended_residual,
@@ -404,6 +388,24 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, xtol=1e-5)
     #     exit(1)
 
     # return sol.x
+
+    sol = sp.optimize.least_squares(
+        extended_residual,
+        X0,
+        jac='2-point',
+        method='lm',
+        ftol=1e-6,
+        gtol=1e-6,
+        xtol=1e-6,
+        x_scale='jac',
+        args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True),
+        diff_step=1e-5
+    )
+    if not sol.success:
+        print(f"Nonlinear solver failed: {sol.message}")
+        exit(1)
+    print(f"param: {sol.x[-1]:.3f}, omega: {sol.x[-2]:.3f}, nfev: {sol.nfev}, njev: {sol.njev}")
+    return sol.x
 
 def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True):
     """
@@ -466,6 +468,16 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True)
 
         # History
         X_mat[:, iteration] = X0 * Dscale
+
+        fig = plot.create_dofs_figure(["Heave", "Pitch"])
+        hb_sol_t, hb_sol = hb_timedomain(0.0, 1000.0, dt, n_dofs, X_mat[:-2, iteration], X_mat[-2, iteration], H)
+        plot.add_data_and_psd(fig, hb_sol_t, hb_sol[0, :], "HB-VLM", 1, 1, 1)
+        plot.add_data_and_psd(fig, hb_sol_t, hb_sol[1, :], "HB-VLM", 3, 1, 1)
+        plot.add_data_and_psd(fig, hb_sol_t, hb_sol[2, :], "HB-VLM", 1, 2, 1)
+        plot.add_data_and_psd(fig, hb_sol_t, hb_sol[3, :], "HB-VLM", 3, 2, 1)
+        param_str = f"{X_mat[-1, iteration]:.2f}".replace('.', '_')
+        plot.fig_save(fig, f"build/continuation/cont_{iteration}_{param_str}")
+
         np.save("build/continuation.npy", X_mat[:, :iteration]) # save every iteration
 
         iteration += 1
@@ -527,14 +539,14 @@ if __name__ == "__main__":
     flutter_speed = 6.285
     flutter_ratio_start = 0.3
     flutter_ratio_end = 0.8
-    ds = 0.1
+    ds = 0.01
 
     # assert ((H+1) & H) == 0 # H+1 should be a power of 2
 
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = 3.0
+    param_start = 5.0
     param_end = 6.0
     # Time integration
     t_final = 2000.0
@@ -574,56 +586,26 @@ if __name__ == "__main__":
     # print("Hybrid cond: ", np.linalg.cond(J_hy))
 
     # np.testing.assert_allclose(J_fd, J_hy)
-
-    # X0 = np.array([[ 1.31714943e-02],
-    #    [-1.01965586e-03],
-    #    [ 1.35262409e+00],
-    #    [ 1.04197553e-01],
-    #    [ 2.93703633e-01],
-    #    [ 8.87485049e-02],
-    #    [ 4.07959533e-03],
-    #    [ 2.33451922e-03],
-    #    [-1.25200217e-02],
-    #    [-6.56350402e-03],
-    #    [ 3.56808270e-02],
-    #    [ 9.04062063e-02],
-    #    [-1.73437507e-02],
-    #    [-3.14241987e-02],
-    #    [-1.76991642e-04],
-    #    [-3.04498176e-04],
-    #    [-1.09710236e-03],
-    #    [-3.96114844e-03],
-    #    [-8.87458356e-04],
-    #    [ 2.02743506e-02],
-    #    [-7.30822018e-04],
-    #    [ 1.01694374e-04],
-    #    [-2.26362820e-04],
-    #    [ 6.31483503e-04],
-    #    [-2.16201950e-05],
-    #    [-1.61312040e-03],
-    #    [-9.99292680e-04],
-    #    [ 6.10999735e-03],
-    #    [ 7.69486566e-05],
-    #    [-1.14004510e-03],
-    #    [-1.39860283e-05],
-    #    [ 1.57303148e-05],
-    #    [ 2.82632990e-05],
-    #    [-4.16910315e-04],
-    #    [-1.81086605e-04],
-    #    [ 7.84949337e-04],
-    #    [ 3.85088620e-05],
-    #    [-2.43267633e-04],
-    #    [-1.34750901e-05],
-    #    [ 1.93240683e-05],
-    #    [ 1.54316419e-05],
-    #    [-5.16621799e-05],
-    #    [ 5.15856915e-02],
-    #    [ 5.99999999e+00]]).flatten()
     
-    # print(hb_residual(X0, False, False))
-
-    X_mat = continuation(param_start, param_end, ds, X0, 1, True)
-    # X_mat = continuation(param_start, param_end, ds, X0, 5000, True)
+    # continuation(param_start, param_end, ds, X0, 1, False)
+    # continuation(param_start, param_end, ds, X0, 5000, False)
     
     if getenv("PLOT"):
-        cont.plot_hb_continuation("2DOF HB-VLM Continuation", H, X_mat)
+        X_mat = np.load("build/continuation.npy")
+        if X_mat.shape[1] == 1:
+            hb_sol_t, hb_sol0 = hb_timedomain(0.0, 1000.0, dt, n_dofs, X_mat[:-2, 0], X_mat[-2, 0], H)
+            fig = plot.create_dofs_figure(["Heave", "Pitch"])
+            dof2.plot_uvlm(fig)
+            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[0, :], "HB-VLM", 1, 1, 1)
+            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[1, :], "HB-VLM", 3, 1, 1)
+            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[2, :], "HB-VLM", 1, 2, 1)
+            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 3, 2, 1)
+            
+            param_str = f"{X_mat[-1, 0]:.1f}".replace('.', '_')
+            plot.fig_save(fig, f"build/hbvlm/hbvlm0_{param_str}")
+        else:
+            cont.plot_hb_continuation("2DOF HB-VLM Continuation", H, X_mat)
+
+# Notes:
+# - Dimitriadis introduction to nonlinear aeroelasticity p333: jacobian sign changes during continuation
+# - Reproduce fig 7.14 ?
