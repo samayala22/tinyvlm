@@ -69,35 +69,21 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         tickformat=".2e"
     )
 
-# def compute_psd(t, data):
-#     """Compute PSD with consistent parameters"""
-#     sampling_rate = 1 / np.mean(np.diff(t))
-#     frequencies, psd = sp.signal.welch(
-#         data[int(0.75*len(data)):], 
-#         fs=sampling_rate
-#     )
-#     mask = frequencies < 1.0
-#     psd_db = 10 * np.log10(psd)
-
-#     return frequencies[mask], psd[mask]
-
 def compute_psd(t, data):
+    """Compute PSD with consistent parameters"""
     sampling_rate = 1 / np.mean(np.diff(t))
-    data_sub = data[int(0.75 * len(data)):]
-    n = len(data_sub)
-    window = np.hanning(n)
-    fft_vals = np.fft.rfft(data_sub * window)
-    frequencies = np.fft.rfftfreq(n, d=1/sampling_rate)
-    U = np.sum(window**2)
-    psd = (np.abs(fft_vals) ** 2) / (sampling_rate * U)
-    if n % 2 == 0:
-        psd[1:-1] *= 2
-    else:
-        psd[1:] *= 2
 
-    # Mask to retain only frequencies below 1.0 Hz
-    mask = (frequencies > 0) & (frequencies < 0.5)
+    frequencies, psd = sp.signal.welch(
+        data[int(0.75*len(data)):],
+        nperseg=int(0.25 * len(data)),
+        nfft=len(data),
+        fs=sampling_rate,
+        window='boxcar',
+        scaling='spectrum'
+    )
 
+    mask = frequencies < 1.0
+    psd_db = 10 * np.log10(psd)
     return frequencies[mask], psd[mask]
 
 def find_peak_idx(data):

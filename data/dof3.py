@@ -1,14 +1,10 @@
+from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from dataclasses import dataclass
-import scipy as sp
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
-from pathlib import Path
-import kaleido
 import plotting as plot
-from pathlib import Path
 
 @dataclass
 class Vars:
@@ -282,10 +278,10 @@ if __name__ == "__main__":
     # U_vec = [12.36842] # Non symmetric 2 period LCO
     # U_vec = [12.75168] # Bifuracation reports many points ?
     U_vec = [7.0]
-    # U_vec = np.linspace(2, 20, 150)
+    # U_vec = np.linspace(0.2, 22.5, 200)
 
-    beta_peaks = []
-    beta_vel = []
+    peaks_data = [[], [], []]
+    peaks_U = [[], [], []]
     coupled_sim = True
 
     for U in tqdm(U_vec): 
@@ -319,8 +315,8 @@ if __name__ == "__main__":
         v.V = v.U / (v.b * v.omega_alpha)
         v.mu = v.m / (np.pi * v.rho * v.b**2)
 
-        dt = 0.02
-        t_final = 5 * v.omega_alpha
+        dt = 0.002
+        t_final = 10.0 * v.omega_alpha
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
@@ -336,23 +332,9 @@ if __name__ == "__main__":
             print("Monolithic solver failed")
             exit(1)
 
-        aero_forces = system.aero_forces(mono.y)
-
-        angle_tolerance = 0.25 # degrees
-        last25_amp = np.degrees(mono.y[5, int(0.75 * n):])
-        peaks_idx0, _ = sp.signal.find_peaks(last25_amp)
-        peaks_idx1, _ = sp.signal.find_peaks(-last25_amp)
-        peaks_idx = np.sort(np.concatenate((peaks_idx0, peaks_idx1)))
-        amp_local = last25_amp[peaks_idx]
-        amp_peaks_local_unique = [amp_local[0]]
-        for amp in amp_local[1:]:
-            if not np.any(np.abs(amp - np.array(amp_peaks_local_unique)) < angle_tolerance):
-                amp_peaks_local_unique.append(amp)
-            
-        beta_peaks.extend(amp_peaks_local_unique)
-        beta_vel.extend([U] * len(amp_peaks_local_unique))
-
         if len(U_vec) == 1:
+            aero_forces = system.aero_forces(mono.y)
+
             # Plotting
             fig = plot.create_dofs_figure(["Wing Heave", "Wing Pitch", "Flap Pitch"])
             plot.add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1) # h
@@ -365,26 +347,26 @@ if __name__ == "__main__":
             plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
             plot.add_data_and_psd(fig, vec_t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
 
-            uvlm_file = Path("build/windows/x64/release/3dof.txt")
-            if uvlm_file.exists():
-                with open(uvlm_file, "r") as f:
-                    uvlm_tsteps = int(f.readline())
-                    uvlm = np.zeros((10, uvlm_tsteps))
-                    i = 0
-                    for line in f:
-                        uvlm[:, i] = np.array(list(map(float, line.split())))
-                        i += 1
-                    uvlm = uvlm[:, :i] # shrink in case the number of steps is not equal (stopped simulation)
+            # uvlm_file = Path("build/windows/x64/release/3dof.txt")
+            # if uvlm_file.exists():
+            #     with open(uvlm_file, "r") as f:
+            #         uvlm_tsteps = int(f.readline())
+            #         uvlm = np.zeros((10, uvlm_tsteps))
+            #         i = 0
+            #         for line in f:
+            #             uvlm[:, i] = np.array(list(map(float, line.split())))
+            #             i += 1
+            #         uvlm = uvlm[:, :i] # shrink in case the number of steps is not equal (stopped simulation)
 
-                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[1, :], "UVLM", 1, 1)
-                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[4, :], "UVLM", 1, 2)
-                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[7, :], "UVLM", 1, 3)
-                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[2, :]), "UVLM", 3, 1)
-                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[5, :]), "UVLM", 3, 2)
-                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[8, :], "UVLM", 3, 3)
-                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[3, :]), "UVLM", 5, 1)
-                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[6, :]), "UVLM", 5, 2)
-                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[9, :], "UVLM", 5, 3)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], uvlm[1, :], "UVLM", 1, 1)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], uvlm[4, :], "UVLM", 1, 2)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], uvlm[7, :], "UVLM", 1, 3)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[2, :]), "UVLM", 3, 1)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[5, :]), "UVLM", 3, 2)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], uvlm[8, :], "UVLM", 3, 3)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[3, :]), "UVLM", 5, 1)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[6, :]), "UVLM", 5, 2)
+            #         plot.add_data_and_psd(fig, uvlm[0, :], uvlm[9, :], "UVLM", 5, 3)
                 
             plot.format_subplot(fig, 1, 1, "t", r"y")
             plot.format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
@@ -405,37 +387,27 @@ if __name__ == "__main__":
             plot.format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
             plot.format_subplot(fig, 6, 3, "f", "Amplitude (dB)")
 
-            plot.fig_save(fig, f"build/3dof/3dof_{int(v.U)}")
+            plot.fig_save(fig, f"build/3dof/3dof")
+        else:
+            slice_start = int(0.9 * n)
+            peaks_slice = mono.y[3:6, slice_start:]
+            
+            for i in range(3):
+                peaks_data[i].append(peaks_slice[i, plot.find_peak_idx(peaks_slice[i, :])])
+                peaks_U[i].append(np.array([U] * peaks_data[i][-1].shape[0]))
 
     if len(U_vec) > 1:
-        fig = make_subplots(
-            rows=1, cols=1,
-            subplot_titles=(
-                'Bifurcation Diagram'
-            ),
-            vertical_spacing=0.1,
-            horizontal_spacing=0.08
-        )
+        fig = plot.fig_create(3, 1, ("Heave", "Pitch", "Control"))
+        for i in range(3):
+            fig.add_trace(
+                go.Scatter(
+                    x=np.concatenate(peaks_U[i]), 
+                    y=np.concatenate(peaks_data[i]), 
+                    mode="markers"
+                ),
+                row=i + 1, 
+                col=1
+            )
+            plot.format_subplot(fig, i + 1, 1, r"$\bar{U}$", "Amplitude")
 
-        fig.add_trace(
-            go.Scattergl(
-                x=beta_vel, 
-                y=beta_peaks, 
-                name="beta",
-                mode='markers',
-                showlegend=True
-            ),
-            row=1, 
-            col=1
-        )
-
-        fig.update_xaxes(
-            title_text="U",
-            row=1,
-            col=1,
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='rgba(128, 128, 128, 0.2)',
-        )
-
-        fig.write_html("build/bifurcation.html", include_mathjax='cdn')
+        plot.fig_save(fig, f"build/3dof/3dof_Freeplay_bifurcation")

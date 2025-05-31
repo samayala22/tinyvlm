@@ -33,23 +33,6 @@ class Parametrisation(Enum):
     Local = 1
     ArcLength = 2
 
-# def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=anp.radians(4.24), a_f=anp.radians(-2.12)):
-#     return anp.where(
-#         alpha < a_f,
-#         M0 + alpha - a_f,
-#         anp.where(
-#             alpha <= (a_f + delta),
-#             M0 + Mf * (alpha - a_f),
-#             M0 + alpha - a_f + delta * (Mf - 1)
-#         )
-#     )
-
-# def alpha_cubic(alpha, beta0 = 0.0, beta1 = 0.1, beta2 = 0.0, beta3 = 40.0):
-#     return beta0 + beta1*alpha + beta2*alpha**2 + beta3*alpha**3
-
-# def alpha_linear(alpha):
-#     return alpha
-
 def create_fourier_basis(omega, harmonics, t):
     unknowns = 2 * harmonics + 1
     basis = np.zeros((unknowns))
