@@ -349,6 +349,15 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation):
         tol = 1e-6,
     )
 
+    Q = sol.fjac.T
+    R = np.zeros_like(sol.fjac)
+    R[np.triu_indices_from(R)] = sol.r
+    jac = Q @ R
+    # latest_jac = extended_residual_jacobian(sol.x, X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True)
+    # print(jac)
+    # print(latest_jac)
+    # np.testing.assert_allclose(jac, latest_jac, rtol=1e-6)
+
     # sol = sp.optimize.least_squares(
     #     extended_residual,
     #     X0,
@@ -381,7 +390,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation):
         print(f"Nonlinear solver failed: {sol.message}")
         exit(1)
     print(f"param: {sol.x[-1]:.3f}, omega: {sol.x[-2]:.3f}, nfev: {sol.get('nfev', None)}, njev: {sol.get('njev', None)}")
-    return sol.x
+    return sol.x, jac
 
 def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True):
     """
@@ -407,7 +416,7 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True)
     Dscale_prev = Dscale.copy()
 
     # Initial step
-    Xp = solve_nonlinear_system(X0, X_ref, z_ref, Dscale, Parametrisation.Local)
+    Xp, J = solve_nonlinear_system(X0, X_ref, z_ref, Dscale, Parametrisation.Local)
     X0 = Xp.copy()
     X_mat[:, 0] = X0
     np.save("build/continuation.npy", X_mat[:, :1])
@@ -423,7 +432,7 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True)
             X0 = X0 * (Dscale_prev / Dscale)
             X_old = X_old * (Dscale_prev / Dscale)
 
-        J = extended_residual_jacobian(X0, X_ref, z_ref * Dscale_prev, hb_residual, Dscale, Parametrisation.ArcLength, True, False)
+        # J = extended_residual_jacobian(X0, X_ref, z_ref * Dscale_prev, hb_residual, Dscale, Parametrisation.ArcLength, True, False)
         ztmp = tangent_predictor(J @ np.diag(1 / Dscale_prev), z_ref * Dscale_prev, X_ref) / Dscale
         z = ztmp / np.linalg.norm(ztmp)
 
@@ -438,7 +447,7 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True)
         # Predictor step
         Xp = X0 + direction*ds*z
         # Corrector step
-        Xtmp = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, Parametrisation.ArcLength)
+        Xtmp, J = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, Parametrisation.ArcLength)
 
         X_old = X0.copy()
         X0 = Xtmp.copy()

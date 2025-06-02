@@ -3,8 +3,8 @@
 #include <functional> // std::function
 #include <fstream>
 
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 
 #include "tinycombination.hpp"
 #include "tinyad.hpp"
@@ -22,7 +22,7 @@
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
-namespace nb = nanobind;
+namespace py = pybind11;
 
 // Delete this ASAP
 #define TRY_CATCH_VOID_CALL(expr) \
@@ -63,7 +63,7 @@ class HBVLM {
         HBVLM(const std::string& backend_name, const std::string& filename);
         ~HBVLM() = default;
         void init(i32 harmonics, f64 scaling);
-        void run(f64 t_final, f64 omega, f64 vars_b, const Assembly<f64>& assembly, const nb::ndarray<double, nb::ndim<2>>& forces_t);
+        void run(f64 t_final, f64 omega, f64 vars_b, const Assembly<f64>& assembly, py::array_t<double>& forces_t);
 
         std::unique_ptr<Backend> backend;
         MultiDim<2> assembly_wings;
@@ -335,7 +335,7 @@ void anderson_acceleration(
     }
 }
 
-void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembly, const nb::ndarray<double, nb::ndim<2>>& forces_t) {
+void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembly, py::array_t<double>& forces_t) {
     // const tiny::ScopedTimer timer("HBVLM::run");
     bool read_gamma = false;
     bool write_gamma = false;
@@ -518,6 +518,8 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
         TRY_CATCH_VOID_CALL(npy::write_npy("gamma0.npy", gamma_coeff_bin));
     }
     
+    auto forces_t_v = forces_t.mutable_unchecked<2>();
+
     // Compute the forces coefficients
     {
         // Maybe we should use mesh dims throughout the code ...
@@ -576,7 +578,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
                 normals_d.views()[0],
                 aero_forces.views()[0]
             ); 
-            forces_t(0, s) = backend->coeff_cl_multibody(
+            forces_t_v(0, s) = backend->coeff_cl_multibody(
                 aero_forces.views(),
                 areas_d.views(),
                 freestream,
@@ -585,7 +587,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
             const auto transform_node0 = assembly.surface_kinematics()[0];
             const auto transform_mat = transform_node0->transform(t);
             auto ref_pt = linalg::mul(transform_mat, {0.5f, 0.0f, 0.0f, 1.0f});
-            forces_t(1, s) = backend->coeff_cm_multibody(
+            forces_t_v(1, s) = backend->coeff_cm_multibody(
                 aero_forces.views(),
                 verts_wing.views(),
                 areas_d.views(),
@@ -606,7 +608,7 @@ void hbvlm_init(i32 harmonics, f64 scaling) {
     g_hbvlm.init(harmonics, scaling);
 }
 
-void hbvlm_run(f64 omega, const nb::ndarray<double, nb::ndim<2>>& dyn_f, const nb::ndarray<double, nb::ndim<2>>& force_t) {
+void hbvlm_run(f64 omega, py::array_t<double>& dyn_f, py::array_t<double>& force_t) {
     // Geometry
     const f64 b = 0.5f; // half chord
     const f64 cycles = 3.0f;
@@ -615,7 +617,8 @@ void hbvlm_run(f64 omega, const nb::ndarray<double, nb::ndim<2>>& dyn_f, const n
     const f64 a_h = -0.5f;
     const i32 H = g_hbvlm.m_harmonics;
     // std::printf("t_final: %f, omega: %.8f, harmonics: %i\n", t_final, omega, g_hbvlm.m_harmonics);
-
+    TINY_ASSERT_EQ(dyn_f.ndim(), 2);
+    TINY_ASSERT_EQ(force_t.ndim(), 2);
     TINY_ASSERT_EQ(dyn_f.shape(0), 2);
     TINY_ASSERT_EQ(dyn_f.shape(1), 2 * H + 1);
     TINY_ASSERT_EQ(force_t.shape(0), 2);
@@ -626,20 +629,20 @@ void hbvlm_run(f64 omega, const nb::ndarray<double, nb::ndim<2>>& dyn_f, const n
         return translation_matrix<fwd::Double>({-u_inf * t, 0.f, 0.f});
     });
     auto heave = kinematics_tree.add([=](const fwd::Double& t) {
-        fwd::Double z = dyn_f(0, 0);
+        fwd::Double z = dyn_f.at(0, 0);
         for (i32 h = 0; h < H; h++) {
             f64 k = (f64)(h+1);
-            z += fwd::cos(omega * t * k) * dyn_f(0, 2*h+1);
-            z += fwd::sin(omega * t * k) * dyn_f(0, 2*h+2);
+            z += fwd::cos(omega * t * k) * dyn_f.at(0, 2*h+1);
+            z += fwd::sin(omega * t * k) * dyn_f.at(0, 2*h+2);
         }
         return translation_matrix<fwd::Double>({0.f, 0.f, -z});
     })->after(fs);
     auto pitch = kinematics_tree.add([=](const fwd::Double& t) {
-        fwd::Double alpha = dyn_f(1, 0);
+        fwd::Double alpha = dyn_f.at(1, 0);
         for (i32 h = 0; h < H; h++) {
             f64 k = (f64)(h+1);
-            alpha += fwd::cos(omega * t * k) * dyn_f(1, 2*h+1);
-            alpha += fwd::sin(omega * t * k) * dyn_f(1, 2*h+2);
+            alpha += fwd::cos(omega * t * k) * dyn_f.at(1, 2*h+1);
+            alpha += fwd::sin(omega * t * k) * dyn_f.at(1, 2*h+2);
         }
 
         return rotation_matrix<fwd::Double>(
@@ -653,11 +656,7 @@ void hbvlm_run(f64 omega, const nb::ndarray<double, nb::ndim<2>>& dyn_f, const n
     g_hbvlm.run(t_final, omega, b, assembly, force_t);
 }
 
-NB_MODULE(libhbvlm, m) {
+PYBIND11_MODULE(libhbvlm, m) {
     m.def("hbvlm_init", &hbvlm_init);
-    m.def("hbvlm_run", &hbvlm_run,
-          nb::arg("omega"),
-          nb::arg("dyn_f").noconvert(),
-          nb::arg("force_t").noconvert()
-    );
+    m.def("hbvlm_run", &hbvlm_run);
 }

@@ -20,7 +20,7 @@ package("openblas_custom")
     add_configs("shared", {description = "Build shared library.", default = true, type = "boolean", readonly = is_plat("windows")})
     add_configs("lapack", {description = "Build LAPACK", default = true, type = "boolean", readonly = is_plat("windows")})
     add_configs("dynamic_arch", {description = "Enable dynamic arch dispatch", default = (is_plat("linux") or is_plat("windows")), type = "boolean", readonly = not is_plat("linux")})
-    add_configs("openmp", {description = "Compile with OpenMP enabled", default = (is_plat("windows") or is_plat("linux")), type = "boolean", readonly = not is_plat("linux")})
+    add_configs("openmp", {description = "Compile with OpenMP enabled", default = false, type = "boolean", readonly = not is_plat("linux")})
     add_configs("integer", {description = "Index type", default = 32, type = "number", values = {32, 64}})
 
     if not is_plat("windows") then
@@ -67,8 +67,13 @@ package("openblas_custom")
         end
         import("package.tools.cmake").install(package, configs)
 
-        os.mv(package:installdir() .. "/include/openblas/*" , package:installdir("include"))
-        os.rm(package:installdir("include/openblas"))
+        if package:config("integer") == 64 then
+            os.mv(package:installdir() .. "/include/openblas64/*" , package:installdir("include"))
+            os.rm(package:installdir("include/openblas64"))
+        else
+            os.mv(package:installdir() .. "/include/openblas/*" , package:installdir("include"))
+            os.rm(package:installdir("include/openblas"))
+        end
     end)
 
     on_test(function (package)

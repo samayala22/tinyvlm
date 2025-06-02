@@ -12,6 +12,7 @@ set_policy("build.warning", true)
 set_policy("build.cuda.devlink", true) -- magic
 set_policy("run.autobuild", true)
 -- set_policy("build.optimization.lto")
+add_cxxflags("-fPIC", {tools = {"gcc", "clang"}})
 
 -- if is_mode("debug") then
 --     set_policy("build.sanitizer.address", true) -- use xmake f --policies=build.sanitizer.address
@@ -20,6 +21,7 @@ set_policy("run.autobuild", true)
 set_warnings("all")
 set_languages("c++17", "c99")
 set_runtimes("MD") -- msvc runtime library (MD/MT/MDd/MTd)
+add_requires("pybind11")
 
 -- Define backends and helper functions
 backends = {"cuda", "cpu"}
@@ -44,7 +46,6 @@ for _,name in ipairs(backends) do
     end
 end
 
-add_requires("nanobind")
 
 includes("packages/*.lua")
 includes("vlm/xmake.lua") -- library and main driver
@@ -64,7 +65,7 @@ end
 -- Create python lib
 target("libhbvlm")
     add_rules("python.library")
-    add_packages("nanobind")
+    add_packages("pybind11")
     set_default(false)
     add_rpathdirs("$ORIGIN")
     add_deps("libvlm")
