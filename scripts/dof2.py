@@ -351,7 +351,7 @@ if __name__ == "__main__":
     flutter_ratio = 0.6
     # vec_U = np.linspace(0.1, 5.5, 250) # for freeplay
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
-    vec_U = [6.0] # reduced velocity
+    vec_U = [2.0] # reduced velocity
     newton_err_thresh = 1e-8
     torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]

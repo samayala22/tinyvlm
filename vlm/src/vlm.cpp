@@ -326,7 +326,7 @@ void UVLM::alloc_buffers() {
 }
 
 
-void UVLM::run(const Assembly& assembly, f32 t_final) {
+void UVLM::run(const Assembly<f32>& assembly, f32 t_final) {
     const tiny::ScopedTimer timer("UVLM");
     const f32 rho = 1.0f; // TODO: take this as input
     // Copy raw meshes to device

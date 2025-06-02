@@ -10,18 +10,20 @@
 
 namespace vlm {
 
+
+template<typename T>
 class Assembly {
 private:
     std::vector<std::string> m_filenames;
-    std::vector<KinematicNode*> m_nodes;
+    std::vector<KinematicNode<T>*> m_nodes;
     std::vector<bool> m_lifting;
-    KinematicNode* m_assembly_node;
+    KinematicNode<T>* m_assembly_node;
     i64 m_num_surfaces = 0;
 
 public:
-    Assembly(KinematicNode* assembly_node) : m_assembly_node(assembly_node) {}
+    Assembly(KinematicNode<T>* assembly_node) : m_assembly_node(assembly_node) {}
     
-    void add(const std::string& filename, KinematicNode* node, bool lifting = true) {
+    void add(const std::string& filename, KinematicNode<T>* node, bool lifting = true) {
         m_filenames.push_back(filename);
         m_nodes.push_back(node);
         m_lifting.push_back(lifting);
@@ -29,9 +31,9 @@ public:
     }
 
     const std::vector<std::string>& mesh_filenames() const { return m_filenames; }
-    const std::vector<KinematicNode*>& surface_kinematics() const { return m_nodes; }
+    const std::vector<KinematicNode<T>*>& surface_kinematics() const { return m_nodes; }
     const std::vector<bool>& lifting() const { return m_lifting; }
-    const KinematicNode* kinematics() const { return m_assembly_node; }
+    const KinematicNode<T>* kinematics() const { return m_assembly_node; }
     i64 num_surfaces() const { return m_num_surfaces; }
 };
 
@@ -121,7 +123,7 @@ class UVLM final: public Simulation {
     public:
         UVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~UVLM() = default;
-        void run(const Assembly& assembly, f32 t_final);
+        void run(const Assembly<f32>& assembly, f32 t_final);
 
         MultiTensor3fD colloc_d{backend->memory.get()};
         MultiTensor3fH colloc_h{backend->memory.get()};

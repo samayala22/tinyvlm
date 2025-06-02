@@ -1,3 +1,7 @@
+import sys
+
+sys.path.append(r"C:\Users\samay\Documents\GitHub\tinyvlm\build\windows\x64\release")
+
 import numpy as np
 import autograd
 import autograd.numpy as anp
@@ -15,6 +19,8 @@ import vanderpol as vdp
 import helpers
 import continuation as cont
 
+from libhbvlm import *
+
 np.set_printoptions(
     linewidth=200, # max line width
     formatter={'float': '{:.3e}'.format} # format shortE
@@ -28,6 +34,7 @@ def getenv(key):
 
 EPS = np.finfo(np.float64).eps
 def cd2_h(x0): return np.maximum(np.where(np.abs(x0) > 1, np.cbrt(EPS * np.abs(x0)), np.cbrt(EPS) * np.abs(x0)), EPS)
+def fd_h(x0): return np.maximum(np.sqrt(EPS) * np.abs(x0), EPS)
 
 class Parametrisation(Enum):
     Local = 1
@@ -52,29 +59,6 @@ def create_fourier_basis(omega, harmonics, t):
 
     return basis, dbasis, ddbasis
 
-def run_hbvlm(omega, H, read_gamma, write_gamma, reset_logfile=False):
-        executable_path = "./build/windows/x64/release/hbvlm.exe"
-        cwd_path = "./build/windows/x64/release/"
-        logfile_path = "build/windows/x64/release/dof2_hbvlm.log"
-
-        if reset_logfile:
-            with open(logfile_path, 'w') as logfile:
-                pass
-            return
-
-        with open(logfile_path, 'a') as logfile:
-            result = subprocess.run(
-                [executable_path, f"{omega:.9f}", f"{H}", f"{int(read_gamma)}", f"{int(write_gamma)}"],
-                cwd=cwd_path,
-                stdout=logfile,
-                stderr=subprocess.STDOUT,  # Combine stderr with stdout
-                text=True
-            )
-        
-        if result.returncode != 0:
-            print(f"Command failed (return code {result.returncode}), see {logfile_path}")
-            exit(1)
-
 @dataclass
 class System:
     M      : callable
@@ -89,14 +73,13 @@ def create_motion_system() -> System:
             - (ndv.omega / U)**2 * u[0],
             - 1/(U**2) * torsional_func(u[1])
         ])
-    
+
     def fnlf(X, omega, U):
-        np.save("build/windows/x64/release/kin_coeffs.npy", X)
-        run_hbvlm(omega, H, False, False)
-        coeffs = np.load("build/windows/x64/release/hbvlm_t.npy").astype(np.float64)
-        coeffs[0, :] = - coeffs[0, :] / (np.pi * ndv.mu)
-        coeffs[1, :] = (2.0 * coeffs[1, :]) / (np.pi * ndv.mu * ndv.r_a**2)
-        return coeffs
+        forces_t = np.zeros_like(X)
+        hbvlm_run(omega, X, forces_t)
+        forces_t[0, :] = - forces_t[0, :] / (np.pi * ndv.mu)
+        forces_t[1, :] = (2.0 * forces_t[1, :]) / (np.pi * ndv.mu * ndv.r_a**2)
+        return forces_t
     
     def M(U):
         return anp.array([
@@ -149,7 +132,7 @@ def tangent_predictor(J, zref, Xref):
 #     z = Q[:, -1]
 #     return z / np.linalg.norm(z)
 
-def numerical_jac(f, x):
+def numerical_jac(f, x, method="3-point"):
     """
     Numerical Jacobian using precise central differences
     Performs 2*N evaluations of the function
@@ -158,14 +141,23 @@ def numerical_jac(f, x):
     n = len(x)
 
     jac = np.zeros((m, n))
-    for j in range(n):
-        h = max(cd2_h(x[j]), 1e-5) # limiter because hbvlm is in single precision
-        # print(f"{j}| h: {h:.5e}")
-        xp, xm = x.copy(), x.copy()
-        xp[j] += h
-        xm[j] -= h
-        delta = xp[j] - xm[j] # delta representable fp number
-        jac[:, j] = (f(xp) - f(xm)) / delta
+    if method == "3-point":
+        for j in range(n):
+            h = cd2_h(x[j])
+            # print(f"{j}| h: {h:.5e}")
+            xp, xm = x.copy(), x.copy()
+            xp[j] += h
+            xm[j] -= h
+            delta = xp[j] - xm[j] # delta representable fp number
+            jac[:, j] = (f(xp) - f(xm)) / delta
+    elif method == "2-point":
+        yj = f(x)
+        for j in range(n):
+            h = fd_h(x[j])
+            xp = x.copy()
+            xp[j] += h
+            delta = xp[j] - x[j]
+            jac[:, j] = (f(xp) - yj) / delta
     
     return jac
 
@@ -340,54 +332,55 @@ def hb_nonlinear_residual(X, *args):
 def hb_residual(X, *args):
     return hb_linear_residual(X, *args) + hb_nonlinear_residual(X, *args)
 
+def objective_function(x, X_ref, z_ref, hb_residual, Dscale, parametrisation, bool1, bool2):
+    residuals = extended_residual(
+        x, X_ref, z_ref, hb_residual, Dscale, parametrisation, bool1, bool2
+    )
+    return np.sum(residuals**2)  # Scalar output
+
 @helpers.Timing(prefix="Solver:")
-def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, xtol=1e-5):
-    # Xp, info, ier, mesg =  sp.optimize.fsolve(
-    #     extended_residual,
-    #     X0,
-    #     args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True),
-    #     fprime=extended_residual_jacobian,
-    #     full_output=True,
-    #     xtol = xtol,
-    # )
-    # if ier != 1:
-    #     print(f"Nonlinear solver failed: {mesg}")
-    #     exit(1)
-
-    # print(f"param: {Xp[-1]:.3f}, omega: {Xp[-2]:.3f}, nfev: {info['nfev']}, njev: {info['njev']}")
-
-    # return Xp
-
-    # sol = sp.optimize.root(
-    #     extended_residual,
-    #     X0,
-    #     args=(X_ref, z_ref, hb_residual, parametrisation, True, True),
-    #     method='hybr',
-    #     jac=extended_residual_jacobian,
-    #     tol = xtol
-    # )
-    # if not sol.success:
-    #     print(f"Nonlinear solver failed: {sol.message}")
-    #     exit(1)
-
-    # return sol.x
-
-    sol = sp.optimize.least_squares(
+def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation):
+    sol = sp.optimize.root(
         extended_residual,
         X0,
-        jac='2-point',
-        method='lm',
-        ftol=1e-6,
-        gtol=1e-6,
-        xtol=1e-6,
-        x_scale='jac',
         args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True),
-        diff_step=1e-5
+        method='hybr',
+        jac=extended_residual_jacobian,
+        tol = 1e-6,
     )
+
+    # sol = sp.optimize.least_squares(
+    #     extended_residual,
+    #     X0,
+    #     jac=extended_residual_jacobian,
+    #     method='trf',
+    #     ftol=1e-6,
+    #     gtol=1e-6,
+    #     xtol=1e-6,
+    #     x_scale='jac',
+    #     args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True),
+    #     diff_step=1e-6
+    # )
+
+    # sol = sp.optimize.minimize(
+    #     objective_function,  # Scalar objective function
+    #     X0,
+    #     method='BFGS',   # Recommended for bound-constrained minimization
+    #     # jac=extended_residual_jacobian,       # Finite difference Jacobian
+    #     tol = 1e-6,  # Function tolerance
+    #     # options={
+    #     #     'ftol': 1e-6,   # Function tolerance
+    #     #     'gtol': 1e-6,   # Gradient tolerance
+    #     #     'eps': 1e-6,     # Step size for finite differences
+    #     #     'maxls': 50      # Max line search steps (prevents stalling)
+    #     # },
+    #     args=(X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True)
+    # )
+
     if not sol.success:
         print(f"Nonlinear solver failed: {sol.message}")
         exit(1)
-    print(f"param: {sol.x[-1]:.3f}, omega: {sol.x[-2]:.3f}, nfev: {sol.nfev}, njev: {sol.njev}")
+    print(f"param: {sol.x[-1]:.3f}, omega: {sol.x[-2]:.3f}, nfev: {sol.get('nfev', None)}, njev: {sol.get('njev', None)}")
     return sol.x
 
 def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True):
@@ -417,6 +410,7 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True)
     Xp = solve_nonlinear_system(X0, X_ref, z_ref, Dscale, Parametrisation.Local)
     X0 = Xp.copy()
     X_mat[:, 0] = X0
+    np.save("build/continuation.npy", X_mat[:, :1])
 
     iteration = 1
     while iteration < max_steps:
@@ -461,9 +455,9 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True)
         param_str = f"{X_mat[-1, iteration]:.2f}".replace('.', '_')
         plot.fig_save(fig, f"build/continuation/cont_{iteration}_{param_str}")
 
+        iteration += 1
         np.save("build/continuation.npy", X_mat[:, :iteration]) # save every iteration
 
-        iteration += 1
         if (X0[-1] - param_end) * param_direction >= 0:
             print("Continuation reached the end")
             break
@@ -515,7 +509,8 @@ if __name__ == "__main__":
         torsional_func = dof2.alpha_linear
 
     # Independent params
-    H = 10
+    H = 5
+    vars_b = 0.5 # half chord
     n_dofs = 2
     n_coeffs = 2*H+1
     n_samples = (H+1)*(2**4) # sampling points (needs to be power of 2)
@@ -523,6 +518,8 @@ if __name__ == "__main__":
     flutter_ratio_start = 0.3
     flutter_ratio_end = 0.8
     ds = 0.01
+
+    hbvlm_init(H, 1.0/vars_b)
 
     # assert ((H+1) & H) == 0 # H+1 should be a power of 2
 
@@ -570,7 +567,7 @@ if __name__ == "__main__":
 
     # np.testing.assert_allclose(J_fd, J_hy)
     
-    # continuation(param_start, param_end, ds, X0, 1, False)
+    continuation(param_start, param_end, ds, X0, 1, False)
     # continuation(param_start, param_end, ds, X0, 5000, False)
     
     if getenv("PLOT"):

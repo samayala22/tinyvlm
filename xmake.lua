@@ -44,6 +44,8 @@ for _,name in ipairs(backends) do
     end
 end
 
+add_requires("nanobind")
+
 includes("packages/*.lua")
 includes("vlm/xmake.lua") -- library and main driver
 
@@ -58,3 +60,12 @@ for _, file in ipairs(os.files("tests/*.cpp")) do
         add_files("tests/" .. name .. ".cpp")
         add_tests("default")
 end
+
+-- Create python lib
+target("libhbvlm")
+    add_rules("python.library")
+    add_packages("nanobind")
+    set_default(false)
+    add_rpathdirs("$ORIGIN")
+    add_deps("libvlm")
+    add_files("lib/libhbvlm.cpp")

@@ -74,13 +74,23 @@ f32 Backend::coeff_steady_cd_multi(const MultiTensorView3fD& verts_wake, const M
     return cd;
 }
 
-void Backend::wake_shed(const MultiTensorView3fD& verts_wing, MultiTensorView3fD& verts_wake, i32 iteration) {
+template<typename T>
+void wake_shed_impl(const MultiTensorView<T, 3, Location::Device>& verts_wing, MultiTensorView<T, 3, Location::Device>& verts_wake, i32 iteration) {
     for (const auto& [wing, wake] : zip(verts_wing, verts_wake)) {
         wing.slice(All, -1, All).to(wake.slice(All, -1-iteration, All));
     }
 }
 
-void Backend::displace_wing(const MultiTensorView2fD& transforms, MultiTensorView3fD& verts_wing, MultiTensorView3fD& verts_wing_init) {
+void Backend::wake_shed(const MultiTensorView3fD& verts_wing, MultiTensorView3fD& verts_wake, i32 iteration) {
+    wake_shed_impl(verts_wing, verts_wake, iteration);
+}
+
+void Backend::wake_shed(const MultiTensorView3dD& verts_wing, MultiTensorView3dD& verts_wake, i32 iteration) {
+    wake_shed_impl(verts_wing, verts_wake, iteration);
+}
+
+template<typename T>
+void displace_wing_impl(Backend* backend, const MultiTensorView<T, 2, Location::Device>& transforms, MultiTensorView<T, 3, Location::Device>& verts_wing, MultiTensorView<T, 3, Location::Device>& verts_wing_init) {
     // const tiny::ScopedTimer t("Mesh::move");
 
     // TODO: parallel for
@@ -89,7 +99,7 @@ void Backend::displace_wing(const MultiTensorView2fD& transforms, MultiTensorVie
         const auto& verts_wing_init_i = verts_wing_init[i];
         const auto& transform_i = transforms[i];
 
-        blas->gemm(
+        backend->blas->gemm(
             1.0f,
             verts_wing_init_i.reshape(verts_wing_init_i.shape(0)*verts_wing_init_i.shape(1), 4),
             transform_i,
@@ -101,15 +111,24 @@ void Backend::displace_wing(const MultiTensorView2fD& transforms, MultiTensorVie
     }
 }
 
-f32 Backend::coeff_cl_multibody(const MultiTensorView3fD& aero_forces, const MultiTensorView2fD& areas, const linalg::float3& freestream, f32 rho) {
+void Backend::displace_wing(const MultiTensorView2fD& transforms, MultiTensorView3fD& verts_wing, MultiTensorView3fD& verts_wing_init) {
+    displace_wing_impl(this, transforms, verts_wing, verts_wing_init);
+}
+
+void Backend::displace_wing(const MultiTensorView2dD& transforms, MultiTensorView3dD& verts_wing, MultiTensorView3dD& verts_wing_init) {
+    displace_wing_impl(this, transforms, verts_wing, verts_wing_init);
+}
+
+template<typename T>
+T coeff_cl_multibody_impl(Backend* backend, const MultiTensorView<T, 3, Location::Device>& aero_forces, const MultiTensorView<T, 2, Location::Device>& areas, const linalg::vec<T, 3>& freestream, T rho) {
     // parallel reduce
-    f32 cl = 0.0f;
-    f32 total_area = 0.0f;
+    T cl = 0.0f;
+    T total_area = 0.0f;
     for (i64 m = 0; m < aero_forces.size(); m++) {
-        const f32 area_local = sum(areas[m]);
-        const f32 wing_cl = coeff_cl(
+        const T area_local = backend->sum(areas[m]);
+        const T wing_cl = backend->coeff_cl(
             aero_forces[m],
-            linalg::normalize(linalg::cross(freestream, {0.f, 1.f, 0.f})), // TODO: compute this from the wing frame
+            linalg::normalize(linalg::cross(freestream, {(T)0.f, (T)1.f, (T)0.f})), // TODO: compute this from the wing frame
             freestream,
             rho,
             area_local
@@ -121,22 +140,44 @@ f32 Backend::coeff_cl_multibody(const MultiTensorView3fD& aero_forces, const Mul
     return cl;
 }
 
-linalg::float3 Backend::coeff_cm_multibody(
+f32 Backend::coeff_cl_multibody(
     const MultiTensorView3fD& aero_forces,
-    const MultiTensorView3fD& verts_wing,
     const MultiTensorView2fD& areas,
-    const linalg::float3& ref_pt,
-    const linalg::float3& freestream, 
+    const linalg::float3& freestream,
     f32 rho
 )
 {
-    linalg::float3 cm = {0.0f, 0.0f, 0.0f};
-    f32 total_area = 0.0f;
-    f32 total_mac = 0.0f;
+    return coeff_cl_multibody_impl(this, aero_forces, areas, freestream, rho);
+}
+
+f64 Backend::coeff_cl_multibody(
+    const MultiTensorView3dD& aero_forces,
+    const MultiTensorView2dD& areas,
+    const linalg::double3& freestream,
+    f64 rho
+)
+{
+    return coeff_cl_multibody_impl(this, aero_forces, areas, freestream, rho);
+}
+
+template<typename T>
+linalg::vec<T, 3> coeff_cm_multibody_impl(
+    Backend* backend,
+    const MultiTensorView<T, 3, Location::Device>& aero_forces,
+    const MultiTensorView<T, 3, Location::Device>& verts_wing,
+    const MultiTensorView<T, 2, Location::Device>& areas,
+    const linalg::vec<T, 3>& ref_pt,
+    const linalg::vec<T, 3>& freestream, 
+    T rho
+)
+{
+    linalg::vec<T, 3> cm = {(T)0.0f, (T)0.0f, (T)0.0f};
+    T total_area = 0.0f;
+    T total_mac = 0.0f;
     for (i64 m = 0; m < aero_forces.size(); m++) {
-        const f32 area_local = sum(areas[m]);
-        const f32 mac_local = mesh_mac(verts_wing[m], areas[m]);
-        const auto local_cm = coeff_cm(
+        const T area_local = backend->sum(areas[m]);
+        const T mac_local = backend->mesh_mac(verts_wing[m], areas[m]);
+        const auto local_cm = backend->coeff_cm(
             aero_forces[m],
             verts_wing[m],
             ref_pt,
@@ -151,6 +192,28 @@ linalg::float3 Backend::coeff_cm_multibody(
     }
     cm /= total_area * total_mac;
     return cm;
+}
+
+linalg::float3 Backend::coeff_cm_multibody(
+    const MultiTensorView3fD& aero_forces,
+    const MultiTensorView3fD& verts_wing,
+    const MultiTensorView2fD& areas,
+    const linalg::float3& ref_pt,
+    const linalg::float3& freestream, 
+    f32 rho
+) {
+    return coeff_cm_multibody_impl(this, aero_forces, verts_wing, areas, ref_pt, freestream, rho);
+}
+
+linalg::double3 Backend::coeff_cm_multibody(
+    const MultiTensorView3dD& aero_forces,
+    const MultiTensorView3dD& verts_wing,
+    const MultiTensorView2dD& areas,
+    const linalg::double3& ref_pt,
+    const linalg::double3& freestream, 
+    f64 rho
+) {
+    return coeff_cm_multibody_impl(this, aero_forces, verts_wing, areas, ref_pt, freestream, rho);
 }
 
 void Backend::forces_unsteady_multibody(

@@ -70,7 +70,80 @@ class BackendCPU final : public Backend {
         
         f32 sum(const TensorView1fD& tensor) override;
         f32 sum(const TensorView2fD& tensor) override;
-                
+        
+        // DOUBLE PRECISION
+        void lhs_assemble(TensorView2dD& lhs, const MultiTensorView3dD& colloc, const MultiTensorView3dD& normals, const MultiTensorView3dD&  verts_wing, const MultiTensorView3dD&  verts_wake, std::vector<i32>& condition, i32 iteration) override;
+        void rhs_assemble_velocities(TensorView1dD& rhs, const MultiTensorView3dD& normals, const MultiTensorView3dD& velocities) override;
+        void rhs_assemble_wake_influence(TensorView1dD& rhs, const MultiTensorView2dD& gamma_wake, const MultiTensorView3dD& colloc, const MultiTensorView3dD& normals, const MultiTensorView3dD&  verts_wake, const std::vector<bool>& lifting, i32 iteration) override;
+        void displace_wing(const MultiTensorView2dD& transforms, MultiTensorView3dD&  verts_wing, MultiTensorView3dD& verts_wing_init);
+        void wake_shed(const MultiTensorView3dD& verts_wing, MultiTensorView3dD& verts_wake, i32 iteration);
+
+        void forces_unsteady2(
+            const TensorView3dD& verts_wing,
+            const TensorView2dD& gamma_delta, // chordwise delta
+            const TensorView2dD& dgamma_dt, // dgamma/dt
+            const TensorView3dD& velocities,
+            const TensorView2dD& areas,
+            const TensorView3dD& normals,
+            const TensorView3dD& forces
+        ) override;
+        f64 coeff_cl(
+            const TensorView3dD& forces,
+            const linalg::double3& lift_axis,
+            const linalg::double3& freestream,
+            const f64 rho,
+            const f64 area
+        ) override;
+        linalg::double3 coeff_cm(
+            const TensorView3dD& forces,
+            const TensorView3dD& verts_wing,
+            const linalg::double3& ref_pt,
+            const linalg::double3& freestream,
+            const f64 rho,
+            const f64 area,
+            const f64 mac
+        ) override;
+
+        void forces_unsteady_multibody(
+            const MultiTensorView3dD& verts_wing,
+            const MultiTensorView2dD& gamma_delta,
+            const MultiTensorView2dD& gamma,
+            const MultiTensorView2dD& gamma_prev,
+            const MultiTensorView3dD& velocities,
+            const MultiTensorView2dD& areas,
+            const MultiTensorView3dD& normals,
+            const MultiTensorView3dD& forces,
+            f64 dt
+        );
+        f64 coeff_cl_multibody(
+            const MultiTensorView3dD& aero_forces,
+            const MultiTensorView2dD& areas,
+            const linalg::double3& freestream,
+            f64 rho
+        );
+        linalg::double3 coeff_cm_multibody(
+            const MultiTensorView3dD& aero_forces,
+            const MultiTensorView3dD& verts_wing,
+            const MultiTensorView2dD& areas,
+            const linalg::double3& ref_pt,
+            const linalg::double3& freestream, 
+            f64 rho
+        );
+
+        void mesh_metrics(const f64 alpha_rad, const MultiTensorView3dD&  verts_wing, MultiTensorView3dD& colloc, MultiTensorView3dD& normals, MultiTensorView2dD& areas) override;
+        f64 mesh_mac(const TensorView3dD& verts_wing, const TensorView2dD& areas) override;
+        void gamma_wake_from_coeffs(
+            const TensorView2dD& gamma_wake,
+            const TensorView2dD& gamma_coeffs,
+            i32 harmonics,
+            f64 tn,
+            f64 omega,
+            f64 dt,
+            i64 iteration
+        ) override;
+        f64 sum(const TensorView1dD& tensor) override;
+        f64 sum(const TensorView2dD& tensor) override;
+
         std::unique_ptr<Memory> create_memory_manager() override;
         // std::unique_ptr<Kernels> create_kernels() override;
         std::unique_ptr<LU> create_lu_solver() override;

@@ -37,7 +37,7 @@ struct UVLM_2DOF_Vars {
     f32 U_a; // reduced freestream velocity
 };
 
-inline linalg::float4x4 dual_to_float(const KinematicMatrixDual& m) {
+inline linalg::float4x4 dual_to_float(const KinematicMatrixDual<f32>& m) {
     return {
         {m.x.x.val(), m.x.y.val(), m.x.z.val(), m.x.w.val()},
         {m.y.x.val(), m.y.y.val(), m.y.z.val(), m.y.w.val()},
@@ -50,7 +50,7 @@ constexpr i32 DOF = 2;
 
 class UVLM_2DOF final: public Simulation {
     public:
-        UVLM_2DOF(const std::string& backend_name, const Assembly& assembly);
+        UVLM_2DOF(const std::string& backend_name, const Assembly<f32>& assembly);
         ~UVLM_2DOF() = default;
         void run(const UVLM_2DOF_Vars& vars, f32 t_final);
 
@@ -113,7 +113,7 @@ class UVLM_2DOF final: public Simulation {
         Tensor1fH dF_h{backend->memory.get()}; // dof
 
         NewmarkBeta integrator{backend.get()};
-        Assembly m_assembly;
+        Assembly<f32> m_assembly;
     private:
         void alloc_buffers();
         void update_wake_and_gamma(i64 iteration);
@@ -123,7 +123,7 @@ class UVLM_2DOF final: public Simulation {
         f32 wing_h(f32 elastic_dst); // get wing elastic height at given dist
 };
 
-UVLM_2DOF::UVLM_2DOF(const std::string& backend_name,const Assembly& assembly) : Simulation(backend_name, assembly.mesh_filenames()), m_assembly(assembly) {
+UVLM_2DOF::UVLM_2DOF(const std::string& backend_name,const Assembly<f32>& assembly) : Simulation(backend_name, assembly.mesh_filenames()), m_assembly(assembly) {
     solver = backend->create_lu_solver();
     accel_solver = backend->create_lu_solver();
     alloc_buffers();
@@ -312,13 +312,13 @@ void UVLM_2DOF::update_wake_and_gamma(i64 iteration) {
     }
 }
 
-inline linalg::float3 linear_velocity(const KinematicMatrixDual& transform_dual, const linalg::float3 vertex) {
+inline linalg::float3 linear_velocity(const KinematicMatrixDual<f32>& transform_dual, const linalg::float3 vertex) {
     linalg::vec<fwd::Float, 4> new_pt = linalg::mul(transform_dual, {vertex.x, vertex.y, vertex.z, 1.0f});
     return {new_pt.x.grad(), new_pt.y.grad(), new_pt.z.grad()};
 }
 
 inline void wing_velocities(
-    const KinematicMatrixDual& transform_dual,
+    const KinematicMatrixDual<f32>& transform_dual,
     const TensorView3fH& colloc_h,
     const TensorView3fH& velocities_h,
     const TensorView3fD& velocities_d
@@ -661,14 +661,14 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
             a_d.view().slice(All, i+1).to(a_h.view().slice(All, i+1));
 
             // Returns dimensionalized values
-            const KinematicNode heave([&](const fwd::Float& t) {
+            const KinematicNode<f32> heave([&](const fwd::Float& t) {
                 return translation_matrix<fwd::Float>({
                     0.0f,
                     0.0f,
                     - u_h.view()(0, i+1) - v_h.view()(0, i+1) * t
                 });
             });
-            const KinematicNode pitch([&](const fwd::Float& t) {
+            const KinematicNode<f32> pitch([&](const fwd::Float& t) {
                 return rotation_matrix<fwd::Float>(
                     {
                         1.f + vars.a_h,
@@ -886,9 +886,9 @@ int main(int argc, char **argv) {
     vars.mu = 100.0f;
     vars.r_a = 0.5f;
     // vars.U_a = flutter_ratio * flutter_speed;
-    vars.U_a = 5.0f;
+    vars.U_a = 2.0f;
 
-    KinematicsTree kinematics_tree;
+    KinematicsTree<f32> kinematics_tree;
 
     #ifdef COUPLED
     std::cout << "COUPLED SIMULATION\n";

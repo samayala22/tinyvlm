@@ -2,7 +2,9 @@
 #include <string>
 #include <functional> // std::function
 #include <fstream>
-#include <filesystem>
+
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
 
 #include "tinycombination.hpp"
 #include "tinyad.hpp"
@@ -20,7 +22,7 @@
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
-namespace fs = std::filesystem;
+namespace nb = nanobind;
 
 // Delete this ASAP
 #define TRY_CATCH_VOID_CALL(expr) \
@@ -34,13 +36,34 @@ namespace fs = std::filesystem;
         std::exit(1); \
     }
 
-#define EXTERNAL_KINEMATICS 1
+// TODO: move this somewhere else
+inline i64 total_panels(const MultiDim<2>& assembly_wing) {
+    i64 total = 0;
+    for (const auto& wing : assembly_wing) {
+        total += wing[0] * wing[1];
+    }
+    return total;
+}
+
+void build_scaled_fourier_series(TensorView1dH& factors, f64 omega, f64 t) {
+    TINY_ASSERT_EQ(factors.shape(0) % 2, 1);
+    i64 harmonics = (factors.shape(0)-1) / 2;
+    const f64 coeff_scaling0 = 1.f / std::sqrt(static_cast<f64>(factors.shape(0)));
+    const f64 coeff_scaling = std::sqrt(2.f / static_cast<f64>(factors.shape(0)));
+    factors(0) = coeff_scaling0;
+    for (i64 i = 0; i < harmonics; i++) {
+        const f64 k = (f64)(i+1);
+        factors(2*i+1) = std::cos(omega * t * k) * coeff_scaling;
+        factors(2*i+2) = std::sin(omega * t * k) * coeff_scaling;
+    }
+}
 
 class HBVLM {
     public:
-        HBVLM(const std::string& backend_name, const Assembly<f64>& assembly, const i32 harmonics);
+        HBVLM(const std::string& backend_name, const std::string& filename);
         ~HBVLM() = default;
-        void run(f64 t_final, f64 omega, f64 vars_b, bool read_gamma=false, bool write_gamma=false);
+        void init(i32 harmonics, f64 scaling);
+        void run(f64 t_final, f64 omega, f64 vars_b, const Assembly<f64>& assembly, const nb::ndarray<double, nb::ndim<2>>& forces_t);
 
         std::unique_ptr<Backend> backend;
         MultiDim<2> assembly_wings;
@@ -73,9 +96,6 @@ class HBVLM {
         Tensor2dD ddft_d{backend->memory.get()};
         std::vector<MultiTensor2dD> gamma_wake; // TODO: change this to something better
         MultiTensor3dD aero_forces{backend->memory.get()}; // ns*nc*3
-        Tensor2dH coeffs_h{backend->memory.get()}; // 2 x coeffs
-        Tensor2dD coeffs_d{backend->memory.get()}; // 2 x coeffs
-        Tensor2dD coeffs_c_d{backend->memory.get()}; // 2 x coeffs
         MultiTensor3dD velocities{backend->memory.get()}; // ns*nc*3
         MultiTensor3dH velocities_h{backend->memory.get()}; // ns*nc*3
 
@@ -85,7 +105,6 @@ class HBVLM {
         std::unique_ptr<LU> solver;
 
         std::vector<i32> condition0;
-        Assembly<f64> m_assembly;
         i32 m_harmonics;
         i32 m_coeffs;
 
@@ -93,16 +112,8 @@ class HBVLM {
         void alloc_buffers();
 };
 
-HBVLM::HBVLM(
-    const std::string& backend_name,
-    const Assembly<f64>& assembly,
-    const i32 harmonics) : 
-    backend(create_backend(backend_name)),
-    m_assembly(assembly),
-    m_harmonics(harmonics),
-    m_coeffs(2*harmonics+1)
-{
-    const std::vector<std::string>& meshes = assembly.mesh_filenames();
+HBVLM::HBVLM(const std::string& backend_name, const std::string& filename) : backend(create_backend(backend_name)) {
+    const std::vector<std::string> meshes = {filename};
     // Read the sizes of all the meshes
     for (const auto& m_name : meshes) {
         const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
@@ -132,28 +143,17 @@ HBVLM::HBVLM(
     }
 
     solver = backend->create_lu_solver();
+}
+
+void HBVLM::init(i32 harmonics, f64 scaling) {
+    m_harmonics = harmonics;
+    m_coeffs = 2*harmonics+1;
     alloc_buffers();
-}
 
-// TODO: move this somewhere else
-inline i64 total_panels(const MultiDim<2>& assembly_wing) {
-    i64 total = 0;
-    for (const auto& wing : assembly_wing) {
-        total += wing[0] * wing[1];
-    }
-    return total;
-}
-
-void build_scaled_fourier_series(TensorView1dH& factors, f64 omega, f64 t) {
-    TINY_ASSERT_EQ(factors.shape(0) % 2, 1);
-    i64 harmonics = (factors.shape(0)-1) / 2;
-    const f64 coeff_scaling0 = 1.f / std::sqrt(static_cast<f64>(factors.shape(0)));
-    const f64 coeff_scaling = std::sqrt(2.f / static_cast<f64>(factors.shape(0)));
-    factors(0) = coeff_scaling0;
-    for (i64 i = 0; i < harmonics; i++) {
-        const f64 k = (f64)(i+1);
-        factors(2*i+1) = std::cos(omega * t * k) * coeff_scaling;
-        factors(2*i+2) = std::sin(omega * t * k) * coeff_scaling;
+    for (const auto& [vwing_init_h, vwing_init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
+        // Nondimensionalize the coordinates
+        backend->blas->scal(scaling, vwing_init_d.slice(All, All, Range{0, 3}).reshape(3*vwing_init_d.shape(0)*vwing_init_d.shape(1)));
+        vwing_init_d.to(vwing_init_h);
     }
 }
 
@@ -192,9 +192,6 @@ void HBVLM::alloc_buffers() {
     dft_h.init({unknowns, unknowns});
     ddft_d.init({unknowns, unknowns});
     ddft_h.init({unknowns, unknowns});
-    coeffs_h.init({2, unknowns});
-    coeffs_d.init({2, unknowns});
-    coeffs_c_d.init({2, unknowns});
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
     aero_forces.init(panels_3D);
@@ -331,26 +328,31 @@ void anderson_acceleration(
     }
     x_curr.to(x0);
 
-    std::printf("Anderson fixed point converged in %d iterations\n", k);
+    if (k == max_iter) {
+        std::printf("Anderson method failed to converge");
+    } else {
+        // std::printf("Anderson fixed point converged in %d iterations\n", k);
+    }
 }
 
-void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_gamma) {
-    const tiny::ScopedTimer timer("HBVLM::run");
+void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembly, const nb::ndarray<double, nb::ndim<2>>& forces_t) {
+    // const tiny::ScopedTimer timer("HBVLM::run");
+    bool read_gamma = false;
+    bool write_gamma = false;
+
     const f64 period = 2.0f * PI_f / omega;
     const f64 period_interval = period / (f64)m_coeffs;
     const f64 rho = 1.0f; // TODO: take this as input
 
-    for (const auto& [vwing, vwing_init_d, vwing_init_h] : zip(verts_wing.views(), verts_wing_init.views(), verts_wing_init_h.views())) {
-        // Nondimensionalize the coordinates
-        backend->blas->scal(1.0f / vars_b, vwing_init_d.slice(All, All, Range{0, 3}).reshape(3*vwing_init_d.shape(0)*vwing_init_d.shape(1)));
-        vwing_init_d.to(vwing_init_h);
-        vwing_init_d.to(vwing);
+    for (const auto& [vwing_d, vwing_h, vwing_init_d] : zip(verts_wing.views(), verts_wing_h.views(), verts_wing_init.views())) {
+        vwing_init_d.to(vwing_d);
+        vwing_d.to(vwing_h);
     }
     backend->mesh_metrics(0.0f, verts_wing.views(), colloc_d.views(), normals_d.views(), areas_d.views());
     for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
 
     // Compute the fixed time step
-    const auto& verts_first_wing = verts_wing_init_h.views()[0];
+    const auto& verts_first_wing = verts_wing_h.views()[0];
     const f64 dx = verts_first_wing(0, -1, 0) - verts_first_wing(0, -2, 0);
     const f64 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
     const f64 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
@@ -358,7 +360,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
     // const f64 dt = last_panel_chord; // ideal chord
     TINY_ASSERT_GT(period_interval, last_panel_chord); // TODO: check what happens if this is not the case
     const f64 dt = period_interval / std::ceil(period_interval / last_panel_chord); // period interval must be a multiple of dt
-    std::printf("period_interval: %f | chord: %f | dt: %f\n", period_interval, last_panel_chord, dt);
+    // std::printf("period_interval: %f | chord: %f | dt: %f\n", period_interval, last_panel_chord, dt);
 
     const i64 max_t_steps = static_cast<i64>((t_start+period+dt) / dt);
 
@@ -385,7 +387,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
 
         // parallel for
         for (i64 m = 0; m < assembly_wings.size(); m++) {
-            auto transform = m_assembly.surface_kinematics()[m]->transform(t);
+            auto transform = assembly.surface_kinematics()[m]->transform(t);
             transform.store(transforms_h.views()[m].ptr(), transforms_h.views()[m].stride(1));
             transforms_h.views()[m].to(transforms.views()[m]);
         }
@@ -447,7 +449,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
             const f64 t = (f64)t_steps * dt; // t_final rounded to nearest dt
 
             for (i64 m = 0; m < assembly_wings.size(); m++) {
-                auto transform = m_assembly.surface_kinematics()[m]->transform(t);
+                auto transform = assembly.surface_kinematics()[m]->transform(t);
                 transform.store(transforms_h.views()[m].ptr(), transforms_h.views()[m].stride(1));
                 transforms_h.views()[m].to(transforms.views()[m]);
             }
@@ -457,7 +459,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
 
             // parallel for
             for (i64 m = 0; m < assembly_wings.size(); m++) {
-                const auto transform_node = m_assembly.surface_kinematics()[m];
+                const auto transform_node = assembly.surface_kinematics()[m];
                 const auto& colloc_h_m = colloc_h.views()[m];
                 const auto& velocities_h_m = velocities_h.views()[m];
                 const auto& velocities_m = velocities.views()[m];
@@ -477,7 +479,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
             auto rhs_s = rhs.view().slice(All, s);
             backend->rhs_assemble_velocities(rhs_s, normals_d.views(), velocities.views());
             backend->gamma_wake_from_coeffs(gamma_wake[s].views()[0], te_gamma, m_harmonics, t, omega, dt, t_steps);
-            backend->rhs_assemble_wake_influence(rhs_s, gamma_wake[s].views(), colloc_d.views(), normals_d.views(), verts_wake.views(), m_assembly.lifting(), (i32)t_steps);
+            backend->rhs_assemble_wake_influence(rhs_s, gamma_wake[s].views(), colloc_d.views(), normals_d.views(), verts_wake.views(), assembly.lifting(), (i32)t_steps);
         } // unknowns for loop
 
         // Apply the the dft matrix to the rhs
@@ -507,7 +509,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
         gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)),
         hb_vlm_iter,
         100, // max iterations
-        1e-6, // tolerance
+        1e-8, // tolerance
         5 // history
     );
 
@@ -529,7 +531,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
             const f64 t = (f64)t_steps * dt; // t_final rounded to nearest dt
 
             for (i64 m = 0; m < assembly_wings.size(); m++) {
-                auto transform = m_assembly.surface_kinematics()[m]->transform(t);
+                auto transform = assembly.surface_kinematics()[m]->transform(t);
                 transform.store(transforms_h.views()[m].ptr(), transforms_h.views()[m].stride(1));
                 transforms_h.views()[m].to(transforms.views()[m]);
             }
@@ -539,7 +541,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
 
             // TODO: move this into its own standalone function
             for (i64 m = 0; m < assembly_wings.size(); m++) {
-                const auto transform_node = m_assembly.surface_kinematics()[m];
+                const auto transform_node = assembly.surface_kinematics()[m];
                 const auto& colloc_h_m = colloc_h.views()[m];
                 const auto& velocities_h_m = velocities_h.views()[m];
                 const auto& velocities_m = velocities.views()[m];
@@ -555,7 +557,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
                 }
                 velocities_h_m.to(velocities_m);
             }
-            const linalg::double3 freestream = -m_assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
+            const linalg::double3 freestream = -assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
 
             auto gamma_wing_s = gamma_wing.view().slice(All, s).reshape(c_ns, c_nc);
             auto dgamma_wing_dt_s = dgamma_wing_dt.view().slice(All, s).reshape(c_ns, c_nc);
@@ -574,16 +576,16 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
                 normals_d.views()[0],
                 aero_forces.views()[0]
             ); 
-            coeffs_h.view()(0, s) = backend->coeff_cl_multibody(
+            forces_t(0, s) = backend->coeff_cl_multibody(
                 aero_forces.views(),
                 areas_d.views(),
                 freestream,
                 rho
             );
-            const auto transform_node0 = m_assembly.surface_kinematics()[0];
+            const auto transform_node0 = assembly.surface_kinematics()[0];
             const auto transform_mat = transform_node0->transform(t);
             auto ref_pt = linalg::mul(transform_mat, {0.5f, 0.0f, 0.0f, 1.0f});
-            coeffs_h.view()(1, s) = backend->coeff_cm_multibody(
+            forces_t(1, s) = backend->coeff_cm_multibody(
                 aero_forces.views(),
                 verts_wing.views(),
                 areas_d.views(),
@@ -592,166 +594,70 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, bool read_gamma, bool write_
                 rho
             ).y;
         }
-        coeffs_h.view().to(coeffs_d.view());
-        {
-            npy::npy_data_ptr<f64> bin_tdata;
-            bin_tdata.data_ptr = coeffs_h.ptr();
-            bin_tdata.shape = {(npy::ndarray_len_t)coeffs_h.view().shape(0), (npy::ndarray_len_t)coeffs_h.view().shape(1)};
-            bin_tdata.fortran_order = true;
-            npy::write_npy("hbvlm_t.npy", bin_tdata);
-        }
     }
-
-    #ifndef EXTERNAL_KINEMATICS
-    {
-        backend->blas->gemm(1.0f, coeffs_d.view(), dft_d.view(), 0.0f, coeffs_c_d.view());
-        coeffs_c_d.view().to(coeffs_h.view());
-
-        npy::npy_data_ptr<f64> bin_data;
-        bin_data.data_ptr = coeffs_h.ptr();
-        bin_data.shape = {(npy::ndarray_len_t)coeffs_h.view().shape(0), (npy::ndarray_len_t)coeffs_h.view().shape(1)};
-        bin_data.fortran_order = true;
-        npy::write_npy("hbvlm.npy", bin_data);
-    }
-
-    // Compute time domain solution from the obtained fourier coeffs
-    {
-        auto& gamma_coeffs_hv = gamma_coeffs_h.view();
-        auto coeffs_cl_v = coeffs_h.view().slice(0, All);
-        auto coeffs_cm_v = coeffs_h.view().slice(1, All);
-        gamma_coeffs.view().to(gamma_coeffs_hv);
-        std::ofstream hb_data("hbvlm_data_" + backend->name + ".txt");
-
-        const i32 unknowns = 2 * m_harmonics + 1;
-        const f64 sqrt_unknowns = 1.f / std::sqrt(static_cast<f64>(unknowns));
-        const f64 sqrt_unknowns_2 = std::sqrt(2.f / static_cast<f64>(unknowns));
-
-        for (i64 i = 0; i < max_t_steps; i++) {
-            const f64 t = (f64)i * dt;
-            f64 gamma = gamma_coeffs_hv(0,0) * sqrt_unknowns;
-            f64 cl = coeffs_cl_v(0) * sqrt_unknowns;
-            f64 cm = coeffs_cm_v(0) * sqrt_unknowns;
-            f64 dgamma = 0.f;
-            for (i64 j = 0; j < m_harmonics; j++) {
-                const f64 k = (f64)(j+1);
-                const f64 c = std::cos(omega * t * k) * sqrt_unknowns_2;
-                const f64 s = std::sin(omega * t * k) * sqrt_unknowns_2;
-                gamma += gamma_coeffs_hv(0, 2*j+1) * c;
-                gamma += gamma_coeffs_hv(0, 2*j+2) * s;
-                dgamma += - gamma_coeffs_hv(0, 2*j+1) * omega * k * s;
-                dgamma += gamma_coeffs_hv(0, 2*j+2) * omega * k * c;
-                cl += coeffs_cl_v(2*j+1) * c;
-                cl += coeffs_cl_v(2*j+2) * s;
-                cm += coeffs_cm_v(2*j+1) * c;
-                cm += coeffs_cm_v(2*j+2) * s;
-            }
-            hb_data << t << " " << gamma << " " << cl << " " << cm << " " << dgamma << "\n";
-        }
-    }
-    #endif
 }
 
-int main(int argc, char** argv) {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_20x1.x"};
-    // const std::vector<std::string> backends = get_available_backends();
-    const std::vector<std::string> backends = {"cpu"};
+// GLOBALS
+std::string g_backend = "cpu";
+std::string g_mesh_name = "./mesh/infinite_rectangular_20x1.x";
+HBVLM g_hbvlm(g_backend, g_mesh_name);
 
-    auto solvers = tiny::make_combination(meshes, backends);
- 
+void hbvlm_init(i32 harmonics, f64 scaling) {
+    g_hbvlm.init(harmonics, scaling);
+}
+
+void hbvlm_run(f64 omega, const nb::ndarray<double, nb::ndim<2>>& dyn_f, const nb::ndarray<double, nb::ndim<2>>& force_t) {
     // Geometry
     const f64 b = 0.5f; // half chord
-
-    #ifndef EXTERNAL_KINEMATICS
-    // Define simulation length
-    const f64 cycles = 9.0f;
-    const f64 u_inf = 1.0f; // freestream velocity
-    // const f64 k = 0.25f; // reduced frequency
-    // const f64 omega = k * u_inf / b;
-    const f64 omega = 0.145;
-    const i32 H = 15;
-    const f64 t_final = cycles * 2.0f * PI_f / omega;
-    // Periodic pitching
-    // const f64 amplitude = to_radians(3.f); // amplitude in radians
-    const f64 amplitude = 0.05f;
-    KinematicsTree kinematics_tree;
-    auto fs = kinematics_tree.add([=](const fwd::Double& t) {
-        return translation_matrix<fwd::Double>({-u_inf * t, 0.f, 0.f});
-    });
-    auto heave = kinematics_tree.add([=](const fwd::Double& t) {
-        return translation_matrix<fwd::Double>({0.f, 0.f, 0.0f * t});
-    })->after(fs);
-    auto pitch = kinematics_tree.add([=](const fwd::Double& t) {
-        fwd::Double alpha = amplitude * fwd::sin(omega * t);
-        return rotation_matrix<fwd::Double>(
-            {0.5f, 0.0f, 0.0f},
-            {0.0f, 1.0f, 0.0f},
-            alpha
-        );
-    })->after(heave);
-    #else
-    if (argc != 5) { // hbvlm <omega> <harmonics>
-        return 1;
-    }
     const f64 cycles = 3.0f;
     const f64 u_inf = 1.0f; // freestream velocity
-    const f64 omega = std::stof(argv[1]);
-    const i32 H = std::stoi(argv[2]); 
-    const bool read_gamma = (bool)std::stoi(argv[3]);
-    const bool write_gamma = (bool)std::stoi(argv[4]);
-    // const bool read_gamma = false;
-    // const bool write_gamma = false;
     const f64 t_final = cycles * 2.0f * PI_f / omega;
     const f64 a_h = -0.5f;
+    const i32 H = g_hbvlm.m_harmonics;
+    // std::printf("t_final: %f, omega: %.8f, harmonics: %i\n", t_final, omega, g_hbvlm.m_harmonics);
 
-    std::printf("t_final: %f, omega: %.8f, harmonics: %i, read_gamma: %s, write_gamma %s\n", t_final, omega, H, read_gamma ? "true" : "false", write_gamma ? "true" : "false");
-
-    fs::path npy_path = fs::path(R"(C:\Users\samay\Documents\GitHub\tinyvlm\build\windows\x64\release\kin_coeffs.npy)");
-    if (!fs::exists(npy_path)) {
-        std::cerr << "File not found: " << npy_path << std::endl;
-        return 1;
-    }
-    npy::npy_data kin_coeffs_npy = npy::read_npy<f64>(npy_path.string());
-    TINY_ASSERT_EQ(kin_coeffs_npy.fortran_order, true);
-    TINY_ASSERT_EQ(kin_coeffs_npy.shape[0], (npy::ndarray_len_t)(2));
-    TINY_ASSERT_EQ(kin_coeffs_npy.shape[1], (npy::ndarray_len_t)(2*H+1));
-
-    f64* h_ptr = kin_coeffs_npy.data.data();
-    f64* alpha_ptr = h_ptr + 1;
-    i32 ld = 2;
-
+    TINY_ASSERT_EQ(dyn_f.shape(0), 2);
+    TINY_ASSERT_EQ(dyn_f.shape(1), 2 * H + 1);
+    TINY_ASSERT_EQ(force_t.shape(0), 2);
+    TINY_ASSERT_EQ(force_t.shape(1), 2 * H + 1);
+    
     KinematicsTree<f64> kinematics_tree;
     auto fs = kinematics_tree.add([=](const fwd::Double& t) {
         return translation_matrix<fwd::Double>({-u_inf * t, 0.f, 0.f});
     });
     auto heave = kinematics_tree.add([=](const fwd::Double& t) {
-        fwd::Double z = (f64)h_ptr[0];
+        fwd::Double z = dyn_f(0, 0);
         for (i32 h = 0; h < H; h++) {
             f64 k = (f64)(h+1);
-            z += fwd::cos(omega * t * k) * (f64)h_ptr[(2*h+1)*ld];
-            z += fwd::sin(omega * t * k) * (f64)h_ptr[(2*h+2)*ld];
+            z += fwd::cos(omega * t * k) * dyn_f(0, 2*h+1);
+            z += fwd::sin(omega * t * k) * dyn_f(0, 2*h+2);
         }
         return translation_matrix<fwd::Double>({0.f, 0.f, -z});
     })->after(fs);
     auto pitch = kinematics_tree.add([=](const fwd::Double& t) {
-        fwd::Double alpha = (f64)alpha_ptr[0];
+        fwd::Double alpha = dyn_f(1, 0);
         for (i32 h = 0; h < H; h++) {
             f64 k = (f64)(h+1);
-            alpha += fwd::cos(omega * t * k) * (f64)alpha_ptr[(2*h+1)*ld];
-            alpha += fwd::sin(omega * t * k) * (f64)alpha_ptr[(2*h+2)*ld];
+            alpha += fwd::cos(omega * t * k) * dyn_f(1, 2*h+1);
+            alpha += fwd::sin(omega * t * k) * dyn_f(1, 2*h+2);
         }
 
         return rotation_matrix<fwd::Double>(
             {1.f + a_h, 0.0f, 0.0f},
             {0.0f, 1.0f, 0.0f}, 
             alpha);
-    })->after(heave);  
-    #endif
+    })->after(heave);
  
-    for (const auto& [mesh_name, backend_name] : solvers) {
-        Assembly<f64> assembly(fs);
-        assembly.add(mesh_name, pitch);
-        HBVLM simulation{backend_name, assembly, H};
-        simulation.run(t_final, omega, b, read_gamma, write_gamma);
-    }
-    return 0;
+    Assembly<f64> assembly(fs);
+    assembly.add(g_mesh_name, pitch);
+    g_hbvlm.run(t_final, omega, b, assembly, force_t);
+}
+
+NB_MODULE(libhbvlm, m) {
+    m.def("hbvlm_init", &hbvlm_init);
+    m.def("hbvlm_run", &hbvlm_run,
+          nb::arg("omega"),
+          nb::arg("dyn_f").noconvert(),
+          nb::arg("force_t").noconvert()
+    );
 }

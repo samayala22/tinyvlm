@@ -14,13 +14,15 @@ package("openblas_custom")
     else
         add_urls("https://github.com/OpenMathLib/OpenBLAS/releases/download/v$(version)/OpenBLAS-$(version).tar.gz")
         add_versions("0.3.26", "4e6e4f5cb14c209262e33e6816d70221a2fe49eb69eaf0a06f065598ac602c68")
+        add_versions("0.3.29", "38240eee1b29e2bde47ebb5d61160207dc68668a54cac62c076bb5032013b1eb")
     end
 
     add_configs("shared", {description = "Build shared library.", default = true, type = "boolean", readonly = is_plat("windows")})
     add_configs("lapack", {description = "Build LAPACK", default = true, type = "boolean", readonly = is_plat("windows")})
     add_configs("dynamic_arch", {description = "Enable dynamic arch dispatch", default = (is_plat("linux") or is_plat("windows")), type = "boolean", readonly = not is_plat("linux")})
     add_configs("openmp", {description = "Compile with OpenMP enabled", default = (is_plat("windows") or is_plat("linux")), type = "boolean", readonly = not is_plat("linux")})
-    
+    add_configs("integer", {description = "Index type", default = 32, type = "number", values = {32, 64}})
+
     if not is_plat("windows") then
         add_deps("cmake")
     end
@@ -49,6 +51,9 @@ package("openblas_custom")
         table.insert(configs, "-DBUILD_SHARED_LIBS=" .. (package:config("shared") and "ON" or "OFF"))
         table.insert(configs, "-DDYNAMIC_ARCH=" .. (package:config("dynamic_arch") and "ON" or "OFF"))
         table.insert(configs, "-DUSE_OPENMP=" .. (package:config("openmp") and "ON" or "OFF"))
+        if package:config("integer") == 64 then
+            table.insert(configs, "-DINTERFACE64=1")
+        end
         if package:is_plat("macosx") and package:is_arch("arm64") then
             table.insert(configs, "-DTARGET=VORTEX") 
             table.insert(configs, "-DBINARY=64")
