@@ -279,11 +279,10 @@ def extended_residual_jacobian(X, X_ref, z_ref, residual_func, Dscale, parametri
     Jext[-2, -2:] = 0.0
 
     # Parametrisation
-    match parametrisation:
-        case Parametrisation.Local:
-            Jext[-1, :] = z_ref
-        case Parametrisation.ArcLength:
-            Jext[-1, :] = 2 * (X - X_ref)
+    if parametrisation == Parametrisation.Local:
+        Jext[-1, :] = z_ref
+    elif parametrisation == Parametrisation.ArcLength:
+        Jext[-1, :] = 2 * (X - X_ref)
 
     # Scaling
     Jext[:-1, :] = Jext[:-1, :] @ np.diag(Dscale)
