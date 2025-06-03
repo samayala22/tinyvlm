@@ -203,11 +203,10 @@ def extended_residual(
         orthogonality += k * (np.dot(X_mat_ref[:, 2*k], X_mat[:, 2*k-1]) - np.dot(X_mat_ref[:, 2*k-1], X_mat[:, 2*k]))
     ext_res[-2] = orthogonality
 
-    match parametrisation:
-        case Parametrisation.Local:
-            ext_res[-1] = np.dot(z_ref, X - X_ref)
-        case Parametrisation.ArcLength:
-            ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
+    if parametrisation == Parametrisation.Local:
+        ext_res[-1] = np.dot(z_ref, X - X_ref)
+    elif parametrisation == Parametrisation.ArcLength:
+        ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
 
     return ext_res
 
@@ -255,11 +254,10 @@ def extended_residual_jacobian_hybrid(X, X_ref, z_ref, residual_func, Dscale, pa
     Jext[-2, -2:] = 0.0
 
     # Parametrisation
-    match parametrisation:
-        case Parametrisation.Local:
-            Jext[-1, :] = z_ref
-        case Parametrisation.ArcLength:
-            Jext[-1, :] = 2 * (X - X_ref)
+    if parametrisation == Parametrisation.Local:
+        Jext[-1, :] = z_ref
+    elif parametrisation == Parametrisation.ArcLength:
+        Jext[-1, :] = 2 * (X - X_ref)
 
     # Scaling
     Jext[:-1, :] = Jext[:-1, :] @ np.diag(Dscale)
