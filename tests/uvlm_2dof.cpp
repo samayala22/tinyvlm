@@ -886,7 +886,7 @@ int main(int argc, char **argv) {
     vars.mu = 100.0f;
     vars.r_a = 0.5f;
     // vars.U_a = flutter_ratio * flutter_speed;
-    vars.U_a = 2.0f;
+    vars.U_a = 7.0f;
 
     KinematicsTree<f32> kinematics_tree;
 

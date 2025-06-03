@@ -391,7 +391,7 @@ if __name__ == "__main__":
 
         # Dimensionless parameters
         dt_nd = 0.2
-        t_final_nd = 2000.0
+        t_final_nd = 1000.0
 
         y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
         system = create_monolithic_system(y0, ndv, torsional_func)

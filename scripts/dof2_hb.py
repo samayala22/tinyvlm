@@ -1,6 +1,11 @@
 import sys
 
-sys.path.append(r"C:\Users\samay\Documents\GitHub\tinyvlm\build\windows\x64\release")
+if sys.platform == "win32":
+    sys.path.append(r".\\build\\windows\\x64\\release")
+elif sys.platform == "linux":
+    sys.path.append(r"./build/linux/x86_64/release")
+else:
+    exit()
 
 import numpy as np
 import autograd
@@ -518,7 +523,7 @@ if __name__ == "__main__":
         torsional_func = dof2.alpha_linear
 
     # Independent params
-    H = 5
+    H = 3
     vars_b = 0.5 # half chord
     n_dofs = 2
     n_coeffs = 2*H+1
@@ -535,8 +540,8 @@ if __name__ == "__main__":
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = 5.0
-    param_end = 6.0
+    param_start = 2.0
+    param_end = 7.0
     # Time integration
     t_final = 2000.0
     dt = 0.2
@@ -582,13 +587,14 @@ if __name__ == "__main__":
     if getenv("PLOT"):
         X_mat = np.load("build/continuation.npy")
         if X_mat.shape[1] == 1:
-            hb_sol_t, hb_sol0 = hb_timedomain(0.0, 1000.0, dt, n_dofs, X_mat[:-2, 0], X_mat[-2, 0], H)
+            hb_sol_t, hb_sol0 = hb_timedomain(0.0, t_final, dt, n_dofs, X_mat[:-2, 0], X_mat[-2, 0], H)
             fig = plot.create_dofs_figure(["Heave", "Pitch"])
-            dof2.plot_uvlm(fig)
-            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[0, :], "HB-VLM", 1, 1, 1)
-            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[1, :], "HB-VLM", 3, 1, 1)
-            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[2, :], "HB-VLM", 1, 2, 1)
-            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 3, 2, 1)
+            # dof2.plot_uvlm(fig)
+            dof2.plot_monolithic(fig, sol)
+            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[0, :], "HB-VLM", 1, 1, 3)
+            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[1, :], "HB-VLM", 3, 1, 3)
+            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[2, :], "HB-VLM", 1, 2, 3)
+            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 3, 2, 3)
             
             param_str = f"{X_mat[-1, 0]:.1f}".replace('.', '_')
             plot.fig_save(fig, f"build/hbvlm/hbvlm0_{param_str}")
