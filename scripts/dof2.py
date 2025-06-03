@@ -105,54 +105,64 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
     psi2 = 0.335
     eps1 = 0.0455
     eps2 = 0.3
+
+    M1 = np.zeros((6,6))
+    M2 = np.zeros((6,6))
+
+    M2[0, 0] = 1
+    M2[1, 1] = 1
+    M2[2, 2] = 1 + 1/ndv.mu
+    M2[2, 3] = ndv.x_a - ndv.a_h/ndv.mu
+    M2[3, 2] = ndv.x_a / (ndv.r_a**2) - ndv.a_h/(ndv.mu*ndv.r_a**2)
+    M2[3, 3] = 1.0 + (2/(ndv.mu*ndv.r_a**2))*((ndv.a_h**2)/2 + 1/16)
+    M2[4, 2] = -1
+    M2[4, 3] = - (0.5 - ndv.a_h)
+    M2[4, 4] = 1
+    M2[5, 2] = -1
+    M2[5, 3] = - (0.5 - ndv.a_h)
+    M2[5, 5] = 1
+
+    f0 = 0.5 - ndv.a_h
+    f1 = - 1 / (np.pi * ndv.mu)
+    f2 = 2*np.pi
+    f3 = 2 / (np.pi * ndv.mu * ndv.r_a**2)
+    f4 = np.pi * (0.5 + ndv.a_h)
+
+    M1[0, 2] = 1
+    M1[1, 3] = 1
+    M1[2, 0] = - (ndv.omega/ndv.U)**2
+    M1[2, 1] = - 2 / ndv.mu
+    M1[2, 2] = - 2.0*ndv.zeta_h*(ndv.omega/ndv.U) - 2 / ndv.mu
+    M1[2, 3] = - (1/(np.pi*ndv.mu)) * (np.pi + 2*np.pi*(0.5 - ndv.a_h))
+    M1[2, 4] = (2 / ndv.mu) * psi1
+    M1[2, 5] = (2 / ndv.mu) * psi2
+    M1[3, 1] = - 1/(ndv.U**2) + f3*f4
+    # M1[3, 1] = f3*f4
+    M1[3, 2] = f3*f4
+    M1[3, 3] = - 2.0*ndv.zeta_a/ndv.U + f3*f4*f0 - f3*0.5*np.pi*f0
+    M1[3, 4] = - psi1*f3*f4
+    M1[3, 5] = - psi2*f3*f4
+    M1[4, 3] = 1
+    M1[4, 4] = -eps1
+    M1[5, 3] = 1
+    M1[5, 5] = -eps2
+
+    A = np.linalg.solve(M2, M1)
+    eigvalues, eigvectors = np.linalg.eig(A)
+
+    # linear stiffness moved to V
+    M1[2, 0] = 0.0
+    M1[3, 1] = f3*f4
+
     def monolithic_system(t, y: np.ndarray):
         # Yung p212
         """
         system unknowns:
         q = [h, a, hd, ad, x1, x2]
         """
-        M1 = np.zeros((6,6))
-        M2 = np.zeros((6,6))
-        V = np.zeros(6)
-
-        M2[0, 0] = 1
-        M2[1, 1] = 1
-        M2[2, 2] = 1 + 1/ndv.mu
-        M2[2, 3] = ndv.x_a - ndv.a_h/ndv.mu
-        M2[3, 2] = ndv.x_a / (ndv.r_a**2) - ndv.a_h/(ndv.mu*ndv.r_a**2)
-        M2[3, 3] = 1.0 + (2/(ndv.mu*ndv.r_a**2))*((ndv.a_h**2)/2 + 1/16)
-        M2[4, 2] = -1
-        M2[4, 3] = - (0.5 - ndv.a_h)
-        M2[4, 4] = 1
-        M2[5, 2] = -1
-        M2[5, 3] = - (0.5 - ndv.a_h)
-        M2[5, 5] = 1
-
-        f0 = 0.5 - ndv.a_h
-        f1 = - 1 / (np.pi * ndv.mu)
-        f2 = 2*np.pi
-        f3 = 2 / (np.pi * ndv.mu * ndv.r_a**2)
-        f4 = np.pi * (0.5 + ndv.a_h)
         f5 = (y0[1] + y0[2] + f0*y0[3])*(-psi1*np.exp(-eps1*t) - psi2*np.exp(-eps2*t))
 
-        M1[0, 2] = 1
-        M1[1, 3] = 1
-        # M1[2, 0] = - (ndv.omega/ndv.U)**2
-        M1[2, 1] = - 2 / ndv.mu
-        M1[2, 2] = - 2.0*ndv.zeta_h*(ndv.omega/ndv.U) - 2 / ndv.mu
-        M1[2, 3] = - (1/(np.pi*ndv.mu)) * (np.pi + 2*np.pi*(0.5 - ndv.a_h))
-        M1[2, 4] = (2 / ndv.mu) * psi1
-        M1[2, 5] = (2 / ndv.mu) * psi2
-        # M1[3, 1] = - 1/(ndv.U**2) + f3*f4
-        M1[3, 1] = f3*f4
-        M1[3, 2] = f3*f4
-        M1[3, 3] = - 2.0*ndv.zeta_a/ndv.U + f3*f4*f0 - f3*0.5*np.pi*f0
-        M1[3, 4] = - psi1*f3*f4
-        M1[3, 5] = - psi2*f3*f4
-        M1[4, 3] = 1
-        M1[4, 4] = -eps1
-        M1[5, 3] = 1
-        M1[5, 5] = -eps2
+        V = np.zeros(6)
 
         V[2] = f1*f2*f5
         V[3] = f3*f4*f5
@@ -164,7 +174,7 @@ def create_monolithic_system(y0: np.ndarray, ndv: NDVars, M: callable):
 
         return y_d
     
-    return monolithic_system
+    return monolithic_system, eigvalues
 
 def solve_iterative(ndv: NDVars, t_final_nd, dt_nd):
     vec_t_nd = np.arange(0, t_final_nd, dt_nd)
@@ -345,7 +355,7 @@ if __name__ == "__main__":
     psi2 = 0.335
     eps1 = 0.0455
     eps2 = 0.3
-
+    dofs = 2
     # Dimensionless params
     flutter_speed = 6.285
     flutter_ratio = 0.6
@@ -353,12 +363,13 @@ if __name__ == "__main__":
     vec_U = np.linspace(0.5, 7.0, 200) # for cubic
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     # vec_U = [2.0] # reduced velocity
-    # vec_U = [6.55]
+    # vec_U = [7.0]
     newton_err_thresh = 1e-8
     torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
     peaks_data = [[], []]
     peaks_U = [[], []]
+    eigenvalues = np.zeros((2*dofs, len(vec_U)), dtype=np.complex128)
 
     if (torsional_spring == 0):
         torsional_func = alpha_freeplay
@@ -396,8 +407,16 @@ if __name__ == "__main__":
         t_final_nd = 1000.0
 
         y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
-        system = create_monolithic_system(y0, ndv, torsional_func)
+        system, eigvalues = create_monolithic_system(y0, ndv, torsional_func)
         monolithic_sol = solve_ivp(system, (0, t_final_nd), y0, t_eval=np.arange(0, t_final_nd, dt_nd), method='RK45')
+
+        max_real_part = np.max(eigvalues.real)
+        # if max_real_part > 0:
+        #     print("Linear flutter detected at U =", U_vel)
+
+        sorted_eigvals = np.sort_complex(eigvalues)[::-1]
+
+        eigenvalues[:, idx] = sorted_eigvals[:eigenvalues.shape[0]]
 
         if (len(vec_U) == 1):
             fig = plot.create_dofs_figure(["Heave", "Pitch"])
@@ -433,3 +452,25 @@ if __name__ == "__main__":
             plot.format_subplot(fig, i + 1, 1, r"$\bar{U}$", "Amplitude")
         
         plot.fig_save(fig, f"build/2dof/2dof_{torsional_spring_names[torsional_spring]}_bifurcation")
+
+        fig2 = plot.fig_create(2, 1, ("Damping", "Frequency"))
+        for i in range(2*dofs):
+            fig2.add_trace(
+                go.Scatter(
+                    x=vec_U, 
+                    y=eigenvalues[i, :].real, 
+                    mode="markers"
+                ),
+                row=1, 
+                col=1
+            )
+            fig2.add_trace(
+                go.Scatter(
+                    x=vec_U, 
+                    y=np.abs(eigenvalues[i, :].imag) * vec_U / b, 
+                    mode="markers"
+                ),
+                row=2, 
+                col=1
+            )
+        plot.fig_save(fig2, f"build/2dof/2dof_eigenvalues")

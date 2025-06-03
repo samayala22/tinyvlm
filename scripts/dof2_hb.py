@@ -538,7 +538,7 @@ if __name__ == "__main__":
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = 2.0
+    param_start = 1.5
     param_end = 7.0
     # Time integration
     t_final = 2000.0
@@ -555,7 +555,7 @@ if __name__ == "__main__":
     )
 
     y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
-    system = dof2.create_monolithic_system(y0, ndv, torsional_func)
+    system, _ = dof2.create_monolithic_system(y0, ndv, torsional_func)
     sol = sp.integrate.solve_ivp(system, (0, t_final), y0, t_eval=np.arange(0, t_final, dt), method='RK45')
     
     idx_start = int(0.75 * len(sol.t))
@@ -565,9 +565,14 @@ if __name__ == "__main__":
     u_coeffs, omega0 = truncated_series_approximation(u_tr, H)
     
     X0 = np.zeros(n_dofs * (2 * H + 1) + 2)
-    X0[:-2] = u_coeffs.T.reshape(-1)
-    X0[-2] = omega0
-    X0[-1] = param_start
+    # X0[:-2] = u_coeffs.T.reshape(-1)
+    # X0[-2] = omega0
+    # X0[-1] = param_start
+
+    X0[2] = 5e-3
+    X0[3] = 5e-3
+    X0[-2] = 0.5
+    X0[-1] = flutter_speed
 
     # z_ref = np.zeros_like(X0)
     # z_ref[-1] = 1.0
@@ -594,8 +599,7 @@ if __name__ == "__main__":
             plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[2, :], "HB-VLM", 1, 2, 3)
             plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 3, 2, 3)
             
-            param_str = f"{X_mat[-1, 0]:.1f}".replace('.', '_')
-            plot.fig_save(fig, f"build/hbvlm/hbvlm0_{param_str}")
+            plot.fig_save(fig, f"build/2dof/hbvlm0")
         else:
             cont.plot_hb_continuation("2DOF HB-VLM Continuation", H, X_mat)
 
