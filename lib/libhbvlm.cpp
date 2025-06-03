@@ -6,7 +6,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 
-#include "tinycombination.hpp"
 #include "tinyad.hpp"
 #include "tinypbar.hpp"
 #include "tinytimer.hpp"
@@ -599,64 +598,50 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
     }
 }
 
-// GLOBALS
-std::string g_backend = "cpu";
-std::string g_mesh_name = "./mesh/infinite_rectangular_20x1.x";
-HBVLM g_hbvlm(g_backend, g_mesh_name);
-
-void hbvlm_init(i32 harmonics, f64 scaling) {
-    g_hbvlm.init(harmonics, scaling);
-}
-
-void hbvlm_run(f64 omega, py::array_t<double>& dyn_f, py::array_t<double>& force_t) {
-    // Geometry
-    const f64 b = 0.5f; // half chord
-    const f64 cycles = 3.0f;
-    const f64 u_inf = 1.0f; // freestream velocity
-    const f64 t_final = cycles * 2.0f * PI_f / omega;
-    const f64 a_h = -0.5f;
-    const i32 H = g_hbvlm.m_harmonics;
-    // std::printf("t_final: %f, omega: %.8f, harmonics: %i\n", t_final, omega, g_hbvlm.m_harmonics);
-    TINY_ASSERT_EQ(dyn_f.ndim(), 2);
-    TINY_ASSERT_EQ(force_t.ndim(), 2);
-    TINY_ASSERT_EQ(dyn_f.shape(0), 2);
-    TINY_ASSERT_EQ(dyn_f.shape(1), 2 * H + 1);
-    TINY_ASSERT_EQ(force_t.shape(0), 2);
-    TINY_ASSERT_EQ(force_t.shape(1), 2 * H + 1);
-    
-    KinematicsTree<f64> kinematics_tree;
-    auto fs = kinematics_tree.add([=](const fwd::Double& t) {
-        return translation_matrix<fwd::Double>({-u_inf * t, 0.f, 0.f});
-    });
-    auto heave = kinematics_tree.add([=](const fwd::Double& t) {
-        fwd::Double z = dyn_f.at(0, 0);
-        for (i32 h = 0; h < H; h++) {
-            f64 k = (f64)(h+1);
-            z += fwd::cos(omega * t * k) * dyn_f.at(0, 2*h+1);
-            z += fwd::sin(omega * t * k) * dyn_f.at(0, 2*h+2);
-        }
-        return translation_matrix<fwd::Double>({0.f, 0.f, -z});
-    })->after(fs);
-    auto pitch = kinematics_tree.add([=](const fwd::Double& t) {
-        fwd::Double alpha = dyn_f.at(1, 0);
-        for (i32 h = 0; h < H; h++) {
-            f64 k = (f64)(h+1);
-            alpha += fwd::cos(omega * t * k) * dyn_f.at(1, 2*h+1);
-            alpha += fwd::sin(omega * t * k) * dyn_f.at(1, 2*h+2);
-        }
-
-        return rotation_matrix<fwd::Double>(
-            {1.f + a_h, 0.0f, 0.0f},
-            {0.0f, 1.0f, 0.0f}, 
-            alpha);
-    })->after(heave);
- 
-    Assembly<f64> assembly(fs);
-    assembly.add(g_mesh_name, pitch);
-    g_hbvlm.run(t_final, omega, b, assembly, force_t);
-}
-
 PYBIND11_MODULE(libhbvlm, m) {
-    m.def("hbvlm_init", &hbvlm_init);
-    m.def("hbvlm_run", &hbvlm_run);
+    py::class_<HBVLM>(m, "HBVLM")
+        .def(py::init<const std::string&, const std::string&>())
+        .def("init", &HBVLM::init)
+        .def("run", [](HBVLM& self, f64 omega, py::array_t<double> dyn_f, py::array_t<double> force_t) {
+            const f64 b = 0.5f;
+            const f64 cycles = 3.0f;
+            const f64 u_inf = 1.0f;
+            const f64 t_final = cycles * 2.0f * PI_f / omega;
+            const f64 a_h = -0.5f;
+            const i32 H = self.m_harmonics;
+
+            auto r = dyn_f.unchecked<2>();
+
+            KinematicsTree<f64> kinematics_tree;
+            auto fs = kinematics_tree.add([=](const fwd::Double& t) {
+                return translation_matrix<fwd::Double>({-u_inf * t, 0.f, 0.f});
+            });
+            
+            auto heave = kinematics_tree.add([=](const fwd::Double& t) {
+                fwd::Double z = r(0, 0);
+                for (i32 h = 0; h < H; h++) {
+                    f64 k = (f64)(h+1);
+                    z += fwd::cos(omega * t * k) * r(0, 2*h+1);
+                    z += fwd::sin(omega * t * k) * r(0, 2*h+2);
+                }
+                return translation_matrix<fwd::Double>({0.f, 0.f, -z});
+            })->after(fs);
+            
+            auto pitch = kinematics_tree.add([=](const fwd::Double& t) {
+                fwd::Double alpha = r(1, 0);
+                for (i32 h = 0; h < H; h++) {
+                    f64 k = (f64)(h+1);
+                    alpha += fwd::cos(omega * t * k) * r(1, 2*h+1);
+                    alpha += fwd::sin(omega * t * k) * r(1, 2*h+2);
+                }
+                return rotation_matrix<fwd::Double>(
+                    {1.f + a_h, 0.0f, 0.0f},
+                    {0.0f, 1.0f, 0.0f}, 
+                    alpha);
+            })->after(heave);
+
+            Assembly<f64> assembly(fs);
+            assembly.add("your_mesh_name_here.x", pitch);  // Pass actual mesh name
+            self.run(t_final, omega, b, assembly, force_t);
+        });
 }

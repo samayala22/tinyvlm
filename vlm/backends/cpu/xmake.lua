@@ -1,4 +1,4 @@
-add_requires("openblas_custom", {configs = {shared = true, lapack = true, dynamic_arch = false, integer = 64}})
+add_requires("openblas_custom", {configs = {shared = true, lapack = true, dynamic_arch = true, integer = 32}})
 add_requires("taskflow_custom")
 
 target("backend-cpu")

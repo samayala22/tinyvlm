@@ -24,7 +24,7 @@ import vanderpol as vdp
 import helpers
 import continuation as cont
 
-from libhbvlm import *
+from libhbvlm import HBVLM
 
 np.set_printoptions(
     linewidth=200, # max line width
@@ -81,7 +81,7 @@ def create_motion_system() -> System:
 
     def fnlf(X, omega, U):
         forces_t = np.zeros_like(X)
-        hbvlm_run(omega, X, forces_t)
+        hb.run(omega, X, forces_t)
         forces_t[0, :] = - forces_t[0, :] / (np.pi * ndv.mu)
         forces_t[1, :] = (2.0 * forces_t[1, :]) / (np.pi * ndv.mu * ndv.r_a**2)
         return forces_t
@@ -530,7 +530,8 @@ if __name__ == "__main__":
     flutter_ratio_end = 0.8
     ds = 0.01
 
-    hbvlm_init(H, 1.0/vars_b)
+    hb = HBVLM("cpu", "./mesh/infinite_rectangular_20x1.x")
+    hb.init(H, 1.0/vars_b)
 
     # assert ((H+1) & H) == 0 # H+1 should be a power of 2
 

@@ -349,14 +349,16 @@ if __name__ == "__main__":
     # Dimensionless params
     flutter_speed = 6.285
     flutter_ratio = 0.6
-    # vec_U = np.linspace(0.1, 5.5, 250) # for freeplay
+    # vec_U = np.linspace(0.1, 5.5, 200) # for freeplay
+    vec_U = np.linspace(0.5, 7.0, 200) # for cubic
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
-    vec_U = [2.0] # reduced velocity
+    # vec_U = [2.0] # reduced velocity
+    # vec_U = [6.55]
     newton_err_thresh = 1e-8
     torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
-    peaks_U = []
-    peaks_data = []
+    peaks_data = [[], []]
+    peaks_U = [[], []]
 
     if (torsional_spring == 0):
         torsional_func = alpha_freeplay
@@ -397,13 +399,6 @@ if __name__ == "__main__":
         system = create_monolithic_system(y0, ndv, torsional_func)
         monolithic_sol = solve_ivp(system, (0, t_final_nd), y0, t_eval=np.arange(0, t_final_nd, dt_nd), method='RK45')
 
-        # Find peaks for bifurcation plot
-        pitch_slice = monolithic_sol.y[1, int(0.75*monolithic_sol.y.shape[1]):]
-        peaks_idx = plot.find_peak_idx(pitch_slice)
-        peaks = pitch_slice[peaks_idx]
-        peaks_data.append(peaks)
-        peaks_U.append(np.array([U_vel] * len(peaks)))
-
         if (len(vec_U) == 1):
             fig = plot.create_dofs_figure(["Heave", "Pitch"])
             # plot_uvlm(fig)
@@ -415,42 +410,26 @@ if __name__ == "__main__":
             # plot.fig_save(fig, f"build/2dof/2dof_{torsional_spring_names[torsional_spring]}_{param_str}")
             plot.fig_save(fig, f"build/2dof/2dof", pdf=False)
 
-        # X = fft(u, axis=1)
-        # X = fft(monolithic_sol.y[0:2, :], axis=1)
-        # freq = fftfreq(n, d= b * dt_nd / U)
-        # max_freq_idx = np.argmax(np.abs(X), axis=1)
-        # dominant_freqs = np.abs(freq[max_freq_idx])
-        # freqs[:, idx] = 2*np.pi * dominant_freqs / omega_a
-
-        # damping_ratios[0, idx] = get_damping_ratio(u[0, :])
-        # damping_ratios[1, idx] = get_damping_ratio(u[1, :])
-        # damping_ratios_m[1, idx] = get_damping_ratio(monolithic_sol.y[1, :])
-
-        # def freq_ratio(time_range, nb_periods):
-        #     m = ndv.mu * (np.pi * rho * b**2)
-        #     omega_a = np.sqrt(k_a / (m * (ndv.r_a * b)**2))
-        #     U = U_vel * (b * omega_a)
-        #     total_t = b * time_range / U
-        #     avg_period = total_t / nb_periods
-        #     omega = 2*np.pi / avg_period
-        #     return omega / omega_a
-
-        # peaks_h_t_i, peaks_h_d_i = get_peaks(vec_t_nd, u[0, :])
-        # peaks_a_t_i, peaks_a_d_i = get_peaks(vec_t_nd, u[1, :])
-        # freqs[1, idx] = freq_ratio(peaks_a_t_i[-1] - peaks_a_t_i[0], len(peaks_a_t_i)-1)
-        # freqs[0, idx] = freq_ratio(peaks_h_t_i[-1] - peaks_h_t_i[0], len(peaks_h_t_i)-1)
+        else:
+            slice_start = int(0.75 * len(monolithic_sol.t))
+            peaks_slice = monolithic_sol.y[0:2, slice_start:]
+            
+            for i in range(2):
+                peaks_data[i].append(peaks_slice[i, plot.find_peak_idx(peaks_slice[i, :])])
+                peaks_U[i].append(np.array([U_vel] * peaks_data[i][-1].shape[0]))
 
     if (len(vec_U) > 1):
-        fig = plot.fig_create(1, 1, ("Pitch Bifurcations",))
-        fig.add_trace(
-            go.Scatter(
-                x=np.concatenate(peaks_U), 
-                y=np.concatenate(peaks_data), 
-                name="Pitch Peaks",
-                mode="markers"
-            ),
-            row=1, 
-            col=1
-        )
-        plot.format_subplot(fig, 1, 1, r"$\bar{U}$", r"$\alpha$ (rad)")
+        fig = plot.fig_create(2, 1, ("Heave", "Pitch"))
+        for i in range(2):
+            fig.add_trace(
+                go.Scatter(
+                    x=np.concatenate(peaks_U[i]), 
+                    y=np.concatenate(peaks_data[i]), 
+                    mode="markers"
+                ),
+                row=i + 1, 
+                col=1
+            )
+            plot.format_subplot(fig, i + 1, 1, r"$\bar{U}$", "Amplitude")
+        
         plot.fig_save(fig, f"build/2dof/2dof_{torsional_spring_names[torsional_spring]}_bifurcation")

@@ -1,6 +1,5 @@
 set_project("vlm")
-set_version("0.1.0")
-set_xmakever("2.8.6") -- xmake test support
+set_xmakever("2.9.9")
 
 add_rules("mode.debug", "mode.release", "mode.releasedbg")
 add_rules("plugin.compile_commands.autoupdate", {outputdir = "."})
@@ -21,7 +20,7 @@ add_cxxflags("-fPIC", {tools = {"gcc", "clang"}})
 set_warnings("all")
 set_languages("c++17", "c99")
 set_runtimes("MD") -- msvc runtime library (MD/MT/MDd/MTd)
-add_requires("pybind11")
+add_requires("pybind11 2.12.0")
 
 -- Define backends and helper functions
 backends = {"cuda", "cpu"}

@@ -48,25 +48,36 @@ def fig_save(fig, filename, pdf=True):
     fig.update_layout(width=width, height=height)
     kaleido.write_fig_sync(fig, path=f"{filename}.pdf")
 
+plotly_axes = {
+    "showgrid": True,
+    "gridwidth": 1,
+    "griddash": "dot",
+    "gridcolor": 'rgba(128, 128, 128, 0.2)',
+    "showline": True,
+    "linecolor": "black",
+    "linewidth": 1,
+    "mirror": True,
+    "ticks": "inside",
+    "ticklen": 8,
+    "tickwidth": 1,
+    "tickcolor": "black"
+}
+
 def format_subplot(fig, row, col, xlabel, ylabel):
     """Format a specific subplot with labels and grid"""
     fig.update_xaxes(
         title_text=xlabel,
         row=row,
         col=col,
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(128, 128, 128, 0.2)',
-        matches= f"x{1 if row % 2 == 1 else 4}"
+        matches= f"x{1 if row % 2 == 1 else 4}",
+        **plotly_axes
     )
     fig.update_yaxes(
         title_text=ylabel,
         row=row,
         col=col,
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(128, 128, 128, 0.2)',
-        tickformat=".2e"
+        tickformat=".2e",
+        **plotly_axes
     )
 
 def compute_psd(t, data):
