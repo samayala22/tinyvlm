@@ -304,6 +304,7 @@ def hb_linear_residual(X, *args):
     return R_lin
 
 def hb_nonlinear_residual(X, *args):
+    lanczos_m = 0.0
     Om = X[-2]
     param = X[-1]
     sys = create_motion_system()
@@ -323,11 +324,11 @@ def hb_nonlinear_residual(X, *args):
         R_nlt[:, s] = - sys.fnlt(q[:, s], q_dot[:, s], Om, param)
     
     R_nl_fft = np.fft.rfft(R_nlt, n_samples, axis=1, norm='backward') # no scaling
-    R_nl = vdp.X_to_real((R_nl_fft[:, :H+1]) / n_samples).T.reshape(-1)
+    R_nl = vdp.X_to_real((R_nl_fft[:, :H+1], lanczos_m) / n_samples).T.reshape(-1)
     
     R_nlft = - sys.fnlf(Xc_real, Om, param)
     R_nlf_fft = np.fft.rfft(R_nlft, n_coeffs, axis=1, norm='backward') # no scaling
-    R_nlf = vdp.X_to_real(R_nlf_fft / n_coeffs, 0).T.reshape(-1)
+    R_nlf = vdp.X_to_real(R_nlf_fft / n_coeffs, lanczos_m).T.reshape(-1)
 
     return R_nl + R_nlf
 
@@ -520,7 +521,7 @@ if __name__ == "__main__":
         torsional_func = dof2.alpha_linear
 
     # Independent params
-    H = 3
+    H = 15
     vars_b = 0.5 # half chord
     n_dofs = 2
     n_coeffs = 2*H+1
@@ -528,7 +529,7 @@ if __name__ == "__main__":
     flutter_speed = 6.285
     flutter_ratio_start = 0.3
     flutter_ratio_end = 0.8
-    ds = 0.01
+    ds = 0.05
 
     hb = HBVLM("cpu", "./mesh/infinite_rectangular_20x1.x")
     hb.init(H, 1.0/vars_b)
@@ -538,8 +539,8 @@ if __name__ == "__main__":
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = 1.5
-    param_end = 7.0
+    param_start = flutter_speed
+    param_end = 2.0
     # Time integration
     t_final = 2000.0
     dt = 0.2
@@ -571,8 +572,8 @@ if __name__ == "__main__":
 
     X0[2] = 5e-3
     X0[3] = 5e-3
-    X0[-2] = 0.5
-    X0[-1] = flutter_speed
+    X0[-2] = 0.085
+    X0[-1] = param_start
 
     # z_ref = np.zeros_like(X0)
     # z_ref[-1] = 1.0
@@ -584,7 +585,7 @@ if __name__ == "__main__":
 
     # np.testing.assert_allclose(J_fd, J_hy)
     
-    continuation(param_start, param_end, ds, X0, 1, False)
+    # continuation(param_start, param_end, ds, X0, 1, False)
     # continuation(param_start, param_end, ds, X0, 5000, False)
     
     if getenv("PLOT"):

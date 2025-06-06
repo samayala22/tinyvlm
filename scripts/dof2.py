@@ -360,12 +360,12 @@ if __name__ == "__main__":
     flutter_speed = 6.285
     flutter_ratio = 0.6
     # vec_U = np.linspace(0.1, 5.5, 200) # for freeplay
-    vec_U = np.linspace(0.5, 7.0, 200) # for cubic
+    # vec_U = np.linspace(0.5, 7.0, 200) # for cubic
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     # vec_U = [2.0] # reduced velocity
-    # vec_U = [7.0]
+    vec_U = [3.7]
     newton_err_thresh = 1e-8
-    torsional_spring = 1
+    torsional_spring = 0
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
     peaks_data = [[], []]
     peaks_U = [[], []]
@@ -428,6 +428,23 @@ if __name__ == "__main__":
             # param_str = f"{ndv.U:.1f}".replace('.', '_')
             # plot.fig_save(fig, f"build/2dof/2dof_{torsional_spring_names[torsional_spring]}_{param_str}")
             plot.fig_save(fig, f"build/2dof/2dof", pdf=False)
+
+            # Poincare sections
+            start = int(0.75*len(monolithic_sol.t))
+            fig2 = plot.fig_create(2, 1, ("Heave", "Pitch"))
+            for i in range(2):
+                fig2.add_trace(
+                    go.Scatter(
+                        x=monolithic_sol.y[i, start:], 
+                        y=monolithic_sol.y[i + 2, start:], 
+                        mode="markers"
+                    ),
+                    row=i + 1, 
+                    col=1
+                )
+            plot.format_subplot(fig2, 1, 1, r"$\bar{h}$", r"$\dot{\bar{h}}$")
+            plot.format_subplot(fig2, 2, 1, r"$\alpha$", r"$\dot{\alpha}$")
+            plot.fig_save(fig2, f"build/2dof/2dof_{torsional_spring_names[torsional_spring]}_poincare", pdf=False)
 
         else:
             slice_start = int(0.75 * len(monolithic_sol.t))
