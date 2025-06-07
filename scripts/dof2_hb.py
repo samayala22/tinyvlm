@@ -324,7 +324,7 @@ def hb_nonlinear_residual(X, *args):
         R_nlt[:, s] = - sys.fnlt(q[:, s], q_dot[:, s], Om, param)
     
     R_nl_fft = np.fft.rfft(R_nlt, n_samples, axis=1, norm='backward') # no scaling
-    R_nl = vdp.X_to_real((R_nl_fft[:, :H+1], lanczos_m) / n_samples).T.reshape(-1)
+    R_nl = vdp.X_to_real(R_nl_fft[:, :H+1] / n_samples, lanczos_m).T.reshape(-1)
     
     R_nlft = - sys.fnlf(Xc_real, Om, param)
     R_nlf_fft = np.fft.rfft(R_nlft, n_coeffs, axis=1, norm='backward') # no scaling
@@ -393,19 +393,24 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation):
         print(f"Nonlinear solver failed: {sol.message}")
         exit(1)
     print(f"param: {sol.x[-1]:.3f}, omega: {sol.x[-2]:.3f}, nfev: {sol.get('nfev', None)}, njev: {sol.get('njev', None)}")
-    return sol.x, jac
 
-def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True):
+    nfev = sol['nfev'] + 2*jac.shape[1]*sol['njev']
+    return sol.x, jac, nfev
+
+def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True, step_adapt=True):
     """
     Continuation for autonomous systems using the harmonic balance method
     """
     # print("Initial guess X0:", X0)
+    ds_min = ds / 5.0
+    ds_max = ds * 5.0
+    nfev_opt = 10 + 2 * X0.shape[0] * 1 # optimal nubmer of function evals
 
     X_mat = np.zeros((X0.shape[0], max_steps))
 
     if param_end > param_start:
         param_direction = 1
-        direction = 1
+        direction = -1
     else:
         param_direction = -1
         direction = -1
@@ -419,10 +424,15 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True)
     Dscale_prev = Dscale.copy()
 
     # Initial step
-    Xp, J = solve_nonlinear_system(X0, X_ref, z_ref, Dscale, Parametrisation.Local)
+    Xp, J, nfev = solve_nonlinear_system(X0, X_ref, z_ref, Dscale, Parametrisation.Local)
     X0 = Xp.copy()
     X_mat[:, 0] = X0
     np.save("build/continuation.npy", X_mat[:, :1])
+
+    det_jac_old = np.linalg.det(J[:-1, :-1])
+    det_jac_ext_old = np.linalg.det(J)
+    det_jac = det_jac_old
+    det_jac_ext = det_jac_ext_old
 
     iteration = 1
     while iteration < max_steps:
@@ -450,10 +460,27 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True)
         # Predictor step
         Xp = X0 + direction*ds*z
         # Corrector step
-        Xtmp, J = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, Parametrisation.ArcLength)
+        Xtmp, J, nfev = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, Parametrisation.ArcLength)
+
+        det_jac = np.linalg.det(J[:-1, :-1])
+        det_jac_ext = np.linalg.det(J)
+
+        if det_jac * det_jac_old < 0 and det_jac_ext * det_jac_ext_old > 0:
+            print("!!! Fold point detected !!!")
+        elif det_jac * det_jac_old < 0 and det_jac_ext * det_jac_ext_old < 0:
+            print("!!! Branch point detected !!!")
+
+        det_jac_old = det_jac
+        det_jac_ext_old = det_jac_ext
 
         X_old = X0.copy()
         X0 = Xtmp.copy()
+
+        if step_adapt:
+            xi = nfev_opt / nfev 
+            xi = np.clip(xi, 0.5, 2.0)
+            ds = np.clip(ds * xi, ds_min, ds_max)
+            print(f"ds: {ds:.3f}")
 
         # History
         X_mat[:, iteration] = X0 * Dscale
@@ -521,7 +548,7 @@ if __name__ == "__main__":
         torsional_func = dof2.alpha_linear
 
     # Independent params
-    H = 15
+    H = 3
     vars_b = 0.5 # half chord
     n_dofs = 2
     n_coeffs = 2*H+1
@@ -539,8 +566,8 @@ if __name__ == "__main__":
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = flutter_speed
-    param_end = 2.0
+    param_start = 2.0
+    param_end = 3.0
     # Time integration
     t_final = 2000.0
     dt = 0.2
@@ -566,14 +593,14 @@ if __name__ == "__main__":
     u_coeffs, omega0 = truncated_series_approximation(u_tr, H)
     
     X0 = np.zeros(n_dofs * (2 * H + 1) + 2)
-    # X0[:-2] = u_coeffs.T.reshape(-1)
-    # X0[-2] = omega0
-    # X0[-1] = param_start
-
-    X0[2] = 5e-3
-    X0[3] = 5e-3
-    X0[-2] = 0.085
+    X0[:-2] = u_coeffs.T.reshape(-1)
+    X0[-2] = omega0
     X0[-1] = param_start
+
+    # X0[2] = 5e-3
+    # X0[3] = 5e-3
+    # X0[-2] = 0.085
+    # X0[-1] = param_start
 
     # z_ref = np.zeros_like(X0)
     # z_ref[-1] = 1.0
@@ -586,7 +613,7 @@ if __name__ == "__main__":
     # np.testing.assert_allclose(J_fd, J_hy)
     
     # continuation(param_start, param_end, ds, X0, 1, False)
-    # continuation(param_start, param_end, ds, X0, 5000, False)
+    continuation(param_start, param_end, ds, X0, 5000, False)
     
     if getenv("PLOT"):
         X_mat = np.load("build/continuation.npy")
