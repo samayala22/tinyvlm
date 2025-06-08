@@ -363,7 +363,7 @@ if __name__ == "__main__":
     # vec_U = np.linspace(0.5, 7.0, 200) # for cubic
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     # vec_U = [2.0] # reduced velocity
-    vec_U = [3.7]
+    vec_U = [3.5]
     newton_err_thresh = 1e-8
     torsional_spring = 0
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
@@ -430,7 +430,7 @@ if __name__ == "__main__":
             plot.fig_save(fig, f"build/2dof/2dof", pdf=False)
 
             # Poincare sections
-            start = int(0.75*len(monolithic_sol.t))
+            start = int(0.9*len(monolithic_sol.t))
             fig2 = plot.fig_create(2, 1, ("Heave", "Pitch"))
             for i in range(2):
                 fig2.add_trace(

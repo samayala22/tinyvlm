@@ -12,9 +12,11 @@ import autograd
 import autograd.numpy as anp
 import scipy as sp
 import plotting as plot
-
+from typing import List, Tuple
 import os
 import subprocess
+import pickle
+
 from enum import Enum
 from dataclasses import dataclass
 
@@ -44,6 +46,17 @@ def fd_h(x0): return np.maximum(np.sqrt(EPS) * np.abs(x0), EPS)
 class Parametrisation(Enum):
     Local = 1
     ArcLength = 2
+
+class ContinuationMetadata:
+    def __init__(self):
+        self.param_start = 0.0
+        self.param_end = 0.0
+        self.scaling = False
+        self.step_adapt = False
+        self.ds = []
+        self.fold_pt = []
+        self.branch_pt = []
+        self.X = None  # or np.zeros(...) if you want a default
 
 def create_fourier_basis(omega, harmonics, t):
     unknowns = 2 * harmonics + 1
@@ -352,10 +365,6 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation):
         tol = 1e-6,
     )
 
-    Q = sol.fjac.T
-    R = np.zeros_like(sol.fjac)
-    R[np.triu_indices_from(R)] = sol.r
-    jac = Q @ R
     # latest_jac = extended_residual_jacobian(sol.x, X_ref, z_ref, hb_residual, Dscale, parametrisation, True, True)
     # print(jac)
     # print(latest_jac)
@@ -391,11 +400,22 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation):
 
     if not sol.success:
         print(f"Nonlinear solver failed: {sol.message}")
-        exit(1)
+        return None, None, None, False
+
+    Q = sol.fjac.T
+    R = np.zeros_like(sol.fjac)
+    R[np.triu_indices_from(R)] = sol.r
+    jac = Q @ R
+
     print(f"param: {sol.x[-1]:.3f}, omega: {sol.x[-2]:.3f}, nfev: {sol.get('nfev', None)}, njev: {sol.get('njev', None)}")
 
     nfev = sol['nfev'] + 2*jac.shape[1]*sol['njev']
-    return sol.x, jac, nfev
+    return sol.x, jac, nfev, True
+
+def hash_metadata(metadata):
+    # Serialize the object (excluding unpickleable fields if needed)
+    data = pickle.dumps(metadata.__dict__)
+    return hashlib.md5(data).hexdigest()[:8]  # Short hash
 
 def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True, step_adapt=True):
     """
@@ -405,12 +425,21 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True,
     ds_min = ds / 5.0
     ds_max = ds * 5.0
     nfev_opt = 10 + 2 * X0.shape[0] * 1 # optimal nubmer of function evals
+    
+    metadata = ContinuationMetadata()
+    metadata.param_start = param_start
+    metadata.param_end = param_end
+    metadata.scaling = scaling
+    metadata.step_adapt = step_adapt
+    metadata.ds = ds
+    metadata.fold_pt = []
+    metadata.branch_pt = []
 
     X_mat = np.zeros((X0.shape[0], max_steps))
 
     if param_end > param_start:
         param_direction = 1
-        direction = -1
+        direction = 1
     else:
         param_direction = -1
         direction = -1
@@ -424,10 +453,11 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True,
     Dscale_prev = Dscale.copy()
 
     # Initial step
-    Xp, J, nfev = solve_nonlinear_system(X0, X_ref, z_ref, Dscale, Parametrisation.Local)
+    Xp, J, nfev, success = solve_nonlinear_system(X0, X_ref, z_ref, Dscale, Parametrisation.Local)
+    if not success:
+        exit(1)
     X0 = Xp.copy()
     X_mat[:, 0] = X0
-    np.save("build/continuation.npy", X_mat[:, :1])
 
     det_jac_old = np.linalg.det(J[:-1, :-1])
     det_jac_ext_old = np.linalg.det(J)
@@ -460,8 +490,9 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True,
         # Predictor step
         Xp = X0 + direction*ds*z
         # Corrector step
-        Xtmp, J, nfev = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, Parametrisation.ArcLength)
-
+        Xtmp, J, nfev, success = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, Parametrisation.ArcLength)
+        if not success:
+            break
         det_jac = np.linalg.det(J[:-1, :-1])
         det_jac_ext = np.linalg.det(J)
 
@@ -495,13 +526,14 @@ def continuation(param_start, param_end, ds, X0, max_steps = 5000, scaling=True,
         plot.fig_save(fig, f"build/continuation/cont_{iteration}_{param_str}")
 
         iteration += 1
-        np.save("build/continuation.npy", X_mat[:, :iteration]) # save every iteration
-
+        
         if (X0[-1] - param_end) * param_direction >= 0:
             print("Continuation reached the end")
             break
 
-    return X_mat[:, :iteration]
+    metadata.X = X_mat[:, :iteration]
+    with open(f"build/continuation.pkl", 'wb') as f:
+        pickle.dump(metadata, f)
 
 def truncated_series_approximation(u_tr, H):
     N_tr = u_tr.shape[1]  # Number of time samples
@@ -537,7 +569,7 @@ def truncated_series_approximation(u_tr, H):
     return coeffs, omega0
 
 if __name__ == "__main__":
-    torsional_spring = 1
+    torsional_spring = 0
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
     if (torsional_spring == 0):
@@ -548,15 +580,15 @@ if __name__ == "__main__":
         torsional_func = dof2.alpha_linear
 
     # Independent params
-    H = 3
+    H = 5
     vars_b = 0.5 # half chord
     n_dofs = 2
     n_coeffs = 2*H+1
-    n_samples = (H+1)*(2**4) # sampling points (needs to be power of 2)
+    n_samples = (H+1)*(2**5) # sampling points (needs to be power of 2)
     flutter_speed = 6.285
     flutter_ratio_start = 0.3
     flutter_ratio_end = 0.8
-    ds = 0.05
+    ds = 0.01
 
     hb = HBVLM("cpu", "./mesh/infinite_rectangular_20x1.x")
     hb.init(H, 1.0/vars_b)
@@ -566,8 +598,8 @@ if __name__ == "__main__":
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = 2.0
-    param_end = 3.0
+    param_start = 4.0
+    param_end = 6.0
     # Time integration
     t_final = 2000.0
     dt = 0.2
@@ -616,7 +648,10 @@ if __name__ == "__main__":
     continuation(param_start, param_end, ds, X0, 5000, False)
     
     if getenv("PLOT"):
-        X_mat = np.load("build/continuation.npy")
+        with open('build/continuation.pkl', 'rb') as f:
+            meta = pickle.load(f)
+        # use meta
+        X_mat = meta.X
         if X_mat.shape[1] == 1:
             hb_sol_t, hb_sol0 = hb_timedomain(0.0, t_final, dt, n_dofs, X_mat[:-2, 0], X_mat[-2, 0], H)
             fig = plot.create_dofs_figure(["Heave", "Pitch"])
@@ -634,3 +669,4 @@ if __name__ == "__main__":
 # Notes:
 # - Dimitriadis introduction to nonlinear aeroelasticity p333: jacobian sign changes during continuation
 # - Reproduce fig 7.14 ?
+# TODO: move everything continuation related to continuation.py
