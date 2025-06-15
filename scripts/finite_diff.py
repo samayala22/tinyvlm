@@ -3,6 +3,7 @@ import numpy as np
 EPS = np.finfo(np.float64).eps
 
 def fd_h(x0): return np.maximum(np.sqrt(EPS) * np.abs(x0), EPS)
+
 def cd_h(x0): return np.maximum(np.cbrt(EPS) * np.abs(x0), EPS)
 def cd2_h(x0): return np.maximum(np.where(np.abs(x0) > 1, np.cbrt(EPS * np.abs(x0)), np.cbrt(EPS) * np.abs(x0)), EPS)
 # def cd2_h(x0): return np.maximum(np.where(np.abs(x0) > 1, (1+np.log10(np.abs(x0))) * np.cbrt(EPS), np.cbrt(EPS) * np.abs(x0)), EPS)

@@ -83,7 +83,6 @@ class HBVLM {
         Tensor2dD lhs{backend->memory.get()}; // (ns*nc)^2
         Tensor2dD rhs{backend->memory.get()}; // (ns*nc) x uharmonics
         Tensor2dD gamma_coeffs{backend->memory.get()}; // (ns*nc) x uharmonics
-        Tensor2dH gamma_coeffs_h{backend->memory.get()}; // (ns*nc) x uharmonics
         Tensor2dD gamma_wing{backend->memory.get()}; // (ns*nc) x time instances
         MultiTensor2dD gamma_wing_delta{backend->memory.get()}; // ns x nc
         Tensor2dD dgamma_wing_dt{backend->memory.get()}; // dgamma/dt
@@ -182,7 +181,7 @@ void HBVLM::alloc_buffers() {
     lhs.init({n, n});
     rhs.init({n, unknowns});
     gamma_coeffs.init({n, unknowns});
-    gamma_coeffs_h.init({n, unknowns});
+    gamma_coeffs.view().fill(0.f);
     gamma_wing.init({n, unknowns});
     gamma_wing_delta.init(panels_2D);
     dgamma_wing_dt.init({n, unknowns});
@@ -201,6 +200,7 @@ void HBVLM::alloc_buffers() {
     condition0.resize(assembly_wings.size()*assembly_wings.size());
 }
 
+// This wont work on GPU
 void gamma_wake_from_coeffs(
     const TensorView2dD& gamma_wake,
     const TensorView2dD& gamma_coeffs,
@@ -235,6 +235,7 @@ void anderson_acceleration(
     i32 m = 3
 )
 {
+    // tiny::ScopedTimer timer("anderson_acceleration");
     i64 n = x0.shape(0);
     Tensor2dD m_X_buf{backend->memory.get()};
     Tensor2dD m_G_buf{backend->memory.get()};
@@ -330,14 +331,12 @@ void anderson_acceleration(
     if (k == max_iter) {
         std::printf("Anderson method failed to converge");
     } else {
-        // std::printf("Anderson fixed point converged in %d iterations\n", k);
+        std::printf("Anderson fixed point converged in %d iterations\n", k);
     }
 }
 
 void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembly, py::array_t<double>& forces_t) {
     // const tiny::ScopedTimer timer("HBVLM::run");
-    bool read_gamma = false;
-    bool write_gamma = false;
 
     const f64 period = 2.0f * PI_f / omega;
     const f64 period_interval = period / (f64)m_coeffs;
@@ -489,33 +488,16 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
     };
     
     auto& gamma_coeffs_v = gamma_coeffs.view();
-    auto& gamma_coeffs_hv = gamma_coeffs_h.view();
-    
-    npy::npy_data_ptr<f64> gamma_coeff_bin;
-    gamma_coeff_bin.data_ptr = gamma_coeffs_h.ptr();
-    gamma_coeff_bin.shape = {(npy::ndarray_len_t)gamma_coeffs_hv.shape(0), (npy::ndarray_len_t)gamma_coeffs_hv.shape(1)};
-    gamma_coeff_bin.fortran_order = true;
-
-    if (read_gamma) {
-        TRY_CATCH_VOID_CALL(npy::read_npy("gamma0.npy", gamma_coeff_bin));
-        gamma_coeffs_hv.to(gamma_coeffs_v);
-    } else {
-        gamma_coeffs_v.fill(0.f);
-    }
+    // gamma_coeffs_v.fill(0.f);
 
     anderson_acceleration(
         backend.get(),
         gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)),
         hb_vlm_iter,
         100, // max iterations
-        1e-8, // tolerance
-        5 // history
+        1e-9, // tolerance
+        10 // history
     );
-
-    if (write_gamma) {
-        gamma_coeffs_v.to(gamma_coeffs_hv);
-        TRY_CATCH_VOID_CALL(npy::write_npy("gamma0.npy", gamma_coeff_bin));
-    }
     
     auto forces_t_v = forces_t.mutable_unchecked<2>();
 
