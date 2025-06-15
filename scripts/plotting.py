@@ -33,8 +33,8 @@ def fig_create(rows, cols, subplot_titles: tuple[str], fig_title: str = ""):
     )
     return fig
 
-def create_dofs_figure(dof_names: list[str]):
-    return fig_create(len(dof_names)*2, 3, tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]))
+def create_dofs_figure(dof_names: list[str], title: str = ""):
+    return fig_create(len(dof_names)*2, 3, tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]), title)
 
 def fig_save(fig, filename, pdf=True):
     Path(filename).parent.mkdir(parents=True, exist_ok=True)
