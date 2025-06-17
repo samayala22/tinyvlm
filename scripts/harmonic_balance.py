@@ -87,7 +87,7 @@ def nonlinear_residual(X, motion, dims):
     R_nlt = np.zeros((dims.n_d, dims.n_s))
     
     for s in range(dims.n_s):
-        R_nlt[:, s] = - sys.fnlt(q[:, s], q_dot[:, s], Om, param)
+        R_nlt[:, s] = - sys.fnlt(Xc_real, q[:, s], q_dot[:, s], Om, param)
     
     R_nl_fft = np.fft.rfft(R_nlt, dims.n_s, axis=1, norm='backward')
     R_nl = X_to_real(R_nl_fft[:, :dims.n_h+1] / dims.n_s, lanczos_m).T.reshape(-1)

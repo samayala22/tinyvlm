@@ -20,6 +20,8 @@ import plotting as plot
 
 from libhbvlm3 import HBVLM
 
+BETA_NL_DAMPING = True
+
 @dataclass
 class System:
     M      : callable
@@ -31,12 +33,24 @@ class System:
     fnlt   : callable        # time‐domain NL force
     fnlf   : callable        # frequency‐domain NL force
 
+def nonlinear_damping(A, omega):
+    f = 0.2
+    z = 0.01
+    A0 = 2.0*np.pi / 180
+    return (A/A0) * z * np.exp(-(omega - f)**2/f)
+
 def create_motion_system() -> System:
-    def fnlt(u, u_dot, omega, U):
+    def fnlt(X, u, u_dot, omega, U):
+        if BETA_NL_DAMPING:
+            A = np.sqrt(X[2, 1]**2 + X[2, 2]**2) # Amplitude of first harmonic
+            beta_damping = - (v.omega_beta / v.omega_alpha) * v.r_beta**2 * nonlinear_damping(A, omega)
+        else:
+            beta_damping = 0.0
+        beta_stiffness = - ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * torsional_func(u[2])
         return np.array([
             0.0, # h
             0.0, # alpha
-            - ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * torsional_func(u[2]) # beta
+            beta_stiffness + beta_damping# beta
         ])
 
     def fnlf(X, omega, U):
@@ -192,7 +206,7 @@ if __name__ == "__main__":
     metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
-    metadata.max_steps = 5000
+    metadata.max_steps = 1
     metadata.scaling = False
     metadata.step_adapt = True
     metadata.ds = [0.05]

@@ -37,7 +37,7 @@ class System:
     fnlf   : callable        # frequency‐domain NL force
 
 def create_motion_system() -> System:
-    def fnlt(u, v, omega, U):
+    def fnlt(X, u, v, omega, U):
         return np.array([
             - (ndv.omega / U)**2 * u[0],
             - 1/(U**2) * torsional_func(u[1])
