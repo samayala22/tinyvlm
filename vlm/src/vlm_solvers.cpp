@@ -110,7 +110,7 @@ void anderson_acceleration_impl(
     if (k == max_iter) {
         std::printf("Anderson method failed to converge");
     } else {
-        std::printf("Anderson fixed point converged in %d iterations\n", k);
+        // std::printf("Anderson fixed point converged in %d iterations\n", k);
     }
 }
 

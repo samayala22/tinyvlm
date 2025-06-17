@@ -99,7 +99,7 @@ if __name__ == "__main__":
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
     param_start = 7.0
-    param_end = 10.0
+    param_end = 8.0
 
     v = dof3.Vars()
     v.a = -0.5 
@@ -192,7 +192,7 @@ if __name__ == "__main__":
     metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
-    metadata.max_steps = 1
+    metadata.max_steps = 5000
     metadata.scaling = False
     metadata.step_adapt = True
     metadata.ds = [0.05]

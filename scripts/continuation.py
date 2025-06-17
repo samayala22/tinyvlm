@@ -151,7 +151,7 @@ def hash_metadata(metadata):
     data = pickle.dumps(metadata.__dict__)
     return hashlib.md5(data).hexdigest()[:8]  # Short hash
 
-def plot_hb(X, iteration, motion, dims):
+def plot_hb(X, iteration, dims):
     fig = plot.create_dofs_figure(["Heave", "Pitch"], f"U = {X[-1]:.2f}")
     hb_sol_t, hb_sol = hb.to_timedomain(0.0, 1000.0, 0.1, dims.n_d, X[:-2], X[-2], dims.n_h)
     plot.add_data_and_psd(fig, hb_sol_t, hb_sol[0, :], "HB-VLM", 1, 1, 1)

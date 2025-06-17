@@ -257,7 +257,7 @@ void gamma_wake_from_coeffs(
 }
 
 void HBVLM::run(f64 t_start, f64 omega, const Vars& v, const Assembly<f64>& assembly, py::array_t<double>& forces_t) {
-    const tiny::ScopedTimer timer("HBVLM::run");
+    // const tiny::ScopedTimer timer("HBVLM::run");
 
     const f64 period = 2.0f * PI_f / omega;
     const f64 period_interval = period / (f64)m_coeffs;

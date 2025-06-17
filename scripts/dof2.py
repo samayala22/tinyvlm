@@ -360,12 +360,12 @@ if __name__ == "__main__":
     flutter_speed = 6.285
     flutter_ratio = 0.6
     # vec_U = np.linspace(0.1, 5.5, 200) # for freeplay
-    # vec_U = np.linspace(0.5, 7.0, 200) # for cubic
+    vec_U = np.linspace(0.5, 100.0, 200) # for cubic
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     # vec_U = [2.0] # reduced velocity
-    vec_U = [3.5]
+    # vec_U = [4.0]
     newton_err_thresh = 1e-8
-    torsional_spring = 0
+    torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
     peaks_data = [[], []]
     peaks_U = [[], []]
@@ -404,7 +404,7 @@ if __name__ == "__main__":
 
         # Dimensionless parameters
         dt_nd = 0.2
-        t_final_nd = 1000.0
+        t_final_nd = 2000.0
 
         y0 = np.array([0, np.radians(3), 0, 0, 0, 0]) # h, a, hd, ad, x1, x2
         system, eigvalues = create_monolithic_system(y0, ndv, torsional_func)
