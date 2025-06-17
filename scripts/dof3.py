@@ -242,7 +242,7 @@ class AeroelasticSystem:
         # assert np.isclose(force_structure, forces_aero).all()
         return forces_aero
     
-def plot_solution(fig, aero_forces, mono):
+def plot_solution(fig, aero_forces, mono, v):
     plot.add_data_and_psd(fig, mono.t, mono.y[3, :], "Theodorsen", 1, 1) # h
     plot.add_data_and_psd(fig, mono.t, mono.y[0, :], "Theodorsen", 1, 2) # dh
     plot.add_data_and_psd(fig, mono.t, aero_forces[0, :]/v.mu, "Theodorsen", 1, 3) # force h
@@ -253,6 +253,25 @@ def plot_solution(fig, aero_forces, mono):
     plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
     plot.add_data_and_psd(fig, mono.t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
 
+def format_plot(fig):
+    plot.format_subplot(fig, 1, 1, "t", r"y")
+    plot.format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
+    plot.format_subplot(fig, 1, 3, "t", "Lift")
+    plot.format_subplot(fig, 2, 1, "f", "Amplitude (dB)")
+    plot.format_subplot(fig, 2, 2, "f", "Amplitude (dB)")
+    plot.format_subplot(fig, 2, 3, "f", "Amplitude (dB)")
+    plot.format_subplot(fig, 3, 1, "t", r"$\alpha$")
+    plot.format_subplot(fig, 3, 2, "t", r"$\dot{\alpha}$")
+    plot.format_subplot(fig, 3, 3, "t", "Moment")
+    plot.format_subplot(fig, 4, 1, "f", "Amplitude (dB)")
+    plot.format_subplot(fig, 4, 2, "f", "Amplitude (dB)")
+    plot.format_subplot(fig, 4, 3, "f", "Amplitude (dB)")
+    plot.format_subplot(fig, 5, 1, "t", r"$\beta$")
+    plot.format_subplot(fig, 5, 2, "t", r"$\dot{\beta}$")
+    plot.format_subplot(fig, 5, 3, "t", "Moment")
+    plot.format_subplot(fig, 6, 1, "f", "Amplitude (dB)")
+    plot.format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
+    plot.format_subplot(fig, 6, 3, "f", "Amplitude (dB)")
 
 if __name__ == "__main__":
     # Darabseh 2022
@@ -349,7 +368,7 @@ if __name__ == "__main__":
 
             # Plotting
             fig = plot.create_dofs_figure(["Wing Heave", "Wing Pitch", "Flap Pitch"])
-            plot_solution(fig, aero_forces, mono)
+            plot_solution(fig, aero_forces, mono, v)
 
             # uvlm_file = Path("build/windows/x64/release/3dof.txt")
             # if uvlm_file.exists():
@@ -371,26 +390,8 @@ if __name__ == "__main__":
             #         plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[3, :]), "UVLM", 5, 1)
             #         plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[6, :]), "UVLM", 5, 2)
             #         plot.add_data_and_psd(fig, uvlm[0, :], uvlm[9, :], "UVLM", 5, 3)
-                
-            plot.format_subplot(fig, 1, 1, "t", r"y")
-            plot.format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
-            plot.format_subplot(fig, 1, 3, "t", "Lift")
-            plot.format_subplot(fig, 2, 1, "f", "Amplitude (dB)")
-            plot.format_subplot(fig, 2, 2, "f", "Amplitude (dB)")
-            plot.format_subplot(fig, 2, 3, "f", "Amplitude (dB)")
-            plot.format_subplot(fig, 3, 1, "t", r"$\alpha$")
-            plot.format_subplot(fig, 3, 2, "t", r"$\dot{\alpha}$")
-            plot.format_subplot(fig, 3, 3, "t", "Moment")
-            plot.format_subplot(fig, 4, 1, "f", "Amplitude (dB)")
-            plot.format_subplot(fig, 4, 2, "f", "Amplitude (dB)")
-            plot.format_subplot(fig, 4, 3, "f", "Amplitude (dB)")
-            plot.format_subplot(fig, 5, 1, "t", r"$\beta$")
-            plot.format_subplot(fig, 5, 2, "t", r"$\dot{\beta}$")
-            plot.format_subplot(fig, 5, 3, "t", "Moment")
-            plot.format_subplot(fig, 6, 1, "f", "Amplitude (dB)")
-            plot.format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
-            plot.format_subplot(fig, 6, 3, "f", "Amplitude (dB)")
-
+            
+            format_plot(fig)
             plot.fig_save(fig, f"build/3dof/3dof")
         else:
             slice_start = int(0.9 * n)

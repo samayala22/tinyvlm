@@ -1,7 +1,7 @@
 import sys
 
 if sys.platform == "win32":
-    sys.path.append(r".\\build\\windows\\x64\\debug")
+    sys.path.append(r".\\build\\windows\\x64\\release")
 elif sys.platform == "linux":
     sys.path.append(r"./build/linux/x86_64/release")
 else:
@@ -94,6 +94,13 @@ if __name__ == "__main__":
     else:
         torsional_func = dof3.alpha_linear
 
+    # Params
+    flutter_speed = 23.9
+    # param_start = flutter_speed * 0.3
+    # param_end = flutter_speed * 0.6
+    param_start = 7.0
+    param_end = 10.0
+
     v = dof3.Vars()
     v.a = -0.5 
     v.b = 0.127 
@@ -119,6 +126,7 @@ if __name__ == "__main__":
     v.zeta_alpha = 0.01626
     v.zeta_beta = 0.0115
     v.sigma = v.omega_h / v.omega_alpha
+    v.U = param_start
     v.V = v.U / (v.b * v.omega_alpha)
     v.mu = v.m / (np.pi * v.rho * v.b**2)
 
@@ -130,13 +138,6 @@ if __name__ == "__main__":
 
     hbvlm = HBVLM("cpu", ["mesh/3dof_wing_9x5.x", "mesh/3dof_flap_3x5.x"])
     hbvlm.init(dims.n_h, 1.0/v.b)
-
-    # Params
-    flutter_speed = 23.9
-    # param_start = flutter_speed * 0.3
-    # param_end = flutter_speed * 0.6
-    param_start = 7.0
-    param_end = 10.0
 
     # Time integration
     t_final = 2000.0
@@ -160,7 +161,33 @@ if __name__ == "__main__":
     # X0[3] = 5e-3
     # X0[-2] = 0.085
     # X0[-1] = param_start
- 
+
+    # motion = create_motion_system()
+    # Xc_real = X0[:-2].reshape(dims.n_c, dims.n_d).T
+    # R_nlft = motion.fnlf(Xc_real, X0[-2], X0[-1])
+    # R_nlf_fft = np.fft.rfft(R_nlft, dims.n_c, axis=1, norm='backward')
+    # R_nlf = hb.X_to_real(R_nlf_fft / dims.n_c, 0.0).T.reshape(-1)
+    # aero_forces = system.aero_forces(sol.y)
+    # hb_sol_t, hb_sol0 = hb.to_timedomain(0.0, t_final, dt, dims.n_d, X0[:-2], X0[-2], dims.n_h)
+    # hbf_t, hbf = hb.to_timedomain(0.0, t_final, dt, dims.n_d, R_nlf, X0[-2], dims.n_h)
+
+    # fig = plot.create_dofs_figure(["Heave", "Pitch", "Control"])
+    # dof3.plot_solution(fig, aero_forces, sol, v)
+    # plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[0, :], "HB-VLM", 1, 1, 3)
+    # plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[1, :]), "HB-VLM", 3, 1, 3)
+    # plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[2, :]), "HB-VLM", 5, 1, 3)
+
+    # plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 1, 2, 3)
+    # plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[4, :]), "HB-VLM", 3, 2, 3)
+    # plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[5, :]), "HB-VLM", 5, 2, 3)
+
+    # plot.add_data_and_psd(fig, hbf_t, hbf[0, :], "HB-VLM", 1, 3, 3)
+    # plot.add_data_and_psd(fig, hbf_t, hbf[1, :], "HB-VLM", 3, 3, 3)
+    # plot.add_data_and_psd(fig, hbf_t, hbf[2, :], "HB-VLM", 5, 3, 3)
+
+    # dof3.format_plot(fig)
+    # plot.fig_save(fig, f"build/3dof/hbvlm0", pdf=False)
+
     metadata = cont.Metadata()
     metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
@@ -179,7 +206,7 @@ if __name__ == "__main__":
             hb_sol_t, hb_sol0 = hb.to_timedomain(0.0, t_final, dt, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
             aero_forces = system.aero_forces(sol.y)
             fig = plot.create_dofs_figure(["Heave", "Pitch", "Control"])
-            dof3.plot_solution(fig, aero_forces, sol)
+            dof3.plot_solution(fig, aero_forces, sol, v)
 
             plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[0, :], "HB-VLM", 1, 1, 3)
             plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[1, :]), "HB-VLM", 3, 1, 3)
@@ -189,6 +216,7 @@ if __name__ == "__main__":
             plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[4, :]), "HB-VLM", 3, 2, 3)
             plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[5, :]), "HB-VLM", 5, 2, 3)
             
+            dof3.format_plot(fig)
             plot.fig_save(fig, f"build/3dof/hbvlm0")
         else:
             cont.plot_hb_continuation(metadata)
