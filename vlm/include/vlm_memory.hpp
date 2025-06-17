@@ -124,7 +124,7 @@ class TensorView {
                 contiguous *= shape(i);
             }
 
-            assert(contiguous % new_shape[0] == 0);
+            TINY_ASSERT_EQ(contiguous % new_shape[0], 0);
             contiguous /= new_shape[0];
             new_strides[0] = stride(0);
 
@@ -136,7 +136,7 @@ class TensorView {
                     ++i;
                 }
 
-                assert(contiguous % ns == 0);
+                TINY_ASSERT_EQ(contiguous % ns, 0);
                 contiguous /= ns;
                 
                 if (contiguous * ns == shape(i-1)) {
@@ -330,13 +330,13 @@ public:
     inline i64 size_bytes() const { return m_view.size_bytes(); }
     
     inline const View& view() const {
-        if (m_view.size_bytes() == 0) {
+        if (m_view.ptr() == nullptr) {
             TINY_ABORT("Tensor::view() called on uninitialized tensor");
         }
         return m_view;
     }
     inline View& view() {
-        if (m_view.size_bytes() == 0) {
+        if (m_view.ptr() == nullptr) {
             TINY_ABORT("Tensor::view() called on uninitialized tensor");
         }
         return m_view;

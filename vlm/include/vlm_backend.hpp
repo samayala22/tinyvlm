@@ -34,6 +34,7 @@ class Backend {
         [[deprecated]] virtual f32 coeff_steady_cd_single(const TensorView3fD& verts_wake, const TensorView2fD& gamma_wake, const FlowData& flow, f32 area) = 0;
         [[deprecated]] f32 coeff_steady_cd_multi(const MultiTensorView3fD&  verts_wake, const MultiTensorView2fD& gamma_wake, const FlowData& flow, const MultiTensorView2fD& areas);
         
+        // TODO: merge forces_unsteady and forces_unsteady2
         virtual void forces_unsteady(
             const TensorView3fD& verts_wing,
             const TensorView2fD& gamma_delta,
@@ -82,6 +83,7 @@ class Backend {
             const MultiTensorView3fD& forces,
             f32 dt
         );
+
         f32 coeff_cl_multibody(
             const MultiTensorView3fD& aero_forces,
             const MultiTensorView2fD& areas,

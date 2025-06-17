@@ -241,7 +241,19 @@ class AeroelasticSystem:
         # force_structure = self.M_s @ self.coupled_accel(y) + self.D_s @ y[0:3, :] + self.K_s @ y[3:6, :] + self.yn_func(y)[3:6, :]
         # assert np.isclose(force_structure, forces_aero).all()
         return forces_aero
-     
+    
+def plot_solution(fig, aero_forces, mono):
+    plot.add_data_and_psd(fig, mono.t, mono.y[3, :], "Theodorsen", 1, 1) # h
+    plot.add_data_and_psd(fig, mono.t, mono.y[0, :], "Theodorsen", 1, 2) # dh
+    plot.add_data_and_psd(fig, mono.t, aero_forces[0, :]/v.mu, "Theodorsen", 1, 3) # force h
+    plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1) # alpha
+    plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2) # dalpha
+    plot.add_data_and_psd(fig, mono.t, aero_forces[1, :]/v.mu, "Theodorsen", 3, 3) # force alpha
+    plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1) # beta
+    plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
+    plot.add_data_and_psd(fig, mono.t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
+
+
 if __name__ == "__main__":
     # Darabseh 2022
     # v = Vars(
@@ -337,15 +349,7 @@ if __name__ == "__main__":
 
             # Plotting
             fig = plot.create_dofs_figure(["Wing Heave", "Wing Pitch", "Flap Pitch"])
-            plot.add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1) # h
-            plot.add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2) # dh
-            plot.add_data_and_psd(fig, vec_t, aero_forces[0, :]/v.mu, "Theodorsen", 1, 3) # force h
-            plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1) # alpha
-            plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2) # dalpha
-            plot.add_data_and_psd(fig, vec_t, aero_forces[1, :]/v.mu, "Theodorsen", 3, 3) # force alpha
-            plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1) # beta
-            plot.add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
-            plot.add_data_and_psd(fig, vec_t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
+            plot_solution(fig, aero_forces, mono)
 
             # uvlm_file = Path("build/windows/x64/release/3dof.txt")
             # if uvlm_file.exists():

@@ -93,7 +93,7 @@ if __name__ == "__main__":
     # Independent params
     dims = hb.Dims(
         n_d=2,          # number of degrees of freedom
-        n_h=10          # number of harmonics
+        n_h=5          # number of harmonics
     )
 
     vars_b = 0.5 # half chord

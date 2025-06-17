@@ -5,6 +5,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 
 #include "tinyad.hpp"
 #include "tinypbar.hpp"
@@ -36,6 +37,33 @@ namespace py = pybind11;
         std::exit(1); \
     }
 
+struct Vars {
+    f64 a; // Dimensionless distance between mid-chord and EA (-0.5)
+    f64 b; // Semi-chord (0.127 m)
+    f64 c; // Dimensionless distance between flap hinge and mid-chord (0.5); Plunge structural damping coefficient per unit span (1.7628 kg/ms)
+    f64 I_alpha; // Mass moment of inertia of the wing-flap about wing EA per unit span (0.01347 kgm)
+    f64 I_beta; // Mass moment of inertia of the flap about the flap hinge line per unit span (0.0003264 kgm)
+    f64 k_h; // Linear structural stiffness coefficient of plunging per unit span
+    f64 k_alpha; // Linear structural stiffness coefficient of plunging per unit span (2818.8 kg/ms²)
+    f64 k_beta; // Linear structural stiffness coefficient of pitching per unit span (37.34 kgm/s²); Linear structural stiffness coefficient of flap per unit span (3.9 kgm/s²); Mass of wing-aileron per span (1.558 kg/m)
+    f64 m; // Mass of wing-aileron per span
+    f64 m_t; // Mass of wing-aileron and the supports per span
+    f64 r_alpha; // Dimensionless radius of gyration around elastic axis
+    f64 r_beta; // Dimensionless radius of gyration around flap hinge axis
+    f64 S_alpha; // Static mass moment of wing-flap about wing EA per unit span
+    f64 S_beta; // Static mass moment of flap about flap hinge line per unit span
+    f64 x_alpha; // Dimensionless distance between airfoil EA and the center of gravity
+    f64 x_beta; // Dimensionless distance between flap center of gravity and flap hinge axis
+    f64 omega_h; // Uncoupled plunge natural frequency
+    f64 omega_alpha; // Uncoupled pitch natural frequency
+    f64 omega_beta; // Uncoupled flap natural frequency
+    f64 rho; // Fluid density
+    f64 zeta_h; // Plunge damping ratio
+    f64 zeta_alpha; // Pitch damping ratio
+    f64 zeta_beta; // Flap damping ratio
+    f64 U; // Velocity
+};
+
 // TODO: move this somewhere else
 inline i64 total_panels(const MultiDim<2>& assembly_wing) {
     i64 total = 0;
@@ -60,10 +88,10 @@ void build_scaled_fourier_series(TensorView1dH& factors, f64 omega, f64 t) {
 
 class HBVLM {
     public:
-        HBVLM(const std::string& backend_name, const std::string& filename);
+        HBVLM(const std::string& backend_name, const std::vector<std::string>& filename);
         ~HBVLM() = default;
         void init(i32 harmonics, f64 scaling);
-        void run(f64 t_final, f64 omega, f64 vars_b, const Assembly<f64>& assembly, py::array_t<double>& forces_t);
+        void run(f64 t_final, f64 omega, const Vars& v, const Assembly<f64>& assembly, py::array_t<double>& forces_t);
 
         std::unique_ptr<Backend> backend;
         MultiDim<2> assembly_wings;
@@ -73,7 +101,6 @@ class HBVLM {
         MultiTensor3dD verts_wing{backend->memory.get()}; // (nc+1)*(ns+1)*3
         MultiTensor3dH verts_wing_h{backend->memory.get()}; // (nc+1)*(ns+1)*3
         MultiTensor3dD verts_wake{backend->memory.get()}; // (nw+1)*(ns+1)*3
-        MultiTensor3dH verts_wake_h{backend->memory.get()}; // (nw+1)*(ns+1)*3
 
         MultiTensor3dD colloc_d{backend->memory.get()};
         MultiTensor3dH colloc_h{backend->memory.get()};
@@ -87,6 +114,7 @@ class HBVLM {
         Tensor2dD gamma_wing{backend->memory.get()}; // (ns*nc) x time instances
         MultiTensor2dD gamma_wing_delta{backend->memory.get()}; // ns x nc
         Tensor2dD dgamma_wing_dt{backend->memory.get()}; // dgamma/dt
+        MultiTensor2dD dgamma{backend->memory.get()};
 
         Tensor2dD residual{backend->memory.get()}; // (ns*nc) x uharmonics
         Tensor2dH dft_h{backend->memory.get()}; // uharmonics x uharmonics
@@ -111,11 +139,11 @@ class HBVLM {
         void alloc_buffers();
 };
 
-HBVLM::HBVLM(const std::string& backend_name, const std::string& filename) : backend(create_backend(backend_name)) {
-    const std::vector<std::string> meshes = {filename};
+HBVLM::HBVLM(const std::string& backend_name, const std::vector<std::string>& meshes) : backend(create_backend(backend_name)) {
+    TINY_ASSERT_EQ(meshes.size(), 2);
     // Read the sizes of all the meshes
     for (const auto& m_name : meshes) {
-        const MeshIO mesh_io{"plot3d"}; // TODO, infer from mesh_name
+        const MeshIO mesh_io{"plot3d"};
         auto [nc,ns] = mesh_io.get_dims(m_name);
         assembly_wings.push_back({ns, nc});
     }
@@ -133,7 +161,7 @@ HBVLM::HBVLM(const std::string& backend_name, const std::string& filename) : bac
     // Read the files
     for (i64 i = 0; i < meshes.size(); i++) {
         const MeshIO mesh_io{"plot3d"};
-        mesh_io.read(meshes[i], verts_wing_init_h.views()[i], true);
+        mesh_io.read(meshes[i], verts_wing_init_h.views()[i], false);
     }
 
     for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
@@ -185,6 +213,7 @@ void HBVLM::alloc_buffers() {
     gamma_coeffs.view().fill(0.f);
     gamma_wing.init({n, unknowns});
     gamma_wing_delta.init(panels_2D);
+    dgamma.init(panels_2D);
     dgamma_wing_dt.init({n, unknowns});
     residual.init({n, unknowns});
     dft_d.init({unknowns, unknowns});
@@ -227,8 +256,8 @@ void gamma_wake_from_coeffs(
     }
 }
 
-void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembly, py::array_t<double>& forces_t) {
-    // const tiny::ScopedTimer timer("HBVLM::run");
+void HBVLM::run(f64 t_start, f64 omega, const Vars& v, const Assembly<f64>& assembly, py::array_t<double>& forces_t) {
+    const tiny::ScopedTimer timer("HBVLM::run");
 
     const f64 period = 2.0f * PI_f / omega;
     const f64 period_interval = period / (f64)m_coeffs;
@@ -242,7 +271,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
     for (const auto& [c_h, c_d] : zip(colloc_h.views(), colloc_d.views())) c_d.to(c_h);
 
     // Compute the fixed time step
-    const auto& verts_first_wing = verts_wing_h.views()[0];
+    const auto& verts_first_wing = verts_wing_h.views()[1];
     const f64 dx = verts_first_wing(0, -1, 0) - verts_first_wing(0, -2, 0);
     const f64 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
     const f64 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
@@ -322,9 +351,12 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
         auto gamma_out = _gamma_out.reshape(lhs.view().shape(0), m_coeffs);
 
         rhs.view().fill(0.f);
+        // auto gamma_wing0 = gamma_in.slice(Range{0, colloc_d.views()[0].size()}, All);
+        auto gamma_wing1 = gamma_in.slice(Range{colloc_d.views()[0].shape(0)*colloc_d.views()[0].shape(1), -1}, All);
+
         // Note this only work on a single wing
-        auto te_gamma = gamma_in
-            .reshape(colloc_d.views()[0].shape(0), colloc_d.views()[0].shape(1), gamma_in.shape(1))
+        auto te_gamma = gamma_wing1
+            .reshape(colloc_d.views()[1].shape(0), colloc_d.views()[1].shape(1), gamma_wing1.shape(1))
             .slice(All, -1, All);
             
         // For each unknown we fill their respective rhs column in a matrix free fashion
@@ -363,7 +395,7 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
 
             auto rhs_s = rhs.view().slice(All, s);
             backend->rhs_assemble_velocities(rhs_s, normals_d.views(), velocities.views());
-            backend->gamma_wake_from_coeffs(gamma_wake[s].views()[0], te_gamma, m_harmonics, t, omega, dt, t_steps);
+            backend->gamma_wake_from_coeffs(gamma_wake[s].views()[1], te_gamma, m_harmonics, t, omega, dt, t_steps); // only the flap has a wake
             backend->rhs_assemble_wake_influence(rhs_s, gamma_wake[s].views(), colloc_d.views(), normals_d.views(), verts_wake.views(), assembly.lifting(), (i32)t_steps);
         } // unknowns for loop
 
@@ -390,11 +422,15 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
 
     // Compute the forces coefficients
     {
-        // Maybe we should use mesh dims throughout the code ...
-        i64 c_ns = colloc_d.views()[0].shape(0);
-        i64 c_nc = colloc_d.views()[0].shape(1);
         backend->blas->gemm(1.0f, gamma_coeffs.view(), dft_d.view(), 0.0f, gamma_wing.view(), BLAS::Trans::No, BLAS::Trans::Yes);
         backend->blas->gemm(1.0f, gamma_coeffs.view(), ddft_d.view(), 0.0f, dgamma_wing_dt.view(), BLAS::Trans::No, BLAS::Trans::Yes);
+        
+        i64 wing_size = colloc_d.views()[0].shape(0)*colloc_d.views()[0].shape(1);
+        auto gamma_wing0 = gamma_wing.view().slice(Range{0, wing_size}, All);
+        auto gamma_wing1 = gamma_wing.view().slice(Range{wing_size, -1}, All);
+        auto dgamma_wing0 = dgamma_wing_dt.view().slice(Range{0, wing_size}, All);
+        auto dgamma_wing1 = dgamma_wing_dt.view().slice(Range{wing_size, -1}, All);
+
         for (i32 s = 0; s < m_coeffs; s++) {
             const f64 t_final = period * (f64)s / (f64)(m_coeffs);
             const i64 t_steps = static_cast<i64>(std::round(t_final / dt));
@@ -428,62 +464,133 @@ void HBVLM::run(f64 t_start, f64 omega, f64 vars_b, const Assembly<f64>& assembl
                 velocities_h_m.to(velocities_m);
             }
             const linalg::double3 freestream = -assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
+            
+            auto gamma_wing0_s = gamma_wing0.slice(All, s).reshape(colloc_d.views()[0].shape(0), colloc_d.views()[0].shape(1));
+            auto dgamma_wing0_s = dgamma_wing0.slice(All, s).reshape(colloc_d.views()[0].shape(0), colloc_d.views()[0].shape(1));
+            auto gamma_wing1_s = gamma_wing1.slice(All, s).reshape(colloc_d.views()[1].shape(0), colloc_d.views()[1].shape(1));
+            auto dgamma_wing1_s = dgamma_wing1.slice(All, s).reshape(colloc_d.views()[1].shape(0), colloc_d.views()[1].shape(1));
+            
+            gamma_wing0_s.to(gamma_wing_delta.views()[0]);
+            gamma_wing1_s.to(gamma_wing_delta.views()[1]);
+            dgamma_wing0_s.to(dgamma.views()[0]);
+            dgamma_wing1_s.to(dgamma.views()[1]);
 
-            auto gamma_wing_s = gamma_wing.view().slice(All, s).reshape(c_ns, c_nc);
-            auto dgamma_wing_dt_s = dgamma_wing_dt.view().slice(All, s).reshape(c_ns, c_nc);
-            gamma_wing_s.to(gamma_wing_delta.views()[0]);
             backend->blas->axpy(
                 -1.0f,
-                gamma_wing_s.slice(All, Range{0, -2}),
+                gamma_wing0_s.slice(All, -1),
+                gamma_wing_delta.views()[1].slice(All, 0)
+            );
+            
+            backend->blas->axpy(
+                -1.0f,
+                gamma_wing0_s.slice(All, Range{0, -2}),
                 gamma_wing_delta.views()[0].slice(All, Range{1, -1})
             );
+
+            backend->blas->axpy(
+                -1.0f,
+                gamma_wing1_s.slice(All, Range{0, -2}),
+                gamma_wing_delta.views()[1].slice(All, Range{1, -1})
+            );
+
             backend->forces_unsteady2(
                 verts_wing.views()[0],
                 gamma_wing_delta.views()[0],
-                dgamma_wing_dt_s,
+                dgamma.views()[0],
                 velocities.views()[0],
                 areas_d.views()[0],
                 normals_d.views()[0],
                 aero_forces.views()[0]
             ); 
+            backend->forces_unsteady2(
+                verts_wing.views()[1],
+                gamma_wing_delta.views()[1],
+                dgamma.views()[1],
+                velocities.views()[1],
+                areas_d.views()[1],
+                normals_d.views()[1],
+                aero_forces.views()[1]
+            );
+
             forces_t_v(0, s) = backend->coeff_cl_multibody(
                 aero_forces.views(),
                 areas_d.views(),
                 freestream,
                 rho
             );
-            const auto transform_node0 = assembly.surface_kinematics()[0];
-            const auto transform_mat = transform_node0->transform(t);
-            auto ref_pt = linalg::mul(transform_mat, {0.5f, 0.0f, 0.0f, 1.0f});
+
+            const auto transform0 = assembly.surface_kinematics()[0]->transform(t);
+            const auto transform1 = assembly.surface_kinematics()[1]->transform(t);
+
+            auto ref_pt_a = linalg::mul(transform0, {1 + v.a, 0.0f, 0.0f, 1.0f});
+            auto ref_pt_b = linalg::mul(transform1, {1 + v.c, 0.0f, 0.0f, 1.0f});
+
             forces_t_v(1, s) = backend->coeff_cm_multibody(
                 aero_forces.views(),
                 verts_wing.views(),
                 areas_d.views(),
-                {ref_pt.x, ref_pt.y, ref_pt.z},
+                {ref_pt_a.x, ref_pt_a.y, ref_pt_a.z},
                 freestream,
                 rho
+            ).y;
+
+            forces_t_v(2, s) = backend->coeff_cm(
+                aero_forces.views()[1],
+                verts_wing.views()[1],
+                {ref_pt_b.x, ref_pt_b.y, ref_pt_b.z},
+                freestream,
+                1.0f, // rho_inf = 1
+                backend->sum(areas_d.views()[1]),
+                backend->mesh_mac(verts_wing.views()[1], areas_d.views()[1])
             ).y;
         }
     }
 }
 
-PYBIND11_MODULE(libhbvlm, m) {
+PYBIND11_MODULE(libhbvlm3, m) {
     py::class_<HBVLM>(m, "HBVLM")
-        .def(py::init<const std::string&, const std::string&>())
+        .def(py::init<const std::string&, const std::vector<std::string>&>())
         .def("init", &HBVLM::init)
-        .def("run", [](HBVLM& self, f64 omega, py::array_t<double> dyn_f, py::array_t<double> force_t) {
-            const f64 b = 0.5f;
+        .def("run", [](HBVLM& self, f64 omega, f64 U, py::array_t<double> dyn_f, py::array_t<double> force_t) {
+            Vars v;
+            v.a = -0.5f;
+            v.b = 0.127f;
+            v.c = 0.5f;
+            v.I_alpha = 0.01347f;
+            v.I_beta = 0.0003264f;
+            v.k_h = 2818.8f;
+            v.k_alpha = 37.34f;
+            v.k_beta = 3.9f;
+            v.m = 1.5666f;
+            v.m_t = 3.39298f;
+            v.r_alpha = 0.7321f;
+            v.r_beta = 0.1140f;
+            v.S_alpha = 0.08587f;
+            v.S_beta = 0.00395f;
+            v.x_alpha = 0.4340f;
+            v.x_beta = 0.02f;
+            v.omega_h = 42.5352f;
+            v.omega_alpha = 52.6506f;
+            v.omega_beta = 109.3093f;
+            v.rho = 1.225f;
+            v.zeta_h = 0.0113f;
+            v.zeta_alpha = 0.01626f;
+            v.zeta_beta = 0.0115f;
+            v.U = U;
+
             const f64 cycles = 3.0f;
-            const f64 u_inf = 1.0f;
             const f64 t_final = cycles * 2.0f * PI_f / omega;
-            const f64 a_h = -0.5f;
             const i32 H = self.m_harmonics;
 
             auto r = dyn_f.unchecked<2>();
 
             KinematicsTree<f64> kinematics_tree;
-            auto fs = kinematics_tree.add([=](const fwd::Double& t) {
-                return translation_matrix<fwd::Double>({-u_inf * t, 0.f, 0.f});
+            auto freestream = kinematics_tree.add([=](const fwd::Double& t) {
+                return translation_matrix<fwd::Double>({
+                    - (v.U / (v.b * v.omega_alpha)) * t,
+                    0.0f,
+                    0.0f
+                });
             });
             
             auto heave = kinematics_tree.add([=](const fwd::Double& t) {
@@ -494,7 +601,7 @@ PYBIND11_MODULE(libhbvlm, m) {
                     z += fwd::sin(omega * t * k) * r(0, 2*h+2);
                 }
                 return translation_matrix<fwd::Double>({0.f, 0.f, -z});
-            })->after(fs);
+            })->after(freestream);
             
             auto pitch = kinematics_tree.add([=](const fwd::Double& t) {
                 fwd::Double alpha = r(1, 0);
@@ -504,13 +611,29 @@ PYBIND11_MODULE(libhbvlm, m) {
                     alpha += fwd::sin(omega * t * k) * r(1, 2*h+2);
                 }
                 return rotation_matrix<fwd::Double>(
-                    {1.f + a_h, 0.0f, 0.0f},
+                    {1.f + v.a, 0.0f, 0.0f},
                     {0.0f, 1.0f, 0.0f}, 
-                    alpha);
+                    alpha
+                );
             })->after(heave);
 
-            Assembly<f64> assembly(fs);
-            assembly.add("your_mesh_name_here.x", pitch);  // Pass actual mesh name
-            self.run(t_final, omega, b, assembly, force_t);
+            auto control = kinematics_tree.add([=](const fwd::Double& t) {
+                fwd::Double beta = r(2, 0);
+                for (i32 h = 0; h < H; h++) {
+                    f64 k = (f64)(h+1);
+                    beta += fwd::cos(omega * t * k) * r(2, 2*h+1);
+                    beta += fwd::sin(omega * t * k) * r(2, 2*h+2);
+                }
+                return rotation_matrix<fwd::Double>(
+                    {1.f + v.c, 0.0f, 0.0f},
+                    {0.0f, 1.0f, 0.0f}, 
+                    beta
+                );
+            })->after(pitch);
+
+            Assembly<f64> assembly(freestream);
+            assembly.add("wing", pitch, false);
+            assembly.add("flap", control, true);
+            self.run(t_final, omega, v, assembly, force_t);
         });
 }

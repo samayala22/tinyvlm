@@ -6,29 +6,10 @@
 
 #include "tinycombination.hpp"
 #include "tinypbar.hpp"
+#include "tinytest.hpp"
 
 #include <fstream>
 #include <memory>
-
-#define ASSERT_EQ(x, y) \
-    do { \
-        auto val1 = (x); \
-        auto val2 = (y); \
-        if (!(val1 == val2)) { \
-            std::cerr << "Assertion failed: " << #x << " == " << #y << " (Left: " << val1 << ", Right: " << val2 << ")\n"; \
-            std::abort(); \
-        } \
-    } while (0)
-
-#define ASSERT_NEAR(x, y, tol) \
-    do { \
-        auto val1 = (x); \
-        auto val2 = (y); \
-        if (!(std::abs(val1 - val2) <= tol)) { \
-            std::cerr << "Assertion failed: |" << #x << " - " << #y << "| <= " << tol << " (Left: " << val1 << ", Right: " << val2 << ", Diff: " << std::abs(val1 - val2) << ")\n"; \
-            std::abort(); \
-        } \
-    } while (0)
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
@@ -67,7 +48,7 @@ struct Vars {
     f32 U; // Velocity
 };
 
-inline linalg::float4x4 dual_to_float(const KinematicMatrixDual& m) {
+inline linalg::float4x4 dual_to_float(const KinematicMatrixDual<f32>& m) {
     return {
         {m.x.x.val(), m.x.y.val(), m.x.z.val(), m.x.w.val()},
         {m.y.x.val(), m.y.y.val(), m.y.z.val(), m.y.w.val()},
@@ -80,7 +61,7 @@ constexpr i32 DOF = 3;
 
 class UVLM_3DOF final: public Simulation {
     public:
-        UVLM_3DOF(const std::string& backend_name, const Assembly& assembly);
+        UVLM_3DOF(const std::string& backend_name, const Assembly<f32>& assembly);
         ~UVLM_3DOF() = default;
         void run(const Vars& vars, f32 t_final);
 
@@ -135,19 +116,19 @@ class UVLM_3DOF final: public Simulation {
 
         NewmarkBeta integrator{backend.get()};
 
-        Assembly m_assembly;
+        Assembly<f32> m_assembly;
     private:
         void alloc_buffers();
         void update_wake_and_gamma(i64 iteration);
-        void update_transforms(const Assembly& assembly, f32 t);
+        void update_transforms(const Assembly<f32>& assembly, f32 t);
         void initialize_structure_data(const Vars& vars, const i64 t_steps, const f32 dt_nd);
         f32 wing_alpha(); // get pitch angle from verts_wing_h
         f32 flap_beta();
         f32 wing_h(f32 elastic_dst); // get wing elastic height at given dist
 };
 
-UVLM_3DOF::UVLM_3DOF(const std::string& backend_name, const Assembly& assembly) : Simulation(backend_name, assembly.mesh_filenames(), false), m_assembly(assembly) {
-    ASSERT_EQ(assembly.num_surfaces(), 2);
+UVLM_3DOF::UVLM_3DOF(const std::string& backend_name, const Assembly<f32>& assembly) : Simulation(backend_name, assembly.mesh_filenames(), false), m_assembly(assembly) {
+    TINY_ASSERT_EQ(assembly.num_surfaces(), 2);
     solver = backend->create_lu_solver();
     accel_solver = backend->create_lu_solver();
     alloc_buffers();
@@ -302,13 +283,13 @@ void UVLM_3DOF::update_wake_and_gamma(i64 iteration) {
     }
 }
 
-inline linalg::float3 linear_velocity(const KinematicMatrixDual& transform_dual, const linalg::float3 vertex) {
+inline linalg::float3 linear_velocity(const KinematicMatrixDual<f32>& transform_dual, const linalg::float3 vertex) {
     linalg::vec<fwd::Float, 4> new_pt = linalg::mul(transform_dual, {vertex.x, vertex.y, vertex.z, 1.0f});
     return {new_pt.x.grad(), new_pt.y.grad(), new_pt.z.grad()};
 }
 
 inline void wing_velocities(
-    const KinematicMatrixDual& transform_dual,
+    const KinematicMatrixDual<f32>& transform_dual,
     const TensorView3fH& colloc_h,
     const TensorView3fH& velocities_h,
     const TensorView3fD& velocities_d
@@ -326,7 +307,7 @@ inline void wing_velocities(
     velocities_h.to(velocities_d);
 }
 
-void UVLM_3DOF::update_transforms(const Assembly& assembly, f32 t) {
+void UVLM_3DOF::update_transforms(const Assembly<f32>& assembly, f32 t) {
     for (i64 m = 0; m < assembly_wings.size(); m++) {
         auto transform = assembly.surface_kinematics()[m]->transform(t);
         transform.store(transforms_h.views()[m].ptr(), transforms_h.views()[m].stride(1));
@@ -465,7 +446,7 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
     const f32 dy = verts_first_wing(0, -1, 1) - verts_first_wing(0, -2, 1);
     const f32 dz = verts_first_wing(0, -1, 2) - verts_first_wing(0, -2, 2);
     const f32 last_panel_chord = std::sqrt(dx*dx + dy*dy + dz*dz);
-    ASSERT_NEAR(linalg::length(m_assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f})), v.U / (v.b * v.omega_alpha), 1e-6f);
+    TINY_ASSERT_NEAR(linalg::length(m_assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f})), v.U / (v.b * v.omega_alpha), 1e-6f);
     const f32 dt_nd = last_panel_chord / linalg::length(m_assembly.kinematics()->linear_velocity(0.0f, {0.f, 0.f, 0.f}));
     const i64 t_steps = static_cast<i64>(t_final_nd / dt_nd);
     t_h.init({t_steps-2});
@@ -536,9 +517,9 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
         const f32 real_alpha = wing_alpha();
         const f32 real_beta = flap_beta();
         const f32 real_h = wing_h(1 + v.a);
-        ASSERT_NEAR(real_h, -u_h.view()(0, i), 5e-5f);
-        ASSERT_NEAR(real_alpha, u_h.view()(1, i), 5e-5f);
-        ASSERT_NEAR(real_beta, u_h.view()(2, i), 5e-5f);
+        TINY_ASSERT_NEAR(real_h, -u_h.view()(0, i), 5e-5f);
+        TINY_ASSERT_NEAR(real_alpha, u_h.view()(1, i), 5e-5f);
+        TINY_ASSERT_NEAR(real_beta, u_h.view()(2, i), 5e-5f);
 
         for (const auto& [gamma_wing_i, gamma_wing_prev_i] : zip(gamma_wing.views(), gamma_wing_prev.views())) {
             gamma_wing_i.to(gamma_wing_prev_i);
@@ -576,14 +557,14 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
             v_d.view().slice(All, i+1).to(v_h.view().slice(All, i+1));
             a_d.view().slice(All, i+1).to(a_h.view().slice(All, i+1));
 
-            const KinematicNode heave([&](const fwd::Float& t) {
+            const KinematicNode<f32> heave([&](const fwd::Float& t) {
                 return translation_matrix<fwd::Float>({
                     0.0f,
                     0.0f,
                     - u_h.view()(0, i+1) - v_h.view()(0, i+1) * t
                 });
             });
-            const KinematicNode wing_pitch([&](const fwd::Float& t) {
+            const KinematicNode<f32> wing_pitch([&](const fwd::Float& t) {
                 return rotation_matrix<fwd::Float>(
                     {
                         1.f + v.a,
@@ -598,7 +579,7 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
                     u_h.view()(1, i+1) + v_h.view()(1, i+1) * t
                 );
             });
-            const KinematicNode flap_pitch([&](const fwd::Float& t) {
+            const KinematicNode<f32> flap_pitch([&](const fwd::Float& t) {
                 return rotation_matrix<fwd::Float>(
                     {
                         1.f + v.c,
@@ -788,7 +769,7 @@ int main() {
 
     const f32 t_final_nd = 5.f * v.omega_alpha;
 
-    KinematicsTree kinematics_tree;
+    KinematicsTree<f32> kinematics_tree;
 
     auto freestream = kinematics_tree.add([=](const fwd::Float& t) {
         return translation_matrix<fwd::Float>({
@@ -799,7 +780,7 @@ int main() {
     });
 
     for (const auto& [surface, backend_name] : simulations) {
-        Assembly assembly(freestream);
+        Assembly<f32> assembly(freestream);
         for (const auto& [mesh_name, lifting] : surface.get()) {
             assembly.add(mesh_name, freestream, lifting);
         }

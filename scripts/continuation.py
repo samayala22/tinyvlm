@@ -233,11 +233,11 @@ def continuation(X0, motion, metadata):
         det_jac_ext = np.linalg.det(J)
 
         if det_jac * det_jac_old < 0 and det_jac_ext * det_jac_ext_old > 0:
-            metadata.fold_pt.append(Xtmp[-1])
+            metadata.fold_pt.append(iteration)
             print("!!! Fold point detected !!!")
         elif det_jac * det_jac_old < 0 and det_jac_ext * det_jac_ext_old < 0:
             print("!!! Branch point detected !!!")
-            metadata.branch_pt.append(Xtmp[-1])
+            metadata.branch_pt.append(iteration)
 
         det_jac_old = det_jac
         det_jac_ext_old = det_jac_ext
