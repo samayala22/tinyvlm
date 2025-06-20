@@ -1,4 +1,4 @@
-import argparse, hashlib, pickle
+import argparse, hashlib, pickle, json
 from enum import Enum
 
 import numpy as np
@@ -147,9 +147,14 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, ds, *args)
     return sol.x, jac, nfev, True
 
 def hash_metadata(metadata):
-    # Serialize the object (excluding unpickleable fields if needed)
-    data = pickle.dumps(metadata.__dict__)
-    return hashlib.md5(data).hexdigest()[:8]  # Short hash
+    params = {
+        "name":         metadata.name,
+        "start":  metadata.X[-1, 0],
+        "end":   metadata.X[-1, -1],
+        "iterations": metadata.X.shape[1]
+    }
+    j = json.dumps(params, sort_keys=True).encode("utf8")
+    return hashlib.md5(j).hexdigest()[:8]
 
 def plot_hb(X, iteration, dims):
     fig = plot.create_dofs_figure(["Heave", "Pitch"], f"U = {X[-1]:.2f}")
@@ -169,7 +174,7 @@ def continuation(X0, motion, metadata):
     ds = metadata.ds[0]
     ds_min = ds / 5.0
     ds_max = ds * 5.0
-    nfev_opt = 10 + 2 * X0.shape[0] * 1 # optimal nubmer of function evals
+    nfev_opt = 5 + 2 * X0.shape[0] * 1 # optimal nubmer of function evals
     
     X_mat = np.zeros((X0.shape[0], metadata.max_steps))
 
@@ -228,7 +233,13 @@ def continuation(X0, motion, metadata):
         # Corrector step
         Xtmp, J, nfev, success = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, Parametrisation.ArcLength, ds, motion, metadata.dims)
         if not success:
-            break
+            if ds > ds_min:
+                print(f"Nonlinear solver failed, reducing step size from {ds:.3f} to {ds/2:.3f}")
+                ds /= 2.0
+                continue
+            else:
+                print("Nonlinear solver failed, continuation stopped")
+                break
         det_jac = np.linalg.det(J[:-1, :-1])
         det_jac_ext = np.linalg.det(J)
 
@@ -275,7 +286,7 @@ def plot_hb_continuation(metadata):
     dofs = metadata.dims.n_d
     print(f"dofs: {dofs}")
     
-    fig = plot.fig_create(dofs, 1, tuple(f"DOF {i+1}" for i in range(dofs)), "Continuation")
+    fig = plot.fig_create(dofs+1, 1, tuple([f"DOF {i+1}" for i in range(dofs)] + ["Omega"]), "Continuation")
 
     X_mat_h = metadata.X[:-2, :]
     for dof in range(dofs):
@@ -292,6 +303,15 @@ def plot_hb_continuation(metadata):
                 col=1
             )
         plot.format_subplot(fig, dof+1, 1, r"$\bar{U}$", f"$||H_{dof+1}||^{2}$")
+    fig.add_trace(
+        go.Scatter(
+            x = metadata.X[-1, :],
+            y = metadata.X[-2, :],
+            mode = "lines+markers"
+        ),
+        row=dofs+1,
+        col=1
+    )
     plot.fig_save(fig, f"build/continuation/continuation_{hash_metadata(metadata)}", pdf=False)
 
 def parser():
@@ -303,4 +323,5 @@ if __name__ == "__main__":
     args = parser().parse_args()
     with open(args.filename, 'rb') as f:
         metadata = pickle.load(f)
+    print(f"Hash: {hash_metadata(metadata)}")
     plot_hb_continuation(metadata)
