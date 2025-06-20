@@ -308,8 +308,8 @@ if __name__ == "__main__":
     # U_vec = [12.63158]
     # U_vec = [12.36842] # Non symmetric 2 period LCO
     # U_vec = [12.75168] # Bifuracation reports many points ?
-    U_vec = [7.0]
-    # U_vec = np.linspace(0.2, 22.5, 200)
+    # U_vec = [7.0]
+    U_vec = np.linspace(0.2, 22.5, 250)
 
     peaks_data = [[], [], []]
     peaks_U = [[], [], []]

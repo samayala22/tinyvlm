@@ -20,7 +20,7 @@ import plotting as plot
 
 from libhbvlm3 import HBVLM
 
-BETA_NL_DAMPING = True
+BETA_NL_DAMPING = False
 
 @dataclass
 class System:
@@ -32,18 +32,23 @@ class System:
     dKdU   : callable
     fnlt   : callable        # time‐domain NL force
     fnlf   : callable        # frequency‐domain NL force
-
+ 
 def nonlinear_damping(A, omega):
-    f = 0.2
-    z = 0.01
-    A0 = 2.0*np.pi / 180
-    return (A/A0) * z * np.exp(-(omega - f)**2/f)
+    """
+    A: Amplitude
+    omega: frequency in Hz
+    """
+    a3 = -1.1
+    a2 = 2.0
+    olog = np.log10(omega)
+    return v.zeta_beta * np.max(a3 * olog**3 + a2 * olog**2 + 1, 0.2)
 
 def create_motion_system() -> System:
     def fnlt(X, u, u_dot, omega, U):
         if BETA_NL_DAMPING:
+            freq = omega * v.omega_alpha # dimensional frequency
             A = np.sqrt(X[2, 1]**2 + X[2, 2]**2) # Amplitude of first harmonic
-            beta_damping = - (v.omega_beta / v.omega_alpha) * v.r_beta**2 * nonlinear_damping(A, omega)
+            beta_damping = - (v.omega_beta / v.omega_alpha) * v.r_beta**2 * nonlinear_damping(A, freq)
         else:
             beta_damping = 0.0
         beta_stiffness = - ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * torsional_func(u[2])
@@ -80,7 +85,8 @@ def create_motion_system() -> System:
         D_s = np.zeros((3,3))
         D_s[0, 0] = v.sigma * v.zeta_h
         D_s[1, 1] = v.r_alpha**2 * v.zeta_alpha
-        D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
+        if not BETA_NL_DAMPING:
+            D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
         D_s = 2 * D_s
         return D_s
     
@@ -175,32 +181,6 @@ if __name__ == "__main__":
     # X0[3] = 5e-3
     # X0[-2] = 0.085
     # X0[-1] = param_start
-
-    # motion = create_motion_system()
-    # Xc_real = X0[:-2].reshape(dims.n_c, dims.n_d).T
-    # R_nlft = motion.fnlf(Xc_real, X0[-2], X0[-1])
-    # R_nlf_fft = np.fft.rfft(R_nlft, dims.n_c, axis=1, norm='backward')
-    # R_nlf = hb.X_to_real(R_nlf_fft / dims.n_c, 0.0).T.reshape(-1)
-    # aero_forces = system.aero_forces(sol.y)
-    # hb_sol_t, hb_sol0 = hb.to_timedomain(0.0, t_final, dt, dims.n_d, X0[:-2], X0[-2], dims.n_h)
-    # hbf_t, hbf = hb.to_timedomain(0.0, t_final, dt, dims.n_d, R_nlf, X0[-2], dims.n_h)
-
-    # fig = plot.create_dofs_figure(["Heave", "Pitch", "Control"])
-    # dof3.plot_solution(fig, aero_forces, sol, v)
-    # plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[0, :], "HB-VLM", 1, 1, 3)
-    # plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[1, :]), "HB-VLM", 3, 1, 3)
-    # plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[2, :]), "HB-VLM", 5, 1, 3)
-
-    # plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 1, 2, 3)
-    # plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[4, :]), "HB-VLM", 3, 2, 3)
-    # plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[5, :]), "HB-VLM", 5, 2, 3)
-
-    # plot.add_data_and_psd(fig, hbf_t, hbf[0, :], "HB-VLM", 1, 3, 3)
-    # plot.add_data_and_psd(fig, hbf_t, hbf[1, :], "HB-VLM", 3, 3, 3)
-    # plot.add_data_and_psd(fig, hbf_t, hbf[2, :], "HB-VLM", 5, 3, 3)
-
-    # dof3.format_plot(fig)
-    # plot.fig_save(fig, f"build/3dof/hbvlm0", pdf=False)
 
     metadata = cont.Metadata()
     metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
