@@ -161,7 +161,7 @@ if __name__ == "__main__":
 
     # Time integration
     t_final = 2000.0
-    dt = 0.2
+    dt = 0.2 
     vec_t = np.arange(0, t_final, dt)
     y0 = np.zeros(8, dtype=np.float64) # hd, ad, bd, h, a, b, x1, x2
     y0[3] = 0.01 / v.b # h
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
-    metadata.max_steps = 1
+    metadata.max_steps = 2
     metadata.scaling = False
     metadata.step_adapt = True
     metadata.ds = [0.05]

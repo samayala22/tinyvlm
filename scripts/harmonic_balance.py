@@ -9,6 +9,7 @@ class Dims():
         self.n_h = n_h
         self.n_s = (n_h + 1) * (2**5)
         self.n_c = 2 * n_h + 1
+        self.n_u = self.n_d * self.n_c
 
 def create_lanczos_filter(N, m=1):
     L = np.zeros(N)
@@ -60,26 +61,28 @@ def nabla(H):
     return nabla
 
 def linear_residual(X, motion, dims):
-    Om = X[-2]
+    omega_idx = dims.n_u - X.shape[0]
+    Om = X[omega_idx]
     param = X[-1]
     sys = motion()
     M = sys.M(param)
     C = sys.C(param)
     K = sys.K(param)
 
-    R_lin = np.zeros(X.shape[0]-2)
+    R_lin = np.zeros(dims.n_u)
     nab = nabla(dims.n_h)
     Z = np.kron(Om**2 * nab @ nab, M) + np.kron(Om * nab, C) + np.kron(np.eye(dims.n_c), K)
-    R_lin = Z @ X[:-2]
+    R_lin = Z @ X[:omega_idx]
     return R_lin
 
 def nonlinear_residual(X, motion, dims):
+    omega_idx = dims.n_u - X.shape[0]
     lanczos_m = 0.0
-    Om = X[-2]
+    Om = X[omega_idx]
     param = X[-1]
     sys = motion()
 
-    Xc_real = X[:-2].reshape(dims.n_c, dims.n_d).T
+    Xc_real = X[:omega_idx].reshape(dims.n_c, dims.n_d).T
     Xc = X_to_complex(Xc_real)
     k = np.arange(dims.n_h + 1)
     q = np.fft.irfft(Xc, dims.n_s, axis=1, norm='forward')
@@ -102,7 +105,8 @@ def residual(X, *args):
     return linear_residual(X, *args) + nonlinear_residual(X, *args)
 
 def jacobian(X, motion, dims):
-    Om = X[-2]
+    omega_idx = dims.n_u - X.shape[0]
+    Om = X[omega_idx]
     param = X[-1]
     sys = motion()
     M = sys.M(param)
@@ -114,13 +118,17 @@ def jacobian(X, motion, dims):
 
     nab = nabla(dims.n_h)
 
-    J_lin = np.zeros((X.shape[0]-2, X.shape[0]))
+    J_lin = np.zeros((dims.n_u, X.shape[0]))
 
-    J_lin[:, :-2] = np.kron(Om**2 * nab @ nab, M) + np.kron(Om * nab, C) + np.kron(np.eye(dims.n_c), K)
-    J_lin[:, -2] = (np.kron(Om**2 * nab @ nab, dMdU) + np.kron(Om * nab, dCdU) + np.kron(np.eye(dims.n_c), dKdU)) @ X[:-2]
-    J_lin[:, -1] = (np.kron(2*Om * nab @ nab, M) + np.kron(nab, C)) @ X[:-2]
+    J_lin[:, :omega_idx] = np.kron(Om**2 * nab @ nab, M) + np.kron(Om * nab, C) + np.kron(np.eye(dims.n_c), K)
+    J_lin[:, omega_idx] = (np.kron(2*Om * nab @ nab, M) + np.kron(nab, C)) @ X[:omega_idx]
+    if omega_idx == -2:
+        J_lin[:, -1] = (np.kron(Om**2 * nab @ nab, dMdU) + np.kron(Om * nab, dCdU) + np.kron(np.eye(dims.n_c), dKdU)) @ X[:omega_idx]
     
-    J_nlin = fd.numerical_jac(nonlinear_residual, X)
+    # J_lin2 = fd.numerical_jac(linear_residual, X, motion, dims)
+    # np.testing.assert_allclose(J_lin, J_lin2)
+
+    J_nlin = fd.numerical_jac(nonlinear_residual, X, motion, dims)
     return J_lin + J_nlin
 
 def integral_orthogonal_phase_condition(X, X_ref, motion, dims):
