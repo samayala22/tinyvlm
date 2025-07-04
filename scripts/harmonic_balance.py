@@ -7,7 +7,8 @@ class Dims():
         # assert ((n_h+1) & n_h) == 0 # H+1 should be a power of 2
         self.n_d = n_d
         self.n_h = n_h
-        self.n_s = (n_h + 1) * (2**5)
+        self.n_s = (n_h + 1) * (2**6)
+        print(f"n_s: {self.n_s}")
         self.n_c = 2 * n_h + 1
         self.n_u = self.n_d * self.n_c
 
@@ -75,6 +76,8 @@ def linear_residual(X, motion, dims):
     R_lin = Z @ X[:omega_idx]
     return R_lin
 
+import time
+
 def nonlinear_residual(X, motion, dims):
     omega_idx = dims.n_u - X.shape[0]
     lanczos_m = 0.0
@@ -87,10 +90,10 @@ def nonlinear_residual(X, motion, dims):
     k = np.arange(dims.n_h + 1)
     q = np.fft.irfft(Xc, dims.n_s, axis=1, norm='forward')
     q_dot = np.fft.irfft(1j * Om * k * Xc, dims.n_s, axis=1, norm='forward')
-    R_nlt = np.zeros((dims.n_d, dims.n_s))
     
-    for s in range(dims.n_s):
-        R_nlt[:, s] = - sys.fnlt(Xc_real, q[:, s], q_dot[:, s], Om, param)
+    T = 2 * np.pi / Om
+    t = np.arange(0, T, T/dims.n_s)
+    R_nlt = - sys.fnlt(t, Xc_real, q, q_dot, Om, param) # (dims.n_d, dims.n_s)
     
     R_nl_fft = np.fft.rfft(R_nlt, dims.n_s, axis=1, norm='backward')
     R_nl = X_to_real(R_nl_fft[:, :dims.n_h+1] / dims.n_s, lanczos_m).T.reshape(-1)

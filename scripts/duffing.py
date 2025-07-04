@@ -2,7 +2,7 @@ import numpy as np
 import scipy as sp
 import plotly.express as px
 import plotly.graph_objects as go
-
+import newmark
 import os
 
 np.set_printoptions(formatter={'float': '{:.4e}'.format}) # format shortE
@@ -40,133 +40,6 @@ def create_fourier_basis(omega, harmonics, t):
         ddbasis[2 * i + 2] = - (omega * k)**2 * np.sin(omega * t * k)
 
     return basis, dbasis, ddbasis
-    
-def anderson_acceleration(f, x0, k_max=100, tol_res=1e-6, m=3):
-    assert m <= x0.shape[0]
-    n = x0.shape[0]
-
-    Xbuf = np.zeros((n, m))  # differences in iterates
-    Gbuf = np.zeros((n, m))  # differences in residuals (g = f(x) - x)
-    x_curr = np.zeros(n)
-    x_new = np.zeros(n)
-    g_curr = np.zeros(n)
-    g_new = np.zeros(n)
-    gamma = np.zeros(n)
-    residual_history = []
-
-    x_curr = x0.copy() # in reality x_curr actually initialzed to x0
-    x_new = f(x_curr)              # x₁ = f(x₀)
-    g_curr = x_new - x_curr     # g₀ = f(x₀) - x₀
-    Xbuf[:, 0] = g_curr # x1 - x0
-    x_curr = x_new.copy()
-    x_new = f(x_curr)              # x₂ = f(x₁)
-    g_new = x_new - x_curr        # g₁ = f(x₁) - x₁
-    Gbuf[:, 0] = g_new - g_curr # g1 - g0
-    g_curr = g_new.copy()
-    
-    k = 1
-    while k < k_max and np.linalg.norm(g_curr) > tol_res:
-        m_k = min(m, k)
-        _, gamma, _ = sp.linalg.lapack.dgels(Gbuf[:, :m_k], g_curr)
-
-        x_new = x_curr + g_curr - (Xbuf[:, :m_k] + Gbuf[:, :m_k]) @ gamma[:m_k]
-
-        Xbuf[:, k % m] = x_new - x_curr
-        x_curr = x_new.copy()
-        x_new = f(x_curr)
-        g_new = x_new - x_curr
-        Gbuf[:, k % m] = g_new - g_curr
-        g_curr = g_new.copy()
-        k += 1
-        residual_history.append(np.linalg.norm(g_curr))
-
-    return x_curr, len(residual_history)
-
-def newmark_beta_step(M, C, K, v_i, a_i, delta_F, dt, beta=1/4, gamma=1/2):
-    x2 = 1
-    x1 = gamma / (beta * dt)
-    x0 = 1 / (beta * dt**2)
-    xd0 = 1 / (beta * dt)
-    xd1 = gamma / beta
-    xdd0 = 1/(2*beta)
-    xdd1 = - dt * (1 - gamma / (2*beta))
-
-    K_eff = x0 * M + x1 * C + x2 * K
-    F_eff = delta_F + M @ (xd0 * v_i + xdd0 * a_i) + C @ (xd1 * v_i + xdd1 * a_i)
-    du = np.linalg.solve(K_eff, F_eff)
-    dv = x1 * du - xd1 * v_i - xdd1 * a_i
-    da = x0 * du - xd0 * v_i - xdd0 * a_i
-
-    return du, dv, da
-
-def nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt):
-    t_steps = int(t_final / dt) + 1
-    n = u0.shape[0] # number of equations
-    vec_t = np.arange(0, t_final + dt, dt)
-    u = np.zeros((n, t_steps))
-    v = np.zeros((n, t_steps))
-    a = np.zeros((n, t_steps))
-    f_curr = nonlinear_func(0.0, u0, v0)
-    u[:, 0] = u0
-    v[:, 0] = v0
-    a[:, 0] = np.linalg.solve(M, f_curr - C @ v0 - K @ u0)
-
-    avg_iters = 0
-
-    for i in range(0, t_steps-1):
-        t = i*dt
-        f_next = f_curr.copy()
-        du = np.zeros(2)
-        du_k = np.zeros(2) + 1
-        iteration = 0
-        while (np.linalg.norm(du_k - du) / len(du) > 1e-10) and (iteration < 100):
-            du_k = du[:]
-            du, dv, da = newmark_beta_step(M, C, K, v[:,i], a[:,i], f_next - f_curr, dt)
-
-            u[:,i+1] = u[:,i] + du
-            v[:,i+1] = v[:,i] + dv
-            a[:,i+1] = a[:,i] + da
-
-            f_next = nonlinear_func(t, u[:,i+1], v[:,i+1])
-            iteration += 1
-        avg_iters += iteration
-        f_curr = f_next.copy()
-
-    print(f"Average iterations: {avg_iters / t_steps:.2f}")
-
-    return vec_t, u, v, a
-
-def nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt):
-    t_steps = int((t_final + dt)/ dt)
-    n = u0.shape[0] # number of equations
-    vec_t = np.arange(0, t_final + dt, dt)
-    f_curr = nonlinear_func(0.0, u0, v0)
-    x = np.zeros((3*n, t_steps+1))
-    x[0:n, 0] = u0
-    x[n:2*n, 0] = v0
-    x[2*n:3*n, 0] = np.linalg.solve(M, f_curr - C @ v0 - K @ u0)
-
-    avg_iters = 0
-    for i in range(0, t_steps):
-        t = i*dt
-        f_next = f_curr.copy()
-        def newmark_fixed_point(x_k):
-            nonlocal f_next, x, i
-            x_k_next = x_k.copy()
-            du, dv, da = newmark_beta_step(M, C, K, x[n:2*n,i], x[2*n:3*n,i], f_next - f_curr, dt)
-            x_k_next[0:n] = x[0:n, i] + du
-            x_k_next[n:2*n] = x[n:2*n, i] + dv
-            x_k_next[2*n:3*n] = x[2*n:3*n, i] + da
-            f_next = nonlinear_func(t, x_k_next[0:n], x_k_next[n:2*n])
-            return x_k_next
-        
-        x[:, i+1], iteration = anderson_acceleration(newmark_fixed_point, x[:, i], 100, 1e-10, 3)
-        avg_iters += iteration
-        f_curr = f_next.copy()
-
-    print(f"Average iterations: {avg_iters / t_steps:.2f}")
-
-    return vec_t, x[0:n, :], x[n:2*n, :], x[2*n:3*n, :]
     
 
 # NLvib params
@@ -216,7 +89,7 @@ def create_motion_system(omega=0.5):
 
 def integrate_duffing(t_final, dt, om_s):
     M, C, K, u0, v0, nonlinear_func, _ = create_motion_system(om_s)
-    t, u, v, a = nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
+    t, u, v, a = newmark.nonlinear_newmark_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
     # t, u, v, a = nonlinear_newmark_anderson_solve(M, C, K, u0, v0, nonlinear_func, t_final, dt)
 
     return t, u

@@ -1,4 +1,4 @@
-import argparse, hashlib, pickle, json
+import argparse, hashlib, pickle, json, time
 from enum import Enum
 
 import numpy as np
@@ -9,6 +9,8 @@ import harmonic_balance as hb # temporary
 import finite_diff as fd
 import plotting as plot
 import helpers
+
+BIFURCATIONS = ["LP", "BP", "NS", "PD"] # Maybe change to enum ?
 
 class Parametrisation(Enum):
     Local = 1
@@ -69,17 +71,12 @@ def bialternate(a, b):
     c = 0.5 * (term1 - term2 + term3 - term4)
     return c
 
-# def lp_test(om_i, om_im1):
-#     """
-#     Limit point test function (Delbé 3.3)
-#     """
-#     return (om_i - om_im1) / np.abs(om_i - om_im1)
-
-def lp_test(z_param):
+def lp_test(om_i, om_im1):
     """
-    Limit point test function (Colaitis 7.3.2)
+    Limit point test function (Delbé 3.3)
     """
-    return z_param
+    diff = om_i - om_im1
+    return diff / np.abs(diff)
 
 def bp_test(J):
     """
@@ -180,8 +177,8 @@ def extended_residual_jacobian(X, X_ref, z_ref, Dscale, parametrisation, ds, ome
     
     return Jext
 
-@helpers.Timing("Solver:")
 def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, ds, omega_idx, *args):
+    st = time.perf_counter_ns()
     sol = sp.optimize.root(
         extended_residual,
         X0,
@@ -201,7 +198,9 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, ds, omega_
     R[np.triu_indices_from(R)] = sol.r
     jac = Q @ R
 
-    return sol.x, jac, sol['nfev'], sol['njev'], True
+    et = time.perf_counter_ns()
+
+    return sol.x, jac, sol['nfev'], sol['njev'], (et-st)*1e-9, True
 
 def hash_metadata(metadata):
     params = {
@@ -246,7 +245,7 @@ def continuation(X0, motion, metadata: Metadata):
     ds = metadata.ds[0]
     ds_min = ds / 5.0
     ds_max = ds * 5.0
-    n_opt = 5 + 2 * X0.shape[0] * 1 # optimal nubmer of function evals
+    n_opt = 6 + X0.shape[0] * 1 # optimal nubmer of function evals
     omega_idx = metadata.dims.n_u - X0.shape[0]
     
     X_mat = np.zeros((X0.shape[0], metadata.max_steps))
@@ -300,13 +299,14 @@ def continuation(X0, motion, metadata: Metadata):
                 Xp = X0 + direction*ds*z
 
             # Corrector step
-            Xtmp, J, nfev, njev, success = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, parametrisation, ds, omega_idx, motion, metadata.dims)
+            Xtmp, J, nfev, njev, timing, success = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, parametrisation, ds, omega_idx, motion, metadata.dims)
             if not success:
                 if ds > ds_min and iteration > 0:
                     print(f"Nonlinear solver failed, reducing step size from {ds:.3f} to {ds/2:.3f}")
                     ds /= 2.0
                     continue
                 else:
+                    iteration += 1 # hack
                     print("Nonlinear solver failed, continuation stopped")
                     break
             
@@ -321,14 +321,14 @@ def continuation(X0, motion, metadata: Metadata):
             floquet_exponents_mat[:, iteration] = floquet_exponents
 
             # Bifurcation tests
-            bifurcation_test_mat[0, iteration] = lp_test(z_ref[-1] if iteration > 0 else 0.0)
+            bifurcation_test_mat[0, iteration] = lp_test(X[-1], X_mat[-1, iteration-1]) if iteration > 0 else 0.0
             bifurcation_test_mat[1, iteration] = bp_test(J)
             bifurcation_test_mat[2, iteration] = ns_test(floquet_exponents)
             bifurcation_test_mat[3, iteration] = pd_test(floquet_exponents, X[omega_idx])
 
             # Bifurcation detection
-            if iteration > 0:
-                for i, name in enumerate(["LP", "BP", "NS", "PD"]):
+            if iteration > 1: # first iteration is inaccurate
+                for i, name in enumerate(BIFURCATIONS):
                     if bifurcation_test_mat[i, iteration-1] * bifurcation_test_mat[i, iteration] < 0:
                         print(f"{name} bifurcation detected")
                         metadata.bifurcation[name].append(iteration)
@@ -336,10 +336,10 @@ def continuation(X0, motion, metadata: Metadata):
             metadata.stable.append(is_stable)
             metadata.ds.append(ds)
 
-            print(f"{iteration} | ds: {ds:.4f}, param: {X[-1]:.3f}, omega: {X[omega_idx]:.3f}, nfev: {nfev}, njev: {njev}, stable: {is_stable}")
+            print(f"{iteration} | ds: {ds:.4f}, param: {X[-1]:.3f}, omega: {X[omega_idx]:.3f}, stable: {is_stable}, nfev: {nfev}, njev: {njev}, timing: {timing:.2f}s")
 
             if metadata.step_adapt:
-                n_f = nfev + 2 * J.shape[1] * njev
+                n_f = nfev + J.shape[1] * njev
                 xi = n_opt / n_f
                 xi = np.clip(xi, 0.5, 2.0)
                 ds = np.clip(ds * xi, ds_min, ds_max)
@@ -369,21 +369,75 @@ def plot_hb_continuation(metadata):
     print(f"dofs: {dofs}")
     
     fig = plot.fig_create(dofs+1, 1, tuple(f"DOF {i+1}" for i in range(dofs)), "Continuation")
+    
+    stable_mask = np.array(metadata.stable)
+    stable_mask2 = stable_mask.copy()
+    X_stable = metadata.X.copy()
+    X_unstable = metadata.X.copy()
+    
+    # Padding to make the line continuous between stable and unstable regions
+    for i in range(len(stable_mask)-1):
+        if stable_mask[i+1] == False and stable_mask[i] == True:
+            stable_mask2[i+1] = True
+        elif stable_mask[i+1] == True and stable_mask[i] == False:
+            stable_mask2[i] = True
 
-    X_mat_h = metadata.X[:omega_idx, :]
+    X_stable[:, ~stable_mask2] = np.nan
+    X_unstable[:, stable_mask] = np.nan
+    
     for dof in range(dofs):
-        X_h = X_mat_h[dof::dofs, :]
+        X_h = metadata.X[dof:omega_idx:dofs, :]
+        X_h_stable = X_stable[dof:omega_idx:dofs, :]
+        X_h_unstable = X_unstable[dof:omega_idx:dofs, :]
+
         for h in range(1, metadata.dims.n_h+1):
+            name = f"Harmonic {h}"
             fig.add_trace(
-                go.Scatter(
-                    x = metadata.X[-1, :],
-                    y = np.sqrt(X_h[2*h-1, :]**2 + X_h[2*h, :]**2),
-                    name = f"Harmonic {h}",
-                    mode = "lines+markers"
+                go.Scattergl(
+                    x = X_stable[-1, :],
+                    y = np.sqrt(X_h_stable[2*h-1, :]**2 + X_h_stable[2*h, :]**2),
+                    name = name,
+                    legendgroup = name,
+                    mode = "lines",
+                    line = {"dash": "solid"},
+                    showlegend = True if dof == 0 else False
                 ),
                 row=dof+1,
                 col=1
             )
+            fig.add_trace(
+                go.Scattergl(
+                    x = X_unstable[-1, :],
+                    y = np.sqrt(X_h_unstable[2*h-1, :]**2 + X_h_unstable[2*h, :]**2),
+                    name = name,
+                    legendgroup = name,
+                    mode = "lines",
+                    line = {"dash": "dash"},
+                    showlegend = False
+                ),
+                row=dof+1,
+                col=1
+            )
+
+        symbols = ["circle", "square", "diamond", "triangle"]
+        for i, b in enumerate(BIFURCATIONS):
+            h=1 # only plot the bifurcations for the first harmonic
+            indices = np.array(metadata.bifurcation[b])
+            if len(indices) == 0: continue
+            fig.add_trace(
+                go.Scattergl(
+                    x = metadata.X[-1, indices],
+                    y = np.sqrt(X_h[2*h-1, indices]**2 + X_h[2*h, indices]**2),
+                    name = b,
+                    legendgroup = b,
+                    mode = "markers",
+                    marker = {"size": 10, "symbol": symbols[i]},
+                    showlegend = True if dof == 0 else False
+                ),
+                row=dof+1,
+                col=1
+            )
+
         plot.format_subplot(fig, dof+1, 1, r"$\bar{U}$", f"$||H_{dof+1}||^{2}$")
 
     plot.fig_save(fig, f"build/continuation/continuation_{hash_metadata(metadata)}", pdf=False)

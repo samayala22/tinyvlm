@@ -44,7 +44,7 @@ def nonlinear_damping(A, omega):
     return v.zeta_beta * np.max(a3 * olog**3 + a2 * olog**2 + 1, 0.2)
 
 def create_motion_system() -> System:
-    def fnlt(X, u, u_dot, omega, U):
+    def fnlt(t, X, u, u_dot, omega, U):
         if BETA_NL_DAMPING:
             freq = omega * v.omega_alpha # dimensional frequency
             A = np.sqrt(X[2, 1]**2 + X[2, 2]**2) # Amplitude of first harmonic
