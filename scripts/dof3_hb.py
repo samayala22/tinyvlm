@@ -46,16 +46,17 @@ def nonlinear_damping(A, omega):
 
 def create_motion_system() -> System:
     def fnlt(t, X, u, u_dot, omega, U):
+        zero = np.zeros_like(t)
         if BETA_NL_DAMPING:
             freq = omega * v.omega_alpha # dimensional frequency
             A = np.sqrt(X[2, 1]**2 + X[2, 2]**2) # Amplitude of first harmonic
             beta_damping = - (v.omega_beta / v.omega_alpha) * v.r_beta**2 * nonlinear_damping(A, freq)
         else:
-            beta_damping = 0.0
+            beta_damping = zero
         beta_stiffness = - ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * torsional_func(u[2])
         return np.array([
-            0.0, # h
-            0.0, # alpha
+            zero, # h
+            zero, # alpha
             beta_stiffness + beta_damping# beta
         ])
 
