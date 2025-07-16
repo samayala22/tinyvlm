@@ -13,45 +13,37 @@ class Dims():
         self.n_u = self.n_d * self.n_c
 
 def create_lanczos_filter(N, m=1):
-    L = np.zeros(N)
-    L[0] = 1
-    def sinc(x): return np.sin(np.pi * x) / (np.pi*x)
-    for i in range(1, N+1):
-        xi = i / (N+1)
-        L[i-1] = sinc(xi) ** m
+    i = np.arange(1, N + 1)
+    xi = i / (N + 1)
+    sinc = np.sin(np.pi * xi) / (np.pi * xi)
+    L = sinc ** m
     return L
 
 def X_to_complex(X):
     """
-    Converts a dofs * (2H+1) real array [A0, A1, B1, ... A_H, B_H] to a dofs * (H+1) comlex array
+    Converts a dofs * (2H+1) real array [A0, A1, B1, ... A_H, B_H] to a dofs * (H+1) complex array
     """
-    assert len(X.shape) == 2 # matrix form
-    dofs = X.shape[0]
-    H = int((X.shape[1] - 1) / 2)
-    Xc = np.zeros((dofs, H+1), dtype=np.complex128)
-    for d in range(dofs):
-        Xc[d, 0] = X[d, 0] - 0j
-    for h in range(1, H+1):
-        for d in range(dofs):
-            Xc[d, h] = (X[d, 2*h-1] - 1j * X[d, 2*h])/2
+    assert len(X.shape) == 2  # matrix form
+    dofs, cols = X.shape
+    H = (cols - 1) // 2
+    Xc = np.zeros((dofs, H + 1), dtype=np.complex128)
+    Xc[:, 0] = X[:, 0]
+    Xc[:, 1:] = (X[:, 1::2] - 1j * X[:, 2::2]) / 2
     return Xc
 
 def X_to_real(X, lanczos_m=1.0):
     """
     Converts a dofs * N complex array to a dofs * (2*N-1) real array
     """
-    assert len(X.shape) == 2 # matrix form
-    dofs = X.shape[0]
-    N = X.shape[1]
+    assert len(X.shape) == 2  # matrix form
+    assert X.shape[1] > 1
+    dofs, N = X.shape
     L = create_lanczos_filter(N, lanczos_m)
-    Xr = np.zeros((dofs, 2*N-1), dtype=np.float64)
-    for d in range(dofs):
-        Xr[d, 0] = X[d, 0].real
-    for h in range(1, N):
-        for d in range(dofs):
-            Xr[d, 2*h-1] = L[h] * 2 * X[d, h].real
-            Xr[d, 2*h] = L[h] * -2 * X[d, h].imag
-    
+    Xr = np.zeros((dofs, 2 * N - 1), dtype=np.float64)
+    Xr[:, 0] = np.real(X[:, 0])
+    lanczos_factors = L[1:, None]  # shape (N-1, 1) for broadcasting
+    Xr[:, 1::2] = 2 * np.real(X[:, 1:]) * lanczos_factors.T  # broadcast (dofs, N-1)
+    Xr[:, 2::2] = -2 * np.imag(X[:, 1:]) * lanczos_factors.T  # broadcast (dofs, N-1)
     return Xr
 
 def nabla(H):
@@ -76,8 +68,6 @@ def linear_residual(X, motion, dims):
     R_lin = Z @ X[:omega_idx]
     return R_lin
 
-import time
-
 def nonlinear_residual(X, motion, dims):
     omega_idx = dims.n_u - X.shape[0]
     lanczos_m = 0.0
@@ -92,7 +82,7 @@ def nonlinear_residual(X, motion, dims):
     q_dot = np.fft.irfft(1j * Om * k * Xc, dims.n_s, axis=1, norm='forward')
     
     T = 2 * np.pi / Om
-    t = np.arange(0, T, T/dims.n_s)
+    t = np.linspace(0, T, dims.n_s, False)
     R_nlt = - sys.fnlt(t, Xc_real, q, q_dot, Om, param) # (dims.n_d, dims.n_s)
     
     R_nl_fft = np.fft.rfft(R_nlt, dims.n_s, axis=1, norm='backward')

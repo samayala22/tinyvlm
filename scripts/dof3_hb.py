@@ -21,6 +21,7 @@ import plotting as plot
 from libhbvlm3 import HBVLM
 
 BETA_NL_DAMPING = False
+INITIAL_ONLY = False
 
 @dataclass
 class System:
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
     param_start = 7.0
-    param_end = 8.0
+    param_end = 15.0
 
     v = dof3.Vars()
     v.a = -0.5 
@@ -153,7 +154,7 @@ if __name__ == "__main__":
     # Independent params
     dims = hb.Dims(
         n_d=3,          # number of degrees of freedom
-        n_h=5          # number of harmonics
+        n_h=10          # number of harmonics
     )
 
     hbvlm = HBVLM("cpu", ["mesh/3dof_wing_9x5.x", "mesh/3dof_flap_3x5.x"])
@@ -186,10 +187,10 @@ if __name__ == "__main__":
     metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
-    metadata.max_steps = 2
+    metadata.max_steps = 1 if INITIAL_ONLY else 10000
     metadata.scaling = False
     metadata.step_adapt = True
-    metadata.ds = [0.05]
+    metadata.ds = [0.02]
     metadata.dims = dims
     
     metadata = cont.continuation(X0, create_motion_system, metadata)

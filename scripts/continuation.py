@@ -217,8 +217,8 @@ def stability_analysis(J_ext, motion, omega, omega_idx, dims):
     Hill stability analysis using the Quadratic Eigenvalue Problem formulation.
     """
     J_hb = J_ext[:omega_idx, :omega_idx]  # Exclude the last two rows/columns (parameter and orthogonality condition)
-    hb_dim = dims.n_d * dims.n_c
-    H = np.zeros((2 * hb_dim, 2 * hb_dim))
+    hb_dim = dims.n_d * dims.n_c # dofs * (2 * H + 1)
+    H = np.zeros((2 * hb_dim, 2 * hb_dim)) # first order casted system
     nab = hb.nabla(dims.n_h)
     system = motion()
     M = system.M(omega)
@@ -232,7 +232,6 @@ def stability_analysis(J_ext, motion, omega, omega_idx, dims):
 
     eigvals = np.linalg.eigvals(H)
     floquet_exponents = eigvals[np.argsort(np.abs(np.imag(eigvals)))[:2*dims.n_d]]
-    
     max_real_part = np.max(np.real(floquet_exponents))
     is_stable = max_real_part < 1e-8
     return is_stable, floquet_exponents
@@ -329,7 +328,7 @@ def continuation(X0, motion, metadata: Metadata):
             # Bifurcation detection
             if iteration > 1: # first iteration is inaccurate
                 for i, name in enumerate(BIFURCATIONS):
-                    if bifurcation_test_mat[i, iteration-1] * bifurcation_test_mat[i, iteration] < 0:
+                    if np.copysign(1.0, bifurcation_test_mat[i, iteration-1]) != np.copysign(1.0, bifurcation_test_mat[i, iteration]):
                         print(f"{name} bifurcation detected")
                         metadata.bifurcation[name].append(iteration)
             

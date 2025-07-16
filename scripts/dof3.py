@@ -37,6 +37,13 @@ class Vars:
     mu: float = 0.0
 
 def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=np.radians(4.24), a_f=np.radians(-2.12)):
+    """
+    alpha: dof angle
+    M0: preload
+    Mf: freeplay region stiffness
+    delta: freeplay region width
+    a_f: freeplay region start angle
+    """
     return np.where(
         alpha < a_f,
         M0 + alpha - a_f,

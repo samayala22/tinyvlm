@@ -4,7 +4,6 @@ import scipy as sp
 from dataclasses import dataclass
 
 # local imports
-import dof3
 import helpers
 import continuation as cont
 import harmonic_balance as hb
@@ -79,7 +78,7 @@ if __name__ == "__main__":
     # Independent params
     dims = hb.Dims(
         n_d=2,          # number of degrees of freedom
-        n_h=15          # number of harmonics
+        n_h=10          # number of harmonics
     )
 
     # Time integration
