@@ -190,7 +190,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, ds, omega_
 
     if not sol.success:
         print(f"Nonlinear solver failed: {sol.message}")
-        return None, None, None, None, None, False
+        return False, ()
 
     # Jacobian assembled from QR decomposition
     Q = sol.fjac.T
@@ -200,7 +200,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, ds, omega_
 
     et = time.perf_counter_ns()
 
-    return sol.x, jac, sol['nfev'], sol['njev'], (et-st)*1e-9, True
+    return True, (sol.x, jac, sol['nfev'], sol['njev'], (et-st)*1e-9)
 
 def hash_metadata(metadata):
     params = {
@@ -248,8 +248,10 @@ def continuation(X0, motion, metadata: Metadata):
     omega_idx = metadata.dims.n_u - X0.shape[0]
     
     X_mat = np.zeros((X0.shape[0], metadata.max_steps))
-    floquet_exponents_mat = np.zeros((2 * metadata.dims.n_d, metadata.max_steps), dtype=np.complex128)
-    bifurcation_test_mat = np.zeros((4, metadata.max_steps))
+    metadata.floquet_exponents = np.zeros((2 * metadata.dims.n_d, metadata.max_steps), dtype=np.complex128)
+    metadata.bifurcation_test = np.zeros((4, metadata.max_steps))
+    metadata.stable = np.zeros(metadata.max_steps, dtype=np.bool)
+    metadata.ds = np.zeros(metadata.max_steps)
     
     if metadata.param_end > metadata.param_start:
         param_direction = 1
@@ -298,7 +300,7 @@ def continuation(X0, motion, metadata: Metadata):
                 Xp = X0 + direction*ds*z
 
             # Corrector step
-            Xtmp, J, nfev, njev, timing, success = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, parametrisation, ds, omega_idx, motion, metadata.dims)
+            success, results = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, parametrisation, ds, omega_idx, motion, metadata.dims)
             if not success:
                 if ds > ds_min and iteration > 0:
                     print(f"Nonlinear solver failed, reducing step size from {ds:.3f} to {ds/2:.3f}")
@@ -308,6 +310,8 @@ def continuation(X0, motion, metadata: Metadata):
                     iteration += 1 # hack
                     print("Nonlinear solver failed, continuation stopped")
                     break
+
+            Xtmp, J, nfev, njev, timing = results
             
             # Bookkeeping
             X_old = X0.copy()
@@ -317,24 +321,23 @@ def continuation(X0, motion, metadata: Metadata):
 
             # Stability analysis
             is_stable, floquet_exponents = stability_analysis(J, motion, X[omega_idx], omega_idx, metadata.dims)
-            floquet_exponents_mat[:, iteration] = floquet_exponents
+            metadata.floquet_exponents[:, iteration] = floquet_exponents
+            metadata.stable[iteration] = is_stable
+            metadata.ds[iteration] = ds
 
             # Bifurcation tests
-            bifurcation_test_mat[0, iteration] = lp_test(X[-1], X_mat[-1, iteration-1]) if iteration > 0 else 0.0
-            bifurcation_test_mat[1, iteration] = bp_test(J)
-            bifurcation_test_mat[2, iteration] = ns_test(floquet_exponents)
-            bifurcation_test_mat[3, iteration] = pd_test(floquet_exponents, X[omega_idx])
+            metadata.bifurcation_test[0, iteration] = lp_test(X[-1], X_mat[-1, iteration-1]) if iteration > 0 else 0.0
+            metadata.bifurcation_test[1, iteration] = bp_test(J)
+            metadata.bifurcation_test[2, iteration] = ns_test(floquet_exponents)
+            metadata.bifurcation_test[3, iteration] = pd_test(floquet_exponents, X[omega_idx])
 
             # Bifurcation detection
             if iteration > 1: # first iteration is inaccurate
                 for i, name in enumerate(BIFURCATIONS):
-                    if np.copysign(1.0, bifurcation_test_mat[i, iteration-1]) != np.copysign(1.0, bifurcation_test_mat[i, iteration]):
+                    if np.copysign(1.0, metadata.bifurcation_test[i, iteration-1]) != np.copysign(1.0, metadata.bifurcation_test[i, iteration]):
                         print(f"{name} bifurcation detected")
                         metadata.bifurcation[name].append(iteration)
             
-            metadata.stable.append(is_stable)
-            metadata.ds.append(ds)
-
             print(f"{iteration} | ds: {ds:.4f}, param: {X[-1]:.3f}, omega: {X[omega_idx]:.3f}, stable: {is_stable}, nfev: {nfev}, njev: {njev}, timing: {timing:.2f}s")
 
             if metadata.step_adapt:
@@ -351,9 +354,11 @@ def continuation(X0, motion, metadata: Metadata):
     except KeyboardInterrupt:
         print("Continuation interrupted by user")
 
-    metadata.X = X_mat[:, :iteration]
-    metadata.floquet_exponents = floquet_exponents_mat[:, :iteration]
-    metadata.bifurcation_test = bifurcation_test_mat[:, :iteration]
+    metadata.X = X_mat[:, :iteration-1]
+    metadata.stable = metadata.stable[:iteration-1]
+    metadata.floquet_exponents = metadata.floquet_exponents[:, :iteration-1]
+    metadata.bifurcation_test = metadata.bifurcation_test[:, :iteration-1]
+    metadata.ds = metadata.ds[:iteration-1]
 
     filename = f"continuation_{hash_metadata(metadata)}.pkl"
     print(f"Continuation data saved to {filename}")

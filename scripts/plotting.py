@@ -113,7 +113,7 @@ def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', m
     # Add time series data
     start = int(0.75*len(data))
     fig.add_trace(
-        go.Scatter(
+        go.Scattergl(
             x=time[start:], 
             y=data[start:], 
             name=name,
@@ -129,7 +129,7 @@ def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', m
 
     # peaks_idx = find_peak_idx(data)
     # fig.add_trace(
-    #     go.Scattergl(
+    #     go.Scatterglgl(
     #         x=time[peaks_idx], 
     #         y=data[peaks_idx],
     #         mode='markers',
@@ -141,7 +141,7 @@ def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', m
     # Add PSD data
     frequencies, psd = compute_psd(time, data)
     fig.add_trace(
-        go.Scatter(
+        go.Scattergl(
             x=frequencies,
             y=psd,
             name=name,

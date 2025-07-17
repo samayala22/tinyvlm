@@ -155,14 +155,14 @@ if __name__ == "__main__":
     # Independent params
     dims = hb.Dims(
         n_d=3,          # number of degrees of freedom
-        n_h=10          # number of harmonics
+        n_h=5          # number of harmonics
     )
 
     hbvlm = HBVLM("cpu", ["mesh/3dof_wing_9x5.x", "mesh/3dof_flap_3x5.x"])
     hbvlm.init(dims.n_h, 1.0/v.b)
 
     # Time integration
-    t_final = 2000.0
+    t_final = 4000.0
     dt = 0.2 
     vec_t = np.arange(0, t_final, dt)
     y0 = np.zeros(8, dtype=np.float64) # hd, ad, bd, h, a, b, x1, x2
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     system = dof3.AeroelasticSystem(v, True)
     sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
 
-    idx_start = int(0.75 * len(sol.t))
+    idx_start = int(0.9 * len(sol.t))
     t_tr = sol.t[idx_start:]
     u_tr = sol.y[3:6, idx_start:]   # shape = (n_dofs, N_tr)
     u_coeffs, omega0 = hb.truncated_series_approximation(dt, u_tr, dims)
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     metadata.max_steps = 1 if INITIAL_ONLY else 10000
     metadata.scaling = False
     metadata.step_adapt = True
-    metadata.ds = [0.02]
+    metadata.ds = [0.002]
     metadata.dims = dims
     
     metadata = cont.continuation(X0, create_motion_system, metadata)

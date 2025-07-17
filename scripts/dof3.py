@@ -315,8 +315,8 @@ if __name__ == "__main__":
     # U_vec = [12.63158]
     # U_vec = [12.36842] # Non symmetric 2 period LCO
     # U_vec = [12.75168] # Bifuracation reports many points ?
-    # U_vec = [7.0]
-    U_vec = np.linspace(0.2, 22.5, 250)
+    U_vec = [5.5]
+    # U_vec = np.linspace(0.2, 22.5, 250)
 
     peaks_data = [[], [], []]
     peaks_U = [[], [], []]
@@ -353,8 +353,9 @@ if __name__ == "__main__":
         v.V = v.U / (v.b * v.omega_alpha)
         v.mu = v.m / (np.pi * v.rho * v.b**2)
 
-        dt = 0.002
-        t_final = 10.0 * v.omega_alpha
+        dt = 0.1
+        # t_final = 100.0 * v.omega_alpha
+        t_final = 4000.0
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
@@ -412,7 +413,7 @@ if __name__ == "__main__":
         fig = plot.fig_create(3, 1, ("Heave", "Pitch", "Control"))
         for i in range(3):
             fig.add_trace(
-                go.Scatter(
+                go.Scattergl(
                     x=np.concatenate(peaks_U[i]), 
                     y=np.concatenate(peaks_data[i]), 
                     mode="markers"
