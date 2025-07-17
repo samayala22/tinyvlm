@@ -190,7 +190,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, ds, omega_
 
     if not sol.success:
         print(f"Nonlinear solver failed: {sol.message}")
-        return None, None, None, None, False
+        return None, None, None, None, None, False
 
     # Jacobian assembled from QR decomposition
     Q = sol.fjac.T
