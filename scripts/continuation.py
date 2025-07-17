@@ -307,7 +307,6 @@ def continuation(X0, motion, metadata: Metadata):
                     ds /= 2.0
                     continue
                 else:
-                    iteration += 1 # hack
                     print("Nonlinear solver failed, continuation stopped")
                     break
 
@@ -354,11 +353,11 @@ def continuation(X0, motion, metadata: Metadata):
     except KeyboardInterrupt:
         print("Continuation interrupted by user")
 
-    metadata.X = X_mat[:, :iteration-1]
-    metadata.stable = metadata.stable[:iteration-1]
-    metadata.floquet_exponents = metadata.floquet_exponents[:, :iteration-1]
-    metadata.bifurcation_test = metadata.bifurcation_test[:, :iteration-1]
-    metadata.ds = metadata.ds[:iteration-1]
+    metadata.X = X_mat[:, :iteration]
+    metadata.stable = metadata.stable[:iteration]
+    metadata.floquet_exponents = metadata.floquet_exponents[:, :iteration]
+    metadata.bifurcation_test = metadata.bifurcation_test[:, :iteration]
+    metadata.ds = metadata.ds[:iteration]
 
     filename = f"continuation_{hash_metadata(metadata)}.pkl"
     print(f"Continuation data saved to {filename}")

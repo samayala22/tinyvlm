@@ -20,6 +20,8 @@ import plotting as plot
 
 from libhbvlm import HBVLM
 
+INITIAL_ONLY = False
+
 np.set_printoptions(
     linewidth=200, # max line width
     formatter={'float': '{:.3e}'.format} # format shortE
@@ -80,7 +82,7 @@ def create_motion_system() -> System:
     return System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
 
 if __name__ == "__main__":
-    torsional_spring = 0
+    torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
     if (torsional_spring == 0):
@@ -100,16 +102,15 @@ if __name__ == "__main__":
     flutter_speed = 6.285
     flutter_ratio_start = 0.3
     flutter_ratio_end = 0.8
-    ds = 0.01
 
-    hbvlm = HBVLM("cpu", "./mesh/infinite_rectangular_20x1.x")
+    hbvlm = HBVLM("cpu", "./mesh/infinite_rectangular_10x1.x")
     hbvlm.init(dims.n_h, 1.0/vars_b)
 
     # Dependent params
     # param_start = flutter_speed * flutter_ratio_start
     # param_end = flutter_speed * flutter_ratio_end
-    param_start = 4.0
-    param_end = 6.0
+    param_start = 6.5
+    param_end = 20.0
     # Time integration
     t_final = 2000.0
     dt = 0.2
@@ -158,10 +159,10 @@ if __name__ == "__main__":
     metadata.name = f"2DOF {torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
-    metadata.max_steps = 1
+    metadata.max_steps = 1 if INITIAL_ONLY else 10000
     metadata.scaling = False
     metadata.step_adapt = True
-    metadata.ds = [ds]
+    metadata.ds = [0.02]
     metadata.dims = dims
     
     metadata = cont.continuation(X0, create_motion_system, metadata)

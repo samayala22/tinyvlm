@@ -155,7 +155,7 @@ if __name__ == "__main__":
     # Independent params
     dims = hb.Dims(
         n_d=3,          # number of degrees of freedom
-        n_h=5          # number of harmonics
+        n_h=7          # number of harmonics
     )
 
     hbvlm = HBVLM("cpu", ["mesh/3dof_wing_9x5.x", "mesh/3dof_flap_3x5.x"])
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     metadata.max_steps = 1 if INITIAL_ONLY else 10000
     metadata.scaling = False
     metadata.step_adapt = True
-    metadata.ds = [0.002]
+    metadata.ds = [0.02]
     metadata.dims = dims
     
     metadata = cont.continuation(X0, create_motion_system, metadata)

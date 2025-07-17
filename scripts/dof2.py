@@ -94,7 +94,7 @@ def alpha_freeplay(alpha, M0 = 0.0, Mf = 0.0, delta = np.radians(0.5), a_f = np.
     else: # alpha > a_F + delta
         return M0 + alpha - a_f + delta * (Mf - 1)
 
-def alpha_cubic(alpha, beta0 = 0.0, beta1 = 0.1, beta2 = 0.0, beta3 = 40.0):
+def alpha_cubic(alpha, beta0 = 0.0, beta1 = 1.0, beta2 = 0.0, beta3 = 80.0):
     return beta0 + beta1*alpha + beta2*alpha**2 + beta3*alpha**3
 
 def alpha_linear(alpha):
@@ -360,7 +360,7 @@ if __name__ == "__main__":
     flutter_speed = 6.285
     flutter_ratio = 0.6
     # vec_U = np.linspace(0.1, 5.5, 200) # for freeplay
-    vec_U = np.linspace(0.5, 100.0, 200) # for cubic
+    vec_U = np.linspace(1.0, 20.0, 100) # for cubic
     # vec_U = [flutter_ratio * flutter_speed] # reduced velocity
     # vec_U = [2.0] # reduced velocity
     # vec_U = [4.0]
