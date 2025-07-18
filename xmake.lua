@@ -63,7 +63,7 @@ end
 
 -- Create python lib
 target("libhbvlm")
-    add_rules("python.library")
+    add_rules("python.module")
     add_packages("pybind11")
     set_default(false)
     add_rpathdirs("$ORIGIN")
@@ -71,7 +71,7 @@ target("libhbvlm")
     add_files("lib/libhbvlm.cpp")
 
 target("libhbvlm3")
-    add_rules("python.library")
+    add_rules("python.module")
     add_packages("pybind11")
     set_default(false)
     add_rpathdirs("$ORIGIN")
