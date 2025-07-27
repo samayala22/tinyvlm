@@ -369,6 +369,7 @@ if __name__ == "__main__":
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
     peaks_data = [[], []]
     peaks_U = [[], []]
+    rms = np.zeros((2, len(vec_U)))
     eigenvalues = np.zeros((2*dofs, len(vec_U)), dtype=np.complex128)
 
     if (torsional_spring == 0):
@@ -450,6 +451,7 @@ if __name__ == "__main__":
             slice_start = int(0.75 * len(monolithic_sol.t))
             peaks_slice = monolithic_sol.y[0:2, slice_start:]
             
+            rms[:, idx] = np.sqrt(np.mean(peaks_slice**2, axis=1))
             for i in range(2):
                 peaks_data[i].append(peaks_slice[i, plot.find_peak_idx(peaks_slice[i, :])])
                 peaks_U[i].append(np.array([U_vel] * peaks_data[i][-1].shape[0]))
@@ -462,6 +464,15 @@ if __name__ == "__main__":
                     x=np.concatenate(peaks_U[i]), 
                     y=np.concatenate(peaks_data[i]), 
                     mode="markers"
+                ),
+                row=i + 1, 
+                col=1
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=vec_U, 
+                    y=rms[i, :],
+                    mode="lines",
                 ),
                 row=i + 1, 
                 col=1

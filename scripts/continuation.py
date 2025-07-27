@@ -151,10 +151,11 @@ def extended_residual(
     if omega_idx == -2:
         ext_res[-2] = hb.integral_orthogonal_phase_condition(X_unscaled, X_ref * Dscale, *args)
 
+    X_diff = X - X_ref
     if parametrisation == Parametrisation.Local:
-        ext_res[-1] = np.dot(z_ref, X - X_ref)
+        ext_res[-1] = np.dot(z_ref, X_diff)
     elif parametrisation == Parametrisation.ArcLength:
-        ext_res[-1] = np.dot(X - X_ref, X - X_ref) - ds**2 # iteration on a normal plane, perpendicular to tangent
+        ext_res[-1] = np.dot(X_diff, X_diff) - ds**2 # iteration on a normal plane, perpendicular to tangent
 
     return ext_res
 
@@ -212,13 +213,13 @@ def hash_metadata(metadata):
     j = json.dumps(params, sort_keys=True).encode("utf8")
     return hashlib.md5(j).hexdigest()[:8]
 
-def stability_analysis(J_ext, motion, omega, omega_idx, dims):
+def stability_analysis(J_ext, motion, omega, omega_idx, dims, tol=1e-10):
     """
     Hill stability analysis using the Quadratic Eigenvalue Problem formulation.
+    Handles both second-order and first-order (M=0) cases.
     """
-    J_hb = J_ext[:omega_idx, :omega_idx]  # Exclude the last two rows/columns (parameter and orthogonality condition)
-    hb_dim = dims.n_d * dims.n_c # dofs * (2 * H + 1)
-    H = np.zeros((2 * hb_dim, 2 * hb_dim)) # first order casted system
+    J_hb = J_ext[:omega_idx, :omega_idx]  # Exclude the last two rows/columns
+    hb_dim = dims.n_d * dims.n_c  # dofs * (2 * H + 1)
     nab = hb.nabla(dims.n_h)
     system = motion()
     M = system.M(omega)
@@ -226,12 +227,22 @@ def stability_analysis(J_ext, motion, omega, omega_idx, dims):
     Lambda1 = np.kron(2.0 * omega * nab, M) + np.kron(np.eye(dims.n_c), C) 
     Lambda2 = np.kron(np.eye(dims.n_c), M)
 
-    H[0:hb_dim, hb_dim:2*hb_dim] = np.eye(hb_dim)
-    H[hb_dim:2*hb_dim, 0:hb_dim] = -np.linalg.inv(Lambda2) @ J_hb
-    H[hb_dim:2*hb_dim, hb_dim:2*hb_dim] = -np.linalg.inv(Lambda2) @ Lambda1
+    if np.linalg.norm(Lambda2) < tol:  # First-order case (M ≈ 0, Lambda2 ≈ 0)
+        # Hill matrix for first-order: H = - inv(Lambda1) @ J_hb
+        H = -np.linalg.inv(Lambda1) @ J_hb
+        num_exponents = dims.n_d  # First-order: n_d exponents
+    else:  # Second-order case
+        # Original doubled companion matrix
+        H = np.zeros((2 * hb_dim, 2 * hb_dim))
+        H[0:hb_dim, hb_dim:2*hb_dim] = np.eye(hb_dim)
+        H[hb_dim:2*hb_dim, 0:hb_dim] = -np.linalg.inv(Lambda2) @ J_hb
+        H[hb_dim:2*hb_dim, hb_dim:2*hb_dim] = -np.linalg.inv(Lambda2) @ Lambda1
+        num_exponents = 2 * dims.n_d  # Second-order: 2 n_d exponents
 
     eigvals = np.linalg.eigvals(H)
-    floquet_exponents = eigvals[np.argsort(np.abs(np.imag(eigvals)))[:2*dims.n_d]]
+    # Select exponents with smallest |imag| (filter HB artifacts)
+    sorted_idx = np.argsort(np.abs(np.imag(eigvals)))
+    floquet_exponents = eigvals[sorted_idx[:num_exponents]]
     max_real_part = np.max(np.real(floquet_exponents))
     is_stable = max_real_part < 1e-8
     return is_stable, floquet_exponents
@@ -240,17 +251,17 @@ def continuation(X0, motion, metadata: Metadata):
     """
     Continuation for autonomous systems using the harmonic balance method
     """
-    # print("Initial guess X0:", X0)
-    ds = metadata.ds[0]
-    ds_min = ds / 5.0
-    ds_max = ds * 5.0
     n_opt = 6 + X0.shape[0] * 1 # optimal nubmer of function evals
     omega_idx = metadata.dims.n_u - X0.shape[0]
-    
+    ds = metadata.ds
+
+    # Initialization
+    J = np.zeros((X0.shape[0], X0.shape[0]))  # Jacobian
     X_mat = np.zeros((X0.shape[0], metadata.max_steps))
-    metadata.floquet_exponents = np.zeros((2 * metadata.dims.n_d, metadata.max_steps), dtype=np.complex128)
+    order = 2 if np.linalg.norm(motion().M(1.0)) > 1e-10 else 1 # TODO: remove this asap
+    metadata.floquet_exponents = np.zeros((order * metadata.dims.n_d, metadata.max_steps), dtype=np.complex128)
     metadata.bifurcation_test = np.zeros((4, metadata.max_steps))
-    metadata.stable = np.zeros(metadata.max_steps, dtype=np.bool)
+    metadata.stable = ~np.zeros(metadata.max_steps, dtype=np.bool)
     metadata.ds = np.zeros(metadata.max_steps)
     
     if metadata.param_end > metadata.param_start:
@@ -260,26 +271,38 @@ def continuation(X0, motion, metadata: Metadata):
         param_direction = -1
         direction = -1
 
-    J = np.zeros((X0.shape[0], X0.shape[0]))  # Jacobian
+    # Scaling
+    Dscale0 = np.ones_like(X0)
+    Dscale0[-1] = X0[-1]
+    Dscale = Dscale0.copy()
+    Dscale_prev = Dscale.copy()
+    X0 = X0 / Dscale # scaled X0
+    ds = ds / Dscale[-1]
+
     X_ref = X0.copy()
     X_old = X0.copy()
     z_ref = np.zeros_like(X0)
     z_ref[-1] = 1
+    ds_min = ds / 5.0
+    ds_max = ds * 5.0
 
-    Dscale = np.ones_like(X0)
-    Dscale_prev = Dscale.copy()
-
+    total_njev = 0
+    total_nfev = 0
     iteration = 0
     try:
         while iteration < metadata.max_steps:
             if metadata.scaling:
                 Dscale_prev = Dscale.copy()
-                Dscale = np.maximum(np.abs(X0 * Dscale_prev), np.ones_like(X0))
-                Dscale[omega_idx] = 1.0 # omega is not scaled
-                Dscale[-1] = 1.0 # param is not scaled
-                X_ref = X_ref * (Dscale_prev / Dscale)
-                X0 = X0 * (Dscale_prev / Dscale)
-                X_old = X_old * (Dscale_prev / Dscale)
+                Dscale[:-1] = np.maximum(np.abs(X0[:-1] * Dscale_prev[:-1]), Dscale0[:-1])
+                # Dscale[omega_idx] = 1.0 # omega is not scaled
+                # Dscale[-1] = 1.0 # param is not scaled
+                ratio = (Dscale_prev / Dscale)
+                X_ref = X_ref * ratio
+                X0 = X0 * ratio
+                X_old = X_old * ratio
+                if iteration > 0:
+                    J = J @ np.diag(1.0 / Dscale_prev)
+                    z_ref = z_ref * Dscale_prev
 
             if iteration == 0:
                 parametrisation = Parametrisation.Local
@@ -287,7 +310,7 @@ def continuation(X0, motion, metadata: Metadata):
             else:
                 parametrisation = Parametrisation.ArcLength
                 # J = extended_residual_jacobian(X0, X_ref, z_ref * Dscale_prev, hb_residual, Dscale, Parametrisation.ArcLength, True, False)
-                ztmp = tangent_predictor(J @ np.diag(1 / Dscale_prev), z_ref * Dscale_prev, X_ref) / Dscale
+                ztmp = tangent_predictor(J, z_ref, X_ref) / Dscale
                 z = ztmp / np.linalg.norm(ztmp)
 
                 # Take a step in the tangent direction ensuring to stay along the solution path
@@ -311,6 +334,9 @@ def continuation(X0, motion, metadata: Metadata):
                     break
 
             Xtmp, J, nfev, njev, timing = results
+
+            total_nfev += nfev
+            total_njev += njev
             
             # Bookkeeping
             X_old = X0.copy()
@@ -319,14 +345,14 @@ def continuation(X0, motion, metadata: Metadata):
             X_mat[:, iteration] = X
 
             # Stability analysis
-            is_stable, floquet_exponents = stability_analysis(J, motion, X[omega_idx], omega_idx, metadata.dims)
+            is_stable, floquet_exponents = stability_analysis(J @ np.diag(1.0 / Dscale), motion, X[omega_idx], omega_idx, metadata.dims)
             metadata.floquet_exponents[:, iteration] = floquet_exponents
             metadata.stable[iteration] = is_stable
-            metadata.ds[iteration] = ds
+            metadata.ds[iteration] = ds * Dscale[-1]
 
             # Bifurcation tests
             metadata.bifurcation_test[0, iteration] = lp_test(X[-1], X_mat[-1, iteration-1]) if iteration > 0 else 0.0
-            metadata.bifurcation_test[1, iteration] = bp_test(J)
+            metadata.bifurcation_test[1, iteration] = bp_test(J @ np.diag(1.0 / Dscale))
             metadata.bifurcation_test[2, iteration] = ns_test(floquet_exponents)
             metadata.bifurcation_test[3, iteration] = pd_test(floquet_exponents, X[omega_idx])
 
@@ -337,7 +363,7 @@ def continuation(X0, motion, metadata: Metadata):
                         print(f"{name} bifurcation detected")
                         metadata.bifurcation[name].append(iteration)
             
-            print(f"{iteration} | ds: {ds:.4f}, param: {X[-1]:.3f}, omega: {X[omega_idx]:.3f}, stable: {is_stable}, nfev: {nfev}, njev: {njev}, timing: {timing:.2f}s")
+            print(f"{iteration} | ds: {ds * Dscale[-1]:.4f}, param: {X[-1]:.3f}, omega: {X[omega_idx]:.3f}, stable: {is_stable}, nfev: {nfev}, njev: {njev}, timing: {timing:.2f}s")
 
             if metadata.step_adapt:
                 n_f = nfev + J.shape[1] * njev
@@ -359,6 +385,9 @@ def continuation(X0, motion, metadata: Metadata):
     metadata.bifurcation_test = metadata.bifurcation_test[:, :iteration]
     metadata.ds = metadata.ds[:iteration]
 
+    print(f"Total nfev: {total_nfev}")
+    print(f"Total njev: {total_njev}")
+    
     filename = f"continuation_{hash_metadata(metadata)}.pkl"
     print(f"Continuation data saved to {filename}")
     with open(f"build/{filename}", 'wb') as f:
@@ -366,17 +395,20 @@ def continuation(X0, motion, metadata: Metadata):
 
     return metadata
 
+@helpers.Timing()
 def plot_hb_continuation(metadata):
     dofs = metadata.dims.n_d
     omega_idx = metadata.dims.n_u - metadata.X.shape[0]
     print(f"dofs: {dofs}")
     
-    fig = plot.fig_create(dofs+1, 1, tuple(f"DOF {i+1}" for i in range(dofs)), "Continuation")
+    cols = 2
+    rows = (dofs + cols - 1) // cols
+    # cols = 1
+    # rows = dofs
+    fig = plot.fig_create(rows, cols, tuple(f"DOF {i+1}" for i in range(dofs)), "Continuation")
     
     stable_mask = np.array(metadata.stable)
     stable_mask2 = stable_mask.copy()
-    X_stable = metadata.X.copy()
-    X_unstable = metadata.X.copy()
     
     # Padding to make the line continuous between stable and unstable regions
     for i in range(len(stable_mask)-1):
@@ -385,63 +417,103 @@ def plot_hb_continuation(metadata):
         elif stable_mask[i+1] == True and stable_mask[i] == False:
             stable_mask2[i] = True
 
-    X_stable[:, ~stable_mask2] = np.nan
-    X_unstable[:, stable_mask] = np.nan
+    def masked(mat):
+        mat_stable = mat.copy()
+        mat_unstable = mat.copy()
+        mat_stable[..., ~stable_mask2] = np.nan
+        mat_unstable[..., stable_mask] = np.nan
+        return mat_stable, mat_unstable
     
-    for dof in range(dofs):
-        X_h = metadata.X[dof:omega_idx:dofs, :]
-        X_h_stable = X_stable[dof:omega_idx:dofs, :]
-        X_h_unstable = X_unstable[dof:omega_idx:dofs, :]
+    X_stable, X_unstable = masked(metadata.X)
 
-        for h in range(1, metadata.dims.n_h+1):
-            name = f"Harmonic {h}"
+    for r in range(rows):
+        for c in range(cols):
+            dof = r * cols + c
+            if dof >= dofs: break
+
+            X_h = metadata.X[dof:omega_idx:dofs, :]
+            A = np.sqrt(X_h[1::2, :]**2 + X_h[2::2, :]**2)
+            rms = np.sqrt(X_h[0, :]**2 + 0.5 * np.sum(A**2, axis=0))
+            A_stable, A_unstable = masked(A)
+            rms_stable, rms_unstable = masked(rms)
+
+            for h in range(metadata.dims.n_h):
+                name = f"Harmonic {h+1}"
+
+                fig.add_trace(
+                    go.Scattergl(
+                        x = X_stable[-1, :],
+                        y = A_stable[h, :],
+                        name = name,
+                        legendgroup = name,
+                        mode = "lines",
+                        line = {"dash": "solid"},
+                        showlegend = True if dof == 0 else False
+                    ),
+                    row=r+1,
+                    col=c+1
+                )
+                fig.add_trace(
+                    go.Scattergl(
+                        x = X_unstable[-1, :],
+                        y = A_unstable[h, :],
+                        name = name,
+                        legendgroup = name,
+                        mode = "lines",
+                        line = {"dash": "dash"},
+                        showlegend = False
+                    ),
+                    row=r+1,
+                    col=c+1
+                )
+
             fig.add_trace(
                 go.Scattergl(
                     x = X_stable[-1, :],
-                    y = np.sqrt(X_h_stable[2*h-1, :]**2 + X_h_stable[2*h, :]**2),
-                    name = name,
-                    legendgroup = name,
+                    y = rms_stable,
+                    name = f"RMS",
+                    legendgroup = "RMS",
                     mode = "lines",
                     line = {"dash": "solid"},
                     showlegend = True if dof == 0 else False
                 ),
-                row=dof+1,
-                col=1
+                row=r+1,
+                col=c+1
             )
             fig.add_trace(
                 go.Scattergl(
                     x = X_unstable[-1, :],
-                    y = np.sqrt(X_h_unstable[2*h-1, :]**2 + X_h_unstable[2*h, :]**2),
-                    name = name,
-                    legendgroup = name,
+                    y = rms_unstable,
+                    name = f"RMS",
+                    legendgroup = "RMS",
                     mode = "lines",
                     line = {"dash": "dash"},
                     showlegend = False
                 ),
-                row=dof+1,
-                col=1
+                row=r+1,
+                col=c+1
             )
 
-        symbols = ["circle", "square", "diamond", "triangle"]
-        for i, b in enumerate(BIFURCATIONS):
-            h=1 # only plot the bifurcations for the first harmonic
-            indices = np.array(metadata.bifurcation[b])
-            if len(indices) == 0: continue
-            fig.add_trace(
-                go.Scattergl(
-                    x = metadata.X[-1, indices],
-                    y = np.sqrt(X_h[2*h-1, indices]**2 + X_h[2*h, indices]**2),
-                    name = b,
-                    legendgroup = b,
-                    mode = "markers",
-                    marker = {"size": 10, "symbol": symbols[i]},
-                    showlegend = True if dof == 0 else False
-                ),
-                row=dof+1,
-                col=1
-            )
+            symbols = ["circle", "square", "diamond", "triangle"]
+            for i, b in enumerate(BIFURCATIONS):
+                h=1 # only plot the bifurcations for the first harmonic
+                indices = np.array(metadata.bifurcation[b])
+                if len(indices) == 0: continue
+                fig.add_trace(
+                    go.Scattergl(
+                        x = metadata.X[-1, indices],
+                        y = rms[indices],
+                        name = b,
+                        legendgroup = b,
+                        mode = "markers",
+                        marker = {"size": 10, "symbol": symbols[i]},
+                        showlegend = True if dof == 0 else False
+                    ),
+                    row=r+1,
+                    col=c+1
+                )
 
-        plot.format_subplot(fig, dof+1, 1, r"$\bar{U}$", f"$||H_{dof+1}||^{2}$")
+            plot.format_subplot(fig, r+1, c+1, r"$\bar{U}$", f"$||H||^{2}$")
 
     plot.fig_save(fig, f"build/continuation/continuation_{hash_metadata(metadata)}", pdf=False)
 

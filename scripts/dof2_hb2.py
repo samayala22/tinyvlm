@@ -1,12 +1,3 @@
-import sys
-
-if sys.platform == "win32":
-    sys.path.append(r".\\build\\windows\\x64\\release")
-elif sys.platform == "linux":
-    sys.path.append(r"./build/linux/x86_64/release")
-else:
-    exit()
-
 import numpy as np
 import scipy as sp
 from dataclasses import dataclass
@@ -17,8 +8,7 @@ import helpers
 import continuation as cont
 import harmonic_balance as hb
 import plotting as plot
-
-from libhbvlm import HBVLM
+import finite_diff as fd
 
 INITIAL_ONLY = False
 
@@ -38,46 +28,79 @@ class System:
     fnlt   : callable        # time‐domain NL force
     fnlf   : callable        # frequency‐domain NL force
 
+def mono_matrices(U):
+    ndv.U = U
+
+    psi1 = 0.165
+    psi2 = 0.335
+    eps1 = 0.0455
+    eps2 = 0.3
+
+    M1 = np.zeros((6,6))
+    M2 = np.zeros((6,6))
+
+    M2[0, 0] = 1
+    M2[1, 1] = 1
+    M2[2, 2] = 1 + 1/ndv.mu
+    M2[2, 3] = ndv.x_a - ndv.a_h/ndv.mu
+    M2[3, 2] = ndv.x_a / (ndv.r_a**2) - ndv.a_h/(ndv.mu*ndv.r_a**2)
+    M2[3, 3] = 1.0 + (2/(ndv.mu*ndv.r_a**2))*((ndv.a_h**2)/2 + 1/16)
+    M2[4, 2] = -1
+    M2[4, 3] = - (0.5 - ndv.a_h)
+    M2[4, 4] = 1
+    M2[5, 2] = -1
+    M2[5, 3] = - (0.5 - ndv.a_h)
+    M2[5, 5] = 1
+
+    f0 = 0.5 - ndv.a_h
+    f1 = - 1 / (np.pi * ndv.mu)
+    f2 = 2*np.pi
+    f3 = 2 / (np.pi * ndv.mu * ndv.r_a**2)
+    f4 = np.pi * (0.5 + ndv.a_h)
+
+    M1[0, 2] = 1
+    M1[1, 3] = 1
+    M1[2, 1] = - 2 / ndv.mu
+    M1[2, 2] = - 2.0*ndv.zeta_h*(ndv.omega/ndv.U) - 2 / ndv.mu
+    M1[2, 3] = - (1/(np.pi*ndv.mu)) * (np.pi + 2*np.pi*(0.5 - ndv.a_h))
+    M1[2, 4] = (2 / ndv.mu) * psi1
+    M1[2, 5] = (2 / ndv.mu) * psi2
+    M1[3, 1] = f3*f4
+    M1[3, 2] = f3*f4
+    M1[3, 3] = - 2.0*ndv.zeta_a/ndv.U + f3*f4*f0 - f3*0.5*np.pi*f0
+    M1[3, 4] = - psi1*f3*f4
+    M1[3, 5] = - psi2*f3*f4
+    M1[4, 3] = 1
+    M1[4, 4] = -eps1
+    M1[5, 3] = 1
+    M1[5, 5] = -eps2
+
+    return M2, M1
+
 def create_motion_system() -> System:
     def fnlt(t, X, u, v, omega, U):
-        return np.array([
-            - (ndv.omega / U)**2 * u[0],
-            - 1/(U**2) * torsional_func(u[1])
-        ])
+        f = np.zeros((6, t.shape[0]))
+        f[2, :] = - (ndv.omega / U)**2 * u[0, :]
+        f[3, :] = - 1/(U**2) * torsional_func(u[1, :])
+        return f
 
     def fnlf(X, omega, U):
-        forces_t = np.zeros_like(X)
-        hbvlm.run(omega, X, forces_t)
-        forces_t[0, :] = - forces_t[0, :] / (np.pi * ndv.mu)
-        forces_t[1, :] = (2.0 * forces_t[1, :]) / (np.pi * ndv.mu * ndv.r_a**2)
-        return forces_t
+        return np.zeros_like(X)
     
     def M(U):
-        return np.array([
-            [1.0, ndv.x_a],
-            [ndv.x_a / ndv.r_a**2, 1.0]
-        ])
+        return np.zeros((6, 6))
     
     def C(U):
-        return np.array([
-            [2.0 * ndv.zeta_h * ndv.omega / U, 0.0],
-            [0.0, 2.0 * ndv.zeta_a / U]
-        ])
+        M2, _ = mono_matrices(U)
+        return M2
     
     def K(U):
-        return np.zeros((2,2))
+        _, M1 = mono_matrices(U)
+        return -M1
     
-    def dMdU(U):
-        return np.zeros((2, 2))
-    
-    def dCdU(U):
-        return - (1.0 / U**2) * np.array([
-            [2.0 * ndv.zeta_h * ndv.omega, 0.0],
-            [0.0, 2.0 * ndv.zeta_a]
-        ])
-    
-    def dKdU(U):
-        return np.zeros((2, 2))
+    def dMdU(U): return np.zeros((6, 6))
+    def dCdU(U): return fd.cd2(C, U)
+    def dKdU(U): return fd.cd2(K, U)
     
     return System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
 
@@ -94,22 +117,14 @@ if __name__ == "__main__":
 
     # Independent params
     dims = hb.Dims(
-        n_d=2,          # number of degrees of freedom
+        n_d=6,          # number of degrees of freedom
         n_h=10          # number of harmonics
     )
 
-    vars_b = 0.5 # half chord
     flutter_speed = 6.285
-    flutter_ratio_start = 0.3
-    flutter_ratio_end = 0.8
-
-    hbvlm = HBVLM("cpu", "./mesh/infinite_rectangular_10x1.x")
-    hbvlm.init(dims.n_h, 1.0/vars_b)
 
     # Dependent params
-    # param_start = flutter_speed * flutter_ratio_start
-    # param_end = flutter_speed * flutter_ratio_end
-    param_start = 10.0
+    param_start = 7.0
     param_end = 20.0
     # Time integration
     t_final = 2000.0
@@ -129,9 +144,9 @@ if __name__ == "__main__":
     system, _ = dof2.create_monolithic_system(y0, ndv, torsional_func)
     sol = sp.integrate.solve_ivp(system, (0, t_final), y0, t_eval=np.arange(0, t_final, dt), method='RK45')
     
-    idx_start = int(0.75 * len(sol.t))
+    idx_start = int(0.8 * len(sol.t))
     t_tr = sol.t[idx_start:]
-    u_tr = sol.y[0:2, idx_start:]   # shape = (n_dofs, N_tr)
+    u_tr = sol.y[:, idx_start:]   # shape = (n_dofs, N_tr)
 
     u_coeffs, omega0 = hb.truncated_series_approximation(dt, u_tr, dims)
     
@@ -160,9 +175,9 @@ if __name__ == "__main__":
     metadata.param_start = param_start
     metadata.param_end = param_end
     metadata.max_steps = 1 if INITIAL_ONLY else 10000
-    metadata.scaling = False
+    metadata.scaling = True
     metadata.step_adapt = True
-    metadata.ds = [0.01]
+    metadata.ds = 0.02
     metadata.dims = dims
     
     metadata = cont.continuation(X0, create_motion_system, metadata)

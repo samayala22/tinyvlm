@@ -180,7 +180,7 @@ class AeroelasticSystem:
         self.L_lambda = v.V * self.L_lambda
 
     def yn_func(self, y_: np.ndarray):
-        y = y_.reshape(y_.shape[0], -1)
+        y = y_.reshape(y_.shape[0], -1) # so that it works for both y_ as vector or matrix
         yn = np.zeros_like(y)
         gamma = 0 # Cubic factor (0 for linear spring)
         yn[0, :] = self.v.mu * y[3, :] * self.v.sigma**2 * (1 + gamma * y[3, :]**2)
