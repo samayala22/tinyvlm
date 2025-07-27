@@ -24,7 +24,7 @@ class Metadata:
         self.max_steps = 5000
         self.scaling = False
         self.step_adapt = False
-        self.ds = [] # Continuation step size
+        self.ds = 0.05 # Continuation step size
         self.bifurcation_test = None # History of test functions
         self.bifurcation = {"LP": [], "BP": [], "NS": [], "PD": []} # Bifurcation indices position
         self.stable = []

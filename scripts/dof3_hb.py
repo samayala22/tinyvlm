@@ -191,7 +191,7 @@ if __name__ == "__main__":
     metadata.max_steps = 1 if INITIAL_ONLY else 10000
     metadata.scaling = False
     metadata.step_adapt = True
-    metadata.ds = [0.02]
+    metadata.ds = 0.02
     metadata.dims = dims
     
     metadata = cont.continuation(X0, create_motion_system, metadata)
