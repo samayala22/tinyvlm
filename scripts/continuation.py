@@ -361,7 +361,7 @@ def continuation(X0, motion, metadata: Metadata):
                 for i, name in enumerate(BIFURCATIONS):
                     if np.copysign(1.0, metadata.bifurcation_test[i, iteration-1]) != np.copysign(1.0, metadata.bifurcation_test[i, iteration]):
                         print(f"{name} bifurcation detected")
-                        metadata.bifurcation[name].append(iteration)
+                        metadata.bifurcation[name].append(iteration-1)
             
             print(f"{iteration} | ds: {ds * Dscale[-1]:.4f}, param: {X[-1]:.3f}, omega: {X[omega_idx]:.3f}, stable: {is_stable}, nfev: {nfev}, njev: {njev}, timing: {timing:.2f}s")
 
@@ -413,15 +413,15 @@ def plot_hb_continuation(metadata):
     # Padding to make the line continuous between stable and unstable regions
     for i in range(len(stable_mask)-1):
         if stable_mask[i+1] == False and stable_mask[i] == True:
-            stable_mask2[i+1] = True
+            stable_mask2[i] = False
         elif stable_mask[i+1] == True and stable_mask[i] == False:
-            stable_mask2[i] = True
+            stable_mask2[i+1] = False
 
     def masked(mat):
         mat_stable = mat.copy()
         mat_unstable = mat.copy()
-        mat_stable[..., ~stable_mask2] = np.nan
-        mat_unstable[..., stable_mask] = np.nan
+        mat_stable[..., ~stable_mask] = np.nan
+        mat_unstable[..., stable_mask2] = np.nan
         return mat_stable, mat_unstable
     
     X_stable, X_unstable = masked(metadata.X)
