@@ -37,43 +37,6 @@ std::vector<std::string> vlm::get_available_backends() {
     return backends;
 }
 
-f32 Backend::coeff_steady_cl_multi(const MultiTensorView3fD& verts_wing, const MultiTensorView2fD& gamma_delta, const FlowData& flow, const MultiTensorView2fD& areas) {
-    f32 cl = 0.0f;
-    f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wing.size(); i++) {
-        const f32 area_local = sum(areas[i]);
-        const f32 wing_cl = coeff_steady_cl_single(
-            verts_wing[i],
-            gamma_delta[i],
-            flow,
-            area_local
-        );
-        cl += wing_cl * area_local;
-        total_area += area_local;
-    }
-    cl /= total_area;
-    return cl;
-}
-
-f32 Backend::coeff_steady_cd_multi(const MultiTensorView3fD& verts_wake, const MultiTensorView2fD& gamma_wake, const FlowData& flow, const MultiTensorView2fD& areas) {
-    // const tiny::ScopedTimer timer("Compute CL");
-    f32 cd = 0.0f;
-    f32 total_area = 0.0f;
-    for (i64 i = 0; i < verts_wake.size(); i++) {
-        const f32 area_local = sum(areas[i]);
-        const f32 wing_cd = coeff_steady_cd_single(
-            verts_wake[i],
-            gamma_wake[i],
-            flow,
-            area_local
-        );
-        cd += wing_cd * area_local;
-        total_area += area_local;
-    }
-    cd /= total_area;
-    return cd;
-}
-
 template<typename T>
 void wake_shed_impl(const MultiTensorView<T, 3, Location::Device>& verts_wing, MultiTensorView<T, 3, Location::Device>& verts_wake, i32 iteration) {
     for (const auto& [wing, wake] : zip(verts_wing, verts_wake)) {
@@ -219,26 +182,77 @@ linalg::double3 Backend::coeff_cm_multibody(
 void Backend::forces_unsteady_multibody(
     const MultiTensorView3fD& verts_wing,
     const MultiTensorView2fD& gamma_delta,
-    const MultiTensorView2fD& gamma,
-    const MultiTensorView2fD& gamma_prev,
+    const MultiTensorView2fD& dgamma_dt,
     const MultiTensorView3fD& velocities,
     const MultiTensorView2fD& areas,
     const MultiTensorView3fD& normals,
-    const MultiTensorView3fD& forces,
-    f32 dt
+    const MultiTensorView3fD& forces
 ) {
     // parallel tasks
     for (i64 m = 0; m < verts_wing.size(); m++) {
         forces_unsteady(
             verts_wing[m],
             gamma_delta[m],
-            gamma[m],
-            gamma_prev[m],
+            dgamma_dt[m],
             velocities[m],
             areas[m],
             normals[m],
-            forces[m],
-            dt
+            forces[m]
+        );
+    }
+}
+
+void Backend::forces_unsteady_multibody(
+    const MultiTensorView3dD& verts_wing,
+    const MultiTensorView2dD& gamma_delta,
+    const MultiTensorView2dD& dgamma_dt,
+    const MultiTensorView3dD& velocities,
+    const MultiTensorView2dD& areas,
+    const MultiTensorView3dD& normals,
+    const MultiTensorView3dD& forces
+) {
+    // parallel tasks
+    for (i64 m = 0; m < verts_wing.size(); m++) {
+        forces_unsteady(
+            verts_wing[m],
+            gamma_delta[m],
+            dgamma_dt[m],
+            velocities[m],
+            areas[m],
+            normals[m],
+            forces[m]
+        );
+    }
+}
+
+void Backend::forces_steady_multibody(
+    const MultiTensorView3fD& verts_wing,
+    const MultiTensorView2fD& gamma_delta,
+    const MultiTensorView3fD& velocities,
+    const MultiTensorView3fD& forces
+) {
+    for (i64 m = 0; m < verts_wing.size(); m++) {
+        forces_steady(
+            verts_wing[m],
+            gamma_delta[m],
+            velocities[m],
+            forces[m]
+        );
+    }
+}
+
+void Backend::forces_steady_multibody(
+    const MultiTensorView3dD& verts_wing,
+    const MultiTensorView2dD& gamma_delta,
+    const MultiTensorView3dD& velocities,
+    const MultiTensorView3dD& forces
+) {
+    for (i64 m = 0; m < verts_wing.size(); m++) {
+        forces_steady(
+            verts_wing[m],
+            gamma_delta[m],
+            velocities[m],
+            forces[m]
         );
     }
 }

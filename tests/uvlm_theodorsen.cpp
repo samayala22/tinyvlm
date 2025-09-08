@@ -32,7 +32,7 @@ int main() {
     const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
     //const f32 t_final = 5.0f;
 
-    KinematicsTree kinematics_tree;
+    KinematicsTree<f32> kinematics_tree;
 
     // Periodic heaving
     // const f32 amplitude = 0.1f; // amplitude of the wing motion
@@ -69,7 +69,7 @@ int main() {
     // });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
-        Assembly assembly(fs);
+        Assembly<f32> assembly(fs);
         assembly.add(mesh_name, pitch);
         UVLM simulation{backend_name, {mesh_name}};
         simulation.run(assembly, t_final);

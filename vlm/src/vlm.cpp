@@ -140,6 +140,8 @@ AeroCoefficients VLM::run(const FlowData& flow) {
         begin = end;
     }
 
+    backend->forces_steady_multibody(verts_wing.views(), gamma_wing_delta.views(), local_velocities.views(), forces.views());
+
     return AeroCoefficients{
         backend->coeff_steady_cl_multi(verts_wing.views(), gamma_wing_delta.views(), flow, areas_d.views()),
         backend->coeff_steady_cd_multi(verts_wake.views(), gamma_wake.views(), flow, areas_d.views()),

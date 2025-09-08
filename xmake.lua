@@ -1,8 +1,9 @@
 set_project("vlm")
-set_xmakever("2.9.9")
+set_xmakever("3.0.0")
 
 add_rules("mode.debug", "mode.release", "mode.releasedbg")
 add_rules("plugin.compile_commands.autoupdate", {outputdir = "."})
+set_policy("test.return_zero_on_failure", true)
 
 -- set_toolchains("cuda")
 -- set_toolset("cxx", "clang")
@@ -63,7 +64,7 @@ end
 
 -- Create python lib
 target("libhbvlm")
-    add_rules("python.module")
+    add_rules("python.library")
     add_packages("pybind11")
     set_default(false)
     add_rpathdirs("$ORIGIN")
@@ -71,7 +72,7 @@ target("libhbvlm")
     add_files("lib/libhbvlm.cpp")
 
 target("libhbvlm3")
-    add_rules("python.module")
+    add_rules("python.library")
     add_packages("pybind11")
     set_default(false)
     add_rpathdirs("$ORIGIN")

@@ -166,7 +166,30 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView1dD& rhs, const MultiTens
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::forces_unsteady2(
+void BackendCPU::forces_steady(
+    const TensorView3dD& verts_wing,
+    const TensorView2dD& gamma_delta, // chordwise delta
+    const TensorView3dD& velocities,
+    const TensorView3dD& forces
+) {
+    const f64 rho = 1.0f; // TODO: remove hardcoded rho
+    for (i64 j = 0; j < gamma_delta.shape(1); j++) { // chordwise
+        for (i64 i = 0; i < gamma_delta.shape(0); i++) { // spanwise
+            const linalg::double3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
+
+            const linalg::double3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
+            const linalg::double3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
+
+            linalg::double3 force = rho * gamma_delta(i, j) * linalg::cross(V, vertex1 - vertex0); // steady contribution
+
+            forces(i, j, 0) = force.x;
+            forces(i, j, 1) = force.y;
+            forces(i, j, 2) = force.z;
+        }
+    }
+}
+
+void BackendCPU::forces_unsteady(
     const TensorView3dD& verts_wing,
     const TensorView2dD& gamma_delta, // chordwise delta
     const TensorView2dD& dgamma_dt, // dgamma/dt
@@ -175,25 +198,17 @@ void BackendCPU::forces_unsteady2(
     const TensorView3dD& normals,
     const TensorView3dD& forces
 ) {
+    forces_steady(verts_wing, gamma_delta, velocities, forces); // steady part
+    
     const f64 rho = 1.0f; // TODO: remove hardcoded rho
     for (i64 j = 0; j < gamma_delta.shape(1); j++) { // chordwise
         for (i64 i = 0; i < gamma_delta.shape(0); i++) { // spanwise
-
-            const linalg::double3 V{velocities(i, j, 0), velocities(i, j, 1), velocities(i, j, 2)}; // local velocity (freestream + displacement vel)
-
-            const linalg::double3 vertex0{verts_wing(i, j, 0), verts_wing(i, j, 1), verts_wing(i, j, 2)}; // upper left
-            const linalg::double3 vertex1{verts_wing(i+1, j, 0), verts_wing(i+1, j, 1), verts_wing(i+1, j, 2)}; // upper right
             const linalg::double3 normal{normals(i, j, 0), normals(i, j, 1), normals(i, j, 2)};
+            linalg::double3 force = rho * dgamma_dt(i, j) * areas(i, j) * normal; // unsteady contribution
 
-            linalg::double3 force = {0.0f, 0.0f, 0.0f};
-
-            // Joukowski method
-            force += rho * gamma_delta(i, j) * linalg::cross(V, vertex1 - vertex0); // steady contribution
-            force += rho * dgamma_dt(i, j) * areas(i, j) * normal; // unsteady contribution
-
-            forces(i, j, 0) = force.x;
-            forces(i, j, 1) = force.y;
-            forces(i, j, 2) = force.z;
+            forces(i, j, 0) += force.x;
+            forces(i, j, 1) += force.y;
+            forces(i, j, 2) += force.z;
         }
     }
 }

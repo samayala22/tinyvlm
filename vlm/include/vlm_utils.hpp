@@ -57,6 +57,18 @@ auto zip(Containers&... containers) {
     return zip_helper<Containers...>(containers...);
 }
 
+template <class F, class... Views>
+void map(F&& f, Views&... views) {
+    static_assert(sizeof...(Views) > 0, "map requires at least one view");
+
+    const size_t n = std::min({ static_cast<size_t>(views.size())... });
+    ((void)assert(views.size() == n), ...); // ensure equal sizes in debug
+
+    for (size_t i = 0; i < n; ++i) {
+        std::invoke(std::forward<F>(f), views[i]...);
+    }
+}
+
 linalg::float3 compute_freestream(const f32 u_inf, const f32 alpha, const f32 beta);
 linalg::float3 compute_lift_axis(const linalg::float3& freestream_);
 linalg::float3 compute_stream_axis(const linalg::float3& freestream_);

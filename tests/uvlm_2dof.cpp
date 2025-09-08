@@ -859,12 +859,12 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
 int main(int argc, char **argv) {
     std::vector<std::vector<std::pair<std::string, bool>>> meshes;
     // TODO: add check that the values are valid !!
-    meshes.push_back({{"../../../../mesh/infinite_rectangular_20x1.x", true}});
+    // meshes.push_back({{"../../../../mesh/infinite_rectangular_20x1.x", true}});
     // meshes.push_back({{"../../../../mesh/infinite_rectangular_2x2_c.x", true}});
-    // meshes.push_back({
-    //     {"../../../../mesh/infinite_rectangular_2x2_c0.x", false},
-    //     {"../../../../mesh/infinite_rectangular_2x2_c1.x", true}
-    // });
+    meshes.push_back({
+        {"../../../../mesh/infinite_rectangular_2x2_c0.x", false},
+        {"../../../../mesh/infinite_rectangular_2x2_c1.x", true}
+    });
     
     const std::vector<std::string> backends = get_available_backends();
 
