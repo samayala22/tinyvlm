@@ -160,7 +160,7 @@ if __name__ == "__main__":
     metadata.param_start = param_start
     metadata.param_end = param_end
     metadata.max_steps = 1 if INITIAL_ONLY else 10000
-    metadata.scaling = False
+    metadata.scaling = True
     metadata.step_adapt = True
     metadata.ds = 0.01
     metadata.dims = dims

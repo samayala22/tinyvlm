@@ -273,6 +273,7 @@ def continuation(X0, motion, metadata: Metadata):
 
     # Scaling
     Dscale0 = np.ones_like(X0)
+    Dscale0[omega_idx] = X0[omega_idx]
     Dscale0[-1] = X0[-1]
     Dscale = Dscale0.copy()
     Dscale_prev = Dscale.copy()
@@ -293,7 +294,7 @@ def continuation(X0, motion, metadata: Metadata):
         while iteration < metadata.max_steps:
             if metadata.scaling:
                 Dscale_prev = Dscale.copy()
-                Dscale[:-1] = np.maximum(np.abs(X0[:-1] * Dscale_prev[:-1]), Dscale0[:-1])
+                Dscale[:omega_idx] = np.maximum(np.abs(X0[:omega_idx] * Dscale_prev[:omega_idx]), Dscale0[:omega_idx])
                 # Dscale[omega_idx] = 1.0 # omega is not scaled
                 # Dscale[-1] = 1.0 # param is not scaled
                 ratio = (Dscale_prev / Dscale)
