@@ -74,6 +74,7 @@ class UVLM_2DOF final: public Simulation {
         MultiTensor2fD gamma_wake{backend->memory.get()}; // nw*ns
         MultiTensor2fD gamma_wing_prev{backend->memory.get()}; // nc*ns
         MultiTensor2fD gamma_wing_delta{backend->memory.get()}; // nc*ns
+        MultiTensor2fD gamma_wing_dt{backend->memory.get()}; // nc*ns
         MultiTensor3fD aero_forces{backend->memory.get()}; // ns*nc*3
 
         MultiTensor3fD velocities{backend->memory.get()}; // ns*nc*3
@@ -222,6 +223,7 @@ void UVLM_2DOF::alloc_buffers() {
     gamma_wing.init(panels_2D);
     gamma_wing_prev.init(panels_2D);
     gamma_wing_delta.init(panels_2D);
+    gamma_wing_dt.init(panels_2D);
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
     aero_forces.init(panels_3D);
@@ -691,6 +693,7 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
             auto transform_dual = linalg::mul(fs, linalg::mul(heave.transform_dual(0.0f), pitch.transform_dual(0.0f)));
             auto transform = dual_to_float(transform_dual);
             auto ref_pt_4 = linalg::mul(transform, {1 + vars.a_h, 0.0f, 0.0f, 1.0f});
+            auto ref_pt_3 = linalg::float3{ref_pt_4.x, ref_pt_4.y, ref_pt_4.z};
 
             for (i64 i = 0; i < m_assembly.num_surfaces(); i++) {
                 transform.store(transforms_h.views()[i].ptr(), transforms_h.views()[i].stride(1));
@@ -718,6 +721,9 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
                     const auto& gamma_wing_i = gamma_wing.views()[m];
                     const auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
                     const auto& gamma_wake_i = gamma_wake.views()[m];
+                    const auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
+                    const auto& gamma_wing_dt_i = gamma_wing_dt.views()[m];
+
                     i64 end = begin + gamma_wing_i.size();
 
                     // Copy solution to gamma_wing
@@ -743,22 +749,24 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
                         gamma_wing_i.slice(All, Range{0, -2}),
                         gamma_wing_delta_i.slice(All, Range{1, -1})
                     );
-                    
+
+                    gamma_wing_i.to(gamma_wing_dt_i);
+                    backend->blas->axpy(-1.0f, gamma_wing_prev_i, gamma_wing_dt_i);
+                    backend->blas->scal(1.0f/dt_nd, gamma_wing_dt_i.reshape(gamma_wing_dt_i.size()));
+            
                     begin = end;
                 }
             }
 
-            const linalg::float3 freestream = -m_assembly.kinematics()->linear_velocity(t_nd+dt_nd, {0.f, 0.f, 0.f});
+            linalg::float3 freestream = -m_assembly.kinematics()->linear_velocity(t_nd+dt_nd, {0.f, 0.f, 0.f});
             backend->forces_unsteady_multibody(
                 verts_wing.views(),
                 gamma_wing_delta.views(),
-                gamma_wing.views(),
-                gamma_wing_prev.views(),
+                gamma_wing_dt.views(),
                 velocities.views(),
                 areas_d.views(),
                 normals_d.views(),
-                aero_forces.views(),
-                dt_nd
+                aero_forces.views()
             );
 
             const f32 cl = backend->coeff_cl_multibody(
@@ -766,13 +774,13 @@ void UVLM_2DOF::run(const UVLM_2DOF_Vars& vars, f32 t_final_nd) {
                 areas_d.views(),
                 freestream,
                 vars.rho
-            );
+            ); 
 
             const linalg::float3 cm = backend->coeff_cm_multibody(
                 aero_forces.views(),
                 verts_wing.views(),
                 areas_d.views(),
-                {ref_pt_4.x, ref_pt_4.y, ref_pt_4.z},
+                ref_pt_3,
                 freestream,
                 vars.rho
             );

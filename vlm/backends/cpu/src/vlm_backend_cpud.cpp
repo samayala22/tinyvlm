@@ -24,7 +24,7 @@ using namespace linalg::ostream_overloads;
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCPU::lhs_assemble(TensorView2dD& lhs, const MultiTensorView3dD& colloc, const MultiTensorView3dD& normals, const MultiTensorView3dD& verts_wing, const MultiTensorView3dD& verts_wake, std::vector<i32>& condition, i32 iteration) {
+void BackendCPU::lhs_assemble(TensorView2dD& lhs, MultiTensorView3dD& colloc, MultiTensorView3dD& normals, MultiTensorView3dD& verts_wing, MultiTensorView3dD& verts_wake, std::vector<i32>& condition, i32 iteration) {
     // tiny::ScopedTimer timer("LHS");
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
 
@@ -96,7 +96,7 @@ void BackendCPU::lhs_assemble(TensorView2dD& lhs, const MultiTensorView3dD& coll
 /// @param rhs right hand side vector
 /// @param normals normals of all surfaces
 /// @param velocities displacement velocities of all surfaces
-void BackendCPU::rhs_assemble_velocities(TensorView1dD& rhs, const MultiTensorView3dD& normals, const MultiTensorView3dD& velocities) {
+void BackendCPU::rhs_assemble_velocities(TensorView1dD& rhs, MultiTensorView3dD& normals, MultiTensorView3dD& velocities) {
     // const tiny::ScopedTimer timer("RHS");
 
     tf::Taskflow taskflow;
@@ -121,7 +121,7 @@ void BackendCPU::rhs_assemble_velocities(TensorView1dD& rhs, const MultiTensorVi
     Executor::get().run(taskflow).wait();
 }
 
-void BackendCPU::rhs_assemble_wake_influence(TensorView1dD& rhs, const MultiTensorView2dD& gamma_wake, const MultiTensorView3dD& colloc, const MultiTensorView3dD& normals, const MultiTensorView3dD& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
+void BackendCPU::rhs_assemble_wake_influence(TensorView1dD& rhs, MultiTensorView2dD& gamma_wake, MultiTensorView3dD& colloc, MultiTensorView3dD& normals, MultiTensorView3dD& verts_wake, std::vector<bool>& lifting, i32 iteration) {
     // const tiny::ScopedTimer timer("Wake Influence");
     assert(lifting.size() == normals.size());
 
@@ -167,10 +167,10 @@ void BackendCPU::rhs_assemble_wake_influence(TensorView1dD& rhs, const MultiTens
 }
 
 void BackendCPU::forces_steady(
-    const TensorView3dD& verts_wing,
-    const TensorView2dD& gamma_delta, // chordwise delta
-    const TensorView3dD& velocities,
-    const TensorView3dD& forces
+    TensorView3dD& verts_wing,
+    TensorView2dD& gamma_delta, // chordwise delta
+    TensorView3dD& velocities,
+    TensorView3dD& forces
 ) {
     const f64 rho = 1.0f; // TODO: remove hardcoded rho
     for (i64 j = 0; j < gamma_delta.shape(1); j++) { // chordwise
@@ -190,13 +190,13 @@ void BackendCPU::forces_steady(
 }
 
 void BackendCPU::forces_unsteady(
-    const TensorView3dD& verts_wing,
-    const TensorView2dD& gamma_delta, // chordwise delta
-    const TensorView2dD& dgamma_dt, // dgamma/dt
-    const TensorView3dD& velocities,
-    const TensorView2dD& areas,
-    const TensorView3dD& normals,
-    const TensorView3dD& forces
+    TensorView3dD& verts_wing,
+    TensorView2dD& gamma_delta, // chordwise delta
+    TensorView2dD& dgamma_dt, // dgamma/dt
+    TensorView3dD& velocities,
+    TensorView2dD& areas,
+    TensorView3dD& normals,
+    TensorView3dD& forces
 ) {
     forces_steady(verts_wing, gamma_delta, velocities, forces); // steady part
     
@@ -214,11 +214,11 @@ void BackendCPU::forces_unsteady(
 }
 
 f64 BackendCPU::coeff_cl(
-    const TensorView3dD& forces,
-    const linalg::double3& lift_axis,
-    const linalg::double3& freestream,
-    const f64 rho,
-    const f64 area
+    TensorView3dD& forces,
+    linalg::double3& lift_axis,
+    linalg::double3& freestream,
+    f64 rho,
+    f64 area
 ) {
     f64 cl = 0.0f;
     for (i64 j = 0; j < forces.shape(1); j++) {
@@ -231,13 +231,13 @@ f64 BackendCPU::coeff_cl(
 }
 
 linalg::double3 BackendCPU::coeff_cm(
-    const TensorView3dD& forces,
-    const TensorView3dD& verts_wing,
-    const linalg::double3& ref_pt,
-    const linalg::double3& freestream,
-    const f64 rho,
-    const f64 area,
-    const f64 mac
+    TensorView3dD& forces,
+    TensorView3dD& verts_wing,
+    linalg::double3& ref_pt,
+    linalg::double3& freestream,
+    f64 rho,
+    f64 area,
+    f64 mac
 ) {
     linalg::double3 cm = {0.0f, 0.0f, 0.0f};
     for (i64 j = 0; j < forces.shape(1); j++) {
@@ -255,7 +255,7 @@ linalg::double3 BackendCPU::coeff_cm(
 }
 
 // TODO: change this to use the per panel local alpha (in global frame)
-void BackendCPU::mesh_metrics(const f64 alpha_rad, const MultiTensorView3dD& verts_wing, MultiTensorView3dD& colloc, MultiTensorView3dD& normals, MultiTensorView2dD& areas) {
+void BackendCPU::mesh_metrics(const f64 alpha_rad, MultiTensorView3dD& verts_wing, MultiTensorView3dD& colloc, MultiTensorView3dD& normals, MultiTensorView2dD& areas) {
     // parallel for
     for (int m = 0; m < colloc.size(); m++) {
         auto& colloc_m = colloc[m];
@@ -307,7 +307,7 @@ void BackendCPU::mesh_metrics(const f64 alpha_rad, const MultiTensorView3dD& ver
 /// @param j first panel index spanwise
 /// @param n number of panels spanwise
 /// @return mean chord of the set of panels
-f64 BackendCPU::mesh_mac(const TensorView3dD& verts_wing, const TensorView2dD& areas) {
+f64 BackendCPU::mesh_mac(TensorView3dD& verts_wing, TensorView2dD& areas) {
     f64 mac = 0.0f;
     // loop over panel chordwise sections in spanwise direction
     // Note: can be done optimally with vertical fused simd
@@ -335,8 +335,8 @@ f64 BackendCPU::mesh_mac(const TensorView3dD& verts_wing, const TensorView2dD& a
 }
 
 void BackendCPU::gamma_wake_from_coeffs(
-    const TensorView2dD& gamma_wake,
-    const TensorView2dD& gamma_coeffs, // already shifted to the trailing edge
+    TensorView2dD& gamma_wake,
+    TensorView2dD& gamma_coeffs, // already shifted to the trailing edge
     i32 harmonics,
     f64 tn,
     f64 omega,
@@ -370,7 +370,7 @@ void BackendCPU::gamma_wake_from_coeffs(
 }
 
 // TODO: replace with BLAS asum ?
-f64 BackendCPU::sum(const TensorView1dD& tensor) {
+f64 BackendCPU::sum(TensorView1dD& tensor) {
     f64 sum = 0.0;
     for (i64 i = 0; i < tensor.shape(0); i++) {
         sum += tensor(i);
@@ -379,7 +379,7 @@ f64 BackendCPU::sum(const TensorView1dD& tensor) {
 }
 
 // TODO: replace with BLAS asum ?
-f64 BackendCPU::sum(const TensorView2dD& tensor) {
+f64 BackendCPU::sum(TensorView2dD& tensor) {
     f64 sum = 0.0;
     for (i64 j = 0; j < tensor.shape(1); j++) {
         for (i64 i = 0; i < tensor.shape(0); i++) {

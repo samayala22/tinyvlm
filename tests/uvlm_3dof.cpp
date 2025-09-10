@@ -76,6 +76,7 @@ class UVLM_3DOF final: public Simulation {
         MultiTensor2fD gamma_wake{backend->memory.get()}; // nw*ns
         MultiTensor2fD gamma_wing_prev{backend->memory.get()}; // nc*ns
         MultiTensor2fD gamma_wing_delta{backend->memory.get()}; // nc*ns
+        MultiTensor2fD gamma_wing_dt{backend->memory.get()}; // nc*ns
         MultiTensor3fD aero_forces{backend->memory.get()}; // ns*nc*3
 
         MultiTensor3fD velocities{backend->memory.get()}; // ns*nc*3
@@ -196,6 +197,7 @@ void UVLM_3DOF::alloc_buffers() {
     gamma_wing.init(panels_2D);
     gamma_wing_prev.init(panels_2D);
     gamma_wing_delta.init(panels_2D);
+    gamma_wing_dt.init(panels_2D);
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
     aero_forces.init(panels_3D);
@@ -605,7 +607,8 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
             auto flap_transform = dual_to_float(flap_transform_dual);
             auto ref_pt_a = linalg::mul(wing_transform, {1 + v.a, 0.0f, 0.0f, 1.0f});
             auto ref_pt_b = linalg::mul(flap_transform, {1 + v.c, 0.0f, 0.0f, 1.0f});
-
+            auto ref_pt_a_3 = linalg::float3{ref_pt_a.x, ref_pt_a.y, ref_pt_a.z};
+            auto ref_pt_b_3 = linalg::float3{ref_pt_b.x, ref_pt_b.y, ref_pt_b.z};
             wing_transform.store(transforms_h.views()[0].ptr(), transforms_h.views()[0].stride(1));
             flap_transform.store(transforms_h.views()[1].ptr(), transforms_h.views()[1].stride(1));
             transforms_h.views()[0].to(transforms.views()[0]);
@@ -655,21 +658,25 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
                         gamma_wing_delta_i.slice(All, Range{1, -1})
                     );
                     
+                    const auto& gamma_wing_dt_i = gamma_wing_dt.views()[m];
+                    const auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
+                    gamma_wing_i.to(gamma_wing_dt_i);
+                    backend->blas->axpy(-1.0f, gamma_wing_prev_i, gamma_wing_dt_i);
+                    backend->blas->scal(1.0f/dt_nd, gamma_wing_dt_i.reshape(gamma_wing_dt_i.size()));
+                    
                     begin = end;
                 }
             }
 
-            const linalg::float3 freestream = -m_assembly.kinematics()->linear_velocity(t_nd+dt_nd, {0.f, 0.f, 0.f});
+            linalg::float3 freestream = -m_assembly.kinematics()->linear_velocity(t_nd+dt_nd, {0.f, 0.f, 0.f});
             backend->forces_unsteady_multibody(
                 verts_wing.views(),
                 gamma_wing_delta.views(),
-                gamma_wing.views(),
-                gamma_wing_prev.views(),
+                gamma_wing_dt.views(),
                 velocities.views(),
                 areas_d.views(),
                 normals_d.views(),
-                aero_forces.views(),
-                dt_nd
+                aero_forces.views()
             );
 
             const f32 cl = backend->coeff_cl_multibody(
@@ -683,14 +690,14 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
                 aero_forces.views(),
                 verts_wing.views(),
                 areas_d.views(),
-                {ref_pt_a.x, ref_pt_a.y, ref_pt_a.z},
+                ref_pt_a_3,
                 freestream,
                 1.0f // rho_inf = 1
             );
             const linalg::float3 cm_b = backend->coeff_cm(
                 aero_forces.views()[1],
                 verts_wing.views()[1],
-                {ref_pt_b.x, ref_pt_b.y, ref_pt_b.z},
+                ref_pt_b_3,
                 freestream,
                 1.0f, // rho_inf = 1
                 backend->sum(areas_d.views()[1]),

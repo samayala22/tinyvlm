@@ -32,7 +32,7 @@ public:
 
     const std::vector<std::string>& mesh_filenames() const { return m_filenames; }
     const std::vector<KinematicNode<T>*>& surface_kinematics() const { return m_nodes; }
-    const std::vector<bool>& lifting() const { return m_lifting; }
+    std::vector<bool>& lifting() { return m_lifting; }
     const KinematicNode<T>* kinematics() const { return m_assembly_node; }
     i64 num_surfaces() const { return m_num_surfaces; }
 };
@@ -60,7 +60,7 @@ class VLM final: public Simulation {
     public:
         VLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~VLM() = default;
-        AeroCoefficients run(const FlowData& flow);
+        AeroCoefficients run(FlowData& flow);
 
         std::vector<i32> condition0; // TODO: remove
 
@@ -74,6 +74,7 @@ class VLM final: public Simulation {
         MultiTensor2fD gamma_wake{backend->memory.get()}; // nw*ns
         MultiTensor2fD gamma_wing_prev{backend->memory.get()}; // nc*ns
         MultiTensor2fD gamma_wing_delta{backend->memory.get()}; // nc*ns
+        MultiTensor3fD forces{backend->memory.get()}; // ns*nc*3
 
         MultiTensor3fD local_velocities{backend->memory.get()}; // ns*nc*3
         Tensor2fH wake_transform{backend->memory.get()};
@@ -92,7 +93,7 @@ class NLVLM final: public Simulation {
 
         NLVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~NLVLM() = default;
-        AeroCoefficients run(const FlowData& flow, const Database& db);
+        AeroCoefficients run(FlowData& flow, const Database& db);
 
         const i64 max_iter = DEFAULT_MAX_ITER;
         const f64 tol = DEFAULT_TOL;
@@ -108,6 +109,7 @@ class NLVLM final: public Simulation {
         MultiTensor2fD gamma_wake{backend->memory.get()}; // nw*ns
         MultiTensor2fD gamma_wing_prev{backend->memory.get()}; // nc*ns
         MultiTensor2fD gamma_wing_delta{backend->memory.get()}; // nc*ns
+        MultiTensor3fD forces{backend->memory.get()}; // ns*nc*3
 
         MultiTensor3fD local_velocities{backend->memory.get()}; // ns*nc*3
         MultiTensor1fH strip_alphas{backend->memory.get()}; // ns
@@ -123,7 +125,7 @@ class UVLM final: public Simulation {
     public:
         UVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~UVLM() = default;
-        void run(const Assembly<f32>& assembly, f32 t_final);
+        void run(Assembly<f32>& assembly, f32 t_final);
 
         MultiTensor3fD colloc_d{backend->memory.get()};
         MultiTensor3fH colloc_h{backend->memory.get()};
@@ -139,6 +141,8 @@ class UVLM final: public Simulation {
         MultiTensor2fD gamma_wake{backend->memory.get()}; // nw*ns
         MultiTensor2fD gamma_wing_prev{backend->memory.get()}; // nc*ns
         MultiTensor2fD gamma_wing_delta{backend->memory.get()}; // nc*ns
+        MultiTensor2fD gamma_wing_dt{backend->memory.get()}; // nc*ns
+
         MultiTensor3fD aero_forces{backend->memory.get()}; // ns*nc*3
         
         MultiTensor3fD velocities{backend->memory.get()}; // ns*nc*3

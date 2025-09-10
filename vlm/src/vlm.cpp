@@ -86,6 +86,7 @@ void VLM::alloc_buffers() {
     gamma_wing_delta.init(panels_2D);
     gamma_wake.init(wake_panels_2D);
     local_velocities.init(panels_3D);
+    forces.init(panels_3D);
     wake_transform.init({4,4});
     transforms.init(transforms_2D);
     solver->init(lhs.view());
@@ -93,7 +94,7 @@ void VLM::alloc_buffers() {
     for (const auto& wake : verts_wake.views()) wake.slice(All, All, 3).fill(1.f);
 }
 
-AeroCoefficients VLM::run(const FlowData& flow) {
+AeroCoefficients VLM::run(FlowData& flow) {
     // Reset buffer state
     lhs.view().fill(0.f);
     rhs.view().fill(0.f);
@@ -143,9 +144,9 @@ AeroCoefficients VLM::run(const FlowData& flow) {
     backend->forces_steady_multibody(verts_wing.views(), gamma_wing_delta.views(), local_velocities.views(), forces.views());
 
     return AeroCoefficients{
-        backend->coeff_steady_cl_multi(verts_wing.views(), gamma_wing_delta.views(), flow, areas_d.views()),
-        backend->coeff_steady_cd_multi(verts_wake.views(), gamma_wake.views(), flow, areas_d.views()),
-        {0.0f, 0.0f, 0.0f} // todo implement cm
+        backend->coeff_cl_multibody(forces.views(), areas_d.views(), flow.freestream, flow.rho),
+        0.0f,
+        {0.0f, 0.0f, 0.0f} // todo: provide axis
     };
 }
 
@@ -185,6 +186,7 @@ void NLVLM::alloc_buffers() {
     gamma_wing_delta.init(panels_2D);
     gamma_wake.init(wake_panels_2D);
     local_velocities.init(panels_3D);
+    forces.init(panels_3D);
     strip_alphas.init(spanwise_1D);
     wake_transform.init({4,4});
     transforms.init(transforms_2D);
@@ -207,7 +209,7 @@ void strip_alpha_to_vel(const FlowData& flow, MultiTensorView3fD& local_velociti
     }
 }
 
-AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
+AeroCoefficients NLVLM::run(FlowData& flow, const Database& db) {
     f64 err = 1.0f; // l1 error
     auto init_pos = translation_matrix<f32>({
         -100.0f * flow.u_inf*std::cos(flow.alpha),
@@ -250,22 +252,22 @@ AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
             backend->blas->axpy(-1.0f, gamma_wing_i.slice(All, Range{0, -2}), gamma_wing_delta_i.slice(All, Range{1, -1}));
             begin = end;
         }
+
+        backend->forces_steady_multibody(verts_wing.views(), gamma_wing_delta.views(), local_velocities.views(), forces.views());
  
         // Parallel Reduce
         // loop over the chordwise strips and apply Van Dam algorithm
         for (i64 m = 0; m < strip_alphas_v.size(); m++) {
             const auto& strip_alpha_m = strip_alphas_v[m];
-            const auto& verts_wing_m = verts_wing.views()[m];
-            const auto& gamma_wing_delta_m = gamma_wing_delta.views()[m];
             const auto& areas_m = areas_d.views()[m];
+            const auto& forces_m = forces.views()[m];
             for (i64 i = 0; i < strip_alphas_v[m].shape(0); i++) {
-                auto verts_wing_i = verts_wing_m.slice(Range{i, i+2}, All, All);
-                auto gamma_wing_delta_i = gamma_wing_delta_m.slice(Range{i, i+1}, All);
                 auto areas_i = areas_m.slice(Range{i, i+1}, All);
+                auto forces_i = forces_m.slice(Range{i, i+1}, All, All);
                 
-                const FlowData strip_flow = {strip_alpha_m(i), flow.beta, flow.u_inf, flow.rho};
-                const f32 strip_area = backend->sum(areas_i);
-                const f32 strip_cl = backend->coeff_steady_cl_single(verts_wing_i, gamma_wing_delta_i, strip_flow, strip_area);
+                FlowData strip_flow = {strip_alpha_m(i), flow.beta, flow.u_inf, flow.rho};
+                f32 strip_area = backend->sum(areas_i);
+                const f32 strip_cl = backend->coeff_cl(forces_i, strip_flow.lift_axis, strip_flow.freestream, strip_flow.rho, strip_area);
                 const f32 effective_aoa = strip_cl / (2.f*PI_f) - strip_flow.alpha + flow.alpha;
 
                 // TODO: interpolated value should be computed at the y mid point of the strip
@@ -276,12 +278,18 @@ AeroCoefficients NLVLM::run(const FlowData& flow, const Database& db) {
             }
         }
         err /= (f64)total_panels(assembly_wings);; // normalize l1 error
-        //std::printf(">>> Iter: %d | Error: %.3e \n", iter, err);
+        std::printf(">>> Iter: %lld | Error: %.7e \n", iter, err);
     }
 
+    // Reset the local velocities to the original freestream
+    // Is this wrong ? Need to consult Eric
+    for (const auto& strip : strip_alphas.views()) strip.fill(flow.alpha);
+    strip_alpha_to_vel(flow, local_velocities.views(), strip_alphas.views());
+    backend->forces_steady_multibody(verts_wing.views(), gamma_wing_delta.views(), local_velocities.views(), forces.views());
+    
     return AeroCoefficients{
-        backend->coeff_steady_cl_multi(verts_wing.views(), gamma_wing_delta.views(), flow, areas_d.views()),
-        backend->coeff_steady_cd_multi(verts_wake.views(), gamma_wake.views(), flow, areas_d.views()),
+        backend->coeff_cl_multibody(forces.views(), areas_d.views(), flow.freestream, flow.rho),
+        0.0,
         {0.0f, 0.0f, 0.0f} // todo implement
     };
 }
@@ -317,6 +325,7 @@ void UVLM::alloc_buffers() {
     gamma_wing.init(panels_2D);
     gamma_wing_prev.init(panels_2D);
     gamma_wing_delta.init(panels_2D);
+    gamma_wing_dt.init(panels_2D);
     velocities.init(panels_3D);
     velocities_h.init(panels_3D);
     aero_forces.init(panels_3D);
@@ -328,7 +337,7 @@ void UVLM::alloc_buffers() {
 }
 
 
-void UVLM::run(const Assembly<f32>& assembly, f32 t_final) {
+void UVLM::run(Assembly<f32>& assembly, f32 t_final) {
     const tiny::ScopedTimer timer("UVLM");
     const f32 rho = 1.0f; // TODO: take this as input
     // Copy raw meshes to device
@@ -387,7 +396,7 @@ void UVLM::run(const Assembly<f32>& assembly, f32 t_final) {
         const f32 t = (f32)i * dt;
         t_h.view()(i) = t;
         
-        const linalg::float3 freestream = -assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
+        linalg::float3 freestream = -assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
 
         backend->wake_shed(verts_wing.views(), verts_wake.views(), i);
 
@@ -418,28 +427,34 @@ void UVLM::run(const Assembly<f32>& assembly, f32 t_final) {
         i64 begin = 0;
         for (i64 m = 0; m < assembly_wings.size(); m++) {
             const auto& gamma_wing_i = gamma_wing.views()[m];
+            const auto& gamma_wing_prev_i = gamma_wing_prev.views()[m];
             const auto& gamma_wing_delta_i = gamma_wing_delta.views()[m];
             const auto& gamma_wake_i = gamma_wake.views()[m];
+            const auto& gamma_wing_dt_i = gamma_wing_dt.views()[m];
             i64 end = begin + gamma_wing_i.size();
             rhs.view().slice(Range{begin, end}).to(gamma_wing_i.reshape(gamma_wing_i.size()));
             gamma_wing_i.to(gamma_wing_delta_i);
             gamma_wing_i.slice(All, -1).to(gamma_wake_i.slice(All, -1-i)); // shed to wake
             backend->blas->axpy(-1.0f, gamma_wing_i.slice(All, Range{0, -2}), gamma_wing_delta_i.slice(All, Range{1, -1}));
+            gamma_wing_i.to(gamma_wing_dt_i);
+            backend->blas->axpy(-1.0f, gamma_wing_prev_i, gamma_wing_dt_i);
+            backend->blas->scal(1.0f/dt, gamma_wing_dt_i.reshape(gamma_wing_dt_i.size()));
             begin = end;
         }
         
         // skip cl computation for the first iteration
         if (i > 0) {
-            backend->forces_unsteady_multibody(verts_wing.views(), gamma_wing_delta.views(), gamma_wing.views(), gamma_wing_prev.views(), velocities.views(), areas_d.views(), normals_d.views(), aero_forces.views(), dt);
+            backend->forces_unsteady_multibody(verts_wing.views(), gamma_wing_delta.views(), gamma_wing_dt.views(), velocities.views(), areas_d.views(), normals_d.views(), aero_forces.views());
             const f32 cl = backend->coeff_cl_multibody(aero_forces.views(), areas_d.views(), freestream, rho);
             const auto transform_node0 = assembly.surface_kinematics()[0];
             const auto transform_mat = transform_node0->transform(t);
             auto ref_pt = linalg::mul(transform_mat, {0.5f, 0.0f, 0.0f, 1.0f});
+            auto ref_pt3 = linalg::float3{ref_pt.x, ref_pt.y, ref_pt.z};
             const f32 cm_y = backend->coeff_cm_multibody(
                 aero_forces.views(),
                 verts_wing.views(), 
                 areas_d.views(),
-                {ref_pt.x, ref_pt.y, ref_pt.z},
+                ref_pt3,
                 freestream,
                 rho
             ).y;  
