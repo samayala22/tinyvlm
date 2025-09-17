@@ -24,7 +24,7 @@ def cd2(f, x0, h=None):
     if h is None: h = cd2_h(x0)
     return (f(x0 + h) - f(x0 - h)) / ((x0 + h) - (x0 - h))
 
-def numerical_jac(f, x, *args, method="3-point"):
+def numerical_jac(f, x, *args, method="2-point"):
     m = len(f(x, *args))
     n = len(x)
 

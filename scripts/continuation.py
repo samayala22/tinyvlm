@@ -1,4 +1,5 @@
 import argparse, hashlib, pickle, json, time
+from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
@@ -31,6 +32,30 @@ class Metadata:
         self.floquet_exponents = None
         self.X = None
         self.dims = None
+
+def hash_metadata(metadata):
+    params = {
+        "name":         metadata.name,
+        "start":  metadata.X[-1, 0],
+        "end":   metadata.X[-1, -1],
+        "iterations": metadata.X.shape[1]
+    }
+    j = json.dumps(params, sort_keys=True).encode("utf8")
+    return hashlib.md5(j).hexdigest()[:8]
+
+@dataclass
+class System:
+    """
+    M \ddot{u} + C \dot{u} + K u = fnlt(t, u, \dot{u}) + fnlf(X, omega)
+    """
+    M      : callable
+    C      : callable
+    K      : callable
+    dMdU   : callable
+    dCdU   : callable
+    dKdU   : callable
+    fnlt   : callable        # time‐domain NL force
+    fnlf   : callable        # frequency‐domain NL force
 
 def bialternate(a, b):
     """
@@ -191,7 +216,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, ds, omega_
 
     if not sol.success:
         print(f"Nonlinear solver failed: {sol.message}")
-        return False, ()
+        return False, (sol.x, None, sol['nfev'], sol['njev'], (time.perf_counter_ns()-st)*1e-9)
 
     # Jacobian assembled from QR decomposition
     Q = sol.fjac.T
@@ -199,19 +224,7 @@ def solve_nonlinear_system(X0, X_ref, z_ref, Dscale, parametrisation, ds, omega_
     R[np.triu_indices_from(R)] = sol.r
     jac = Q @ R
 
-    et = time.perf_counter_ns()
-
-    return True, (sol.x, jac, sol['nfev'], sol['njev'], (et-st)*1e-9)
-
-def hash_metadata(metadata):
-    params = {
-        "name":         metadata.name,
-        "start":  metadata.X[-1, 0],
-        "end":   metadata.X[-1, -1],
-        "iterations": metadata.X.shape[1]
-    }
-    j = json.dumps(params, sort_keys=True).encode("utf8")
-    return hashlib.md5(j).hexdigest()[:8]
+    return True, (sol.x, jac, sol['nfev'], sol['njev'], (time.perf_counter_ns()-st)*1e-9)
 
 def stability_analysis(J_ext, motion, omega, omega_idx, dims, tol=1e-10):
     """
@@ -221,9 +234,8 @@ def stability_analysis(J_ext, motion, omega, omega_idx, dims, tol=1e-10):
     J_hb = J_ext[:omega_idx, :omega_idx]  # Exclude the last two rows/columns
     hb_dim = dims.n_d * dims.n_c  # dofs * (2 * H + 1)
     nab = hb.nabla(dims.n_h)
-    system = motion()
-    M = system.M(omega)
-    C = system.C(omega)
+    M = motion.M(omega)
+    C = motion.C(omega)
     Lambda1 = np.kron(2.0 * omega * nab, M) + np.kron(np.eye(dims.n_c), C) 
     Lambda2 = np.kron(np.eye(dims.n_c), M)
 
@@ -258,7 +270,7 @@ def continuation(X0, motion, metadata: Metadata):
     # Initialization
     J = np.zeros((X0.shape[0], X0.shape[0]))  # Jacobian
     X_mat = np.zeros((X0.shape[0], metadata.max_steps))
-    order = 2 if np.linalg.norm(motion().M(1.0)) > 1e-10 else 1 # TODO: remove this asap
+    order = 2 if np.linalg.norm(motion.M(1.0)) > 1e-10 else 1 # TODO: remove this asap
     metadata.floquet_exponents = np.zeros((order * metadata.dims.n_d, metadata.max_steps), dtype=np.complex128)
     metadata.bifurcation_test = np.zeros((4, metadata.max_steps))
     metadata.stable = ~np.zeros(metadata.max_steps, dtype=np.bool)
@@ -273,7 +285,6 @@ def continuation(X0, motion, metadata: Metadata):
 
     # Scaling
     Dscale0 = np.ones_like(X0)
-    Dscale0[omega_idx] = X0[omega_idx]
     Dscale0[-1] = X0[-1]
     Dscale = Dscale0.copy()
     Dscale_prev = Dscale.copy()
@@ -353,9 +364,9 @@ def continuation(X0, motion, metadata: Metadata):
 
             # Bifurcation tests
             metadata.bifurcation_test[0, iteration] = lp_test(X[-1], X_mat[-1, iteration-1]) if iteration > 0 else 0.0
-            metadata.bifurcation_test[1, iteration] = bp_test(J @ np.diag(1.0 / Dscale))
-            metadata.bifurcation_test[2, iteration] = ns_test(floquet_exponents)
-            metadata.bifurcation_test[3, iteration] = pd_test(floquet_exponents, X[omega_idx])
+            # metadata.bifurcation_test[1, iteration] = bp_test(J @ np.diag(1.0 / Dscale))
+            # metadata.bifurcation_test[2, iteration] = ns_test(floquet_exponents)
+            # metadata.bifurcation_test[3, iteration] = pd_test(floquet_exponents, X[omega_idx])
 
             # Bifurcation detection
             if iteration > 1: # first iteration is inaccurate
@@ -380,6 +391,7 @@ def continuation(X0, motion, metadata: Metadata):
     except KeyboardInterrupt:
         print("Continuation interrupted by user")
 
+    if iteration == 0: iteration += 1
     metadata.X = X_mat[:, :iteration]
     metadata.stable = metadata.stable[:iteration]
     metadata.floquet_exponents = metadata.floquet_exponents[:, :iteration]
@@ -389,9 +401,9 @@ def continuation(X0, motion, metadata: Metadata):
     print(f"Total nfev: {total_nfev}")
     print(f"Total njev: {total_njev}")
     
-    filename = f"continuation_{hash_metadata(metadata)}.pkl"
+    filename = f"build/continuation_{hash_metadata(metadata)}.pkl"
     print(f"Continuation data saved to {filename}")
-    with open(f"build/{filename}", 'wb') as f:
+    with open(f"{filename}", 'wb') as f:
         pickle.dump(metadata, f)
 
     return metadata

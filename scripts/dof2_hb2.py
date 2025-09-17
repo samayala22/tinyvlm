@@ -180,12 +180,13 @@ if __name__ == "__main__":
     metadata.ds = 0.02
     metadata.dims = dims
     
-    metadata = cont.continuation(X0, create_motion_system, metadata)
+    motion = create_motion_system()
+    metadata = cont.continuation(X0, motion, metadata)
     
     if helpers.getenv("PLOT"):
         X_mat = metadata.X
         if X_mat.shape[1] == 1:
-            hb_sol_t, hb_sol0 = hb.to_timedomain(0.0, t_final, dt, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
+            hb_sol_t, hb_sol0 = hb.to_timedomain(np.arange(0.0, t_final, dt), dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
             fig = plot.create_dofs_figure(["Heave", "Pitch"])
             # dof2.plot_uvlm(fig)
             dof2.plot_monolithic(fig, sol)

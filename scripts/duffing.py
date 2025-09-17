@@ -125,8 +125,8 @@ if __name__ == "__main__":
     
     X_mat = metadata.X
     if X_mat.shape[1] == 1:
-        hb_sol_t, hb_sol0 = hb.to_timedomain(0.0, t_final, dt, dims.n_d, X_mat[:-1, 0], X_mat[-1, 0], dims.n_h)
-        _, hb_sol_approx = hb.to_timedomain(0.0, t_final, dt, dims.n_d, X0[:-1], omega0, dims.n_h)
+        hb_sol_t, hb_sol0 = hb.to_timedomain(vec_t, dims.n_d, X_mat[:-1, 0], X_mat[-1, 0], dims.n_h)
+        _, hb_sol_approx = hb.to_timedomain(vec_t, dims.n_d, X0[:-1], omega0, dims.n_h)
 
         fig = plot.create_dofs_figure(["dof1", "dof2"])
         plot.add_data_and_psd(fig, t, u[0, :], "Time Integration", 1, 1)

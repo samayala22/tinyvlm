@@ -4,17 +4,19 @@ import kaleido
 import numpy as np
 import scipy as sp
 from pathlib import Path
+import helpers
+
+COLORS = ['royalblue', 'red', 'green', 'orange', 'purple']
 
 def fig_dims(fig):
     rows_range, cols_range = fig._get_subplot_rows_columns()
     return list(rows_range)[-1]+1, list(cols_range)[-1]+1
 
+@helpers.measure
 def fig_create(rows, cols, subplot_titles: tuple[str], fig_title: str = ""):
     fig = make_subplots(
         rows=rows, cols=cols,
         subplot_titles=subplot_titles,
-        vertical_spacing=0.1,
-        horizontal_spacing=0.1
     )
     
     fig.update_layout(
@@ -36,6 +38,7 @@ def fig_create(rows, cols, subplot_titles: tuple[str], fig_title: str = ""):
 def create_dofs_figure(dof_names: list[str], title: str = ""):
     return fig_create(len(dof_names)*2, 3, tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]), title)
 
+@helpers.measure
 def fig_save(fig, filename, pdf=True):
     Path(filename).parent.mkdir(parents=True, exist_ok=True)
     ratio = 4/3
@@ -94,7 +97,7 @@ def compute_psd(t, data):
     )
 
     mask = frequencies < 1.0
-    psd_db = 10 * np.log10(psd)
+    # psd_db = 10 * np.log10(psd)
     return frequencies[mask], psd[mask]
 
 def find_peak_idx(data):
@@ -104,10 +107,28 @@ def find_peak_idx(data):
     peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
     return peaks_idx
 
+def add_data(fig, time, data, name, row, col, data_id=0, mode='lines', marker_size=4):
+    assert data_id < len(COLORS)
+    line = {"color": COLORS[data_id]}
+
+    fig.add_trace(
+        go.Scattergl(
+            x=time, 
+            y=data, 
+            name=name,
+            legendgroup=name,
+            mode=mode,
+            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
+            line = line,
+            showlegend=True if (row == 1 and col == 1) else False
+        ),
+        row=row, 
+        col=col
+    )
+
 def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', marker_size=4):
-    colors = ['royalblue', 'red', 'green', 'orange', 'purple']
-    assert data_id < len(colors)
-    line = {"color": colors[data_id]}
+    assert data_id < len(COLORS)
+    line = {"color": COLORS[data_id]}
 
     """Add time series and PSD data to plotly figure"""
     # Add time series data

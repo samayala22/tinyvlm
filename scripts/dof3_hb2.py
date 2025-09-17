@@ -11,7 +11,7 @@ import finite_diff as fd
 import plotting as plot
 
 BETA_NL_DAMPING = False
-INITIAL_ONLY = False
+INITIAL_ONLY = True
 
 @dataclass
 class System:
@@ -167,12 +167,13 @@ if __name__ == "__main__":
     metadata.ds = 0.02
     metadata.dims = dims
     
-    metadata = cont.continuation(X0, create_motion_system, metadata)
+    motion = create_motion_system()
+    metadata = cont.continuation(X0, motion, metadata)
     
     if helpers.getenv("PLOT"):
         X_mat = metadata.X
         if X_mat.shape[1] == 1:
-            hb_sol_t, hb_sol0 = hb.to_timedomain(0.0, t_final, dt, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
+            hb_sol_t, hb_sol0 = hb.to_timedomain(vec_t, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
             aero_forces = system.aero_forces(sol.y)
             fig = plot.create_dofs_figure(["Heave", "Pitch", "Control"])
             dof3.plot_solution(fig, aero_forces, sol, v)
