@@ -31,7 +31,7 @@ jobs:
 
       - name: Download ISPC
         run: |
-          Invoke-WebRequest -Uri "https://github.com/ispc/ispc/releases/download/v1.28.0/ispc-v1.28.1-windows.zip" -OutFile "ispc.zip"
+          Invoke-WebRequest -Uri "https://github.com/ispc/ispc/releases/download/v1.28.1/ispc-v1.28.1-windows.zip" -OutFile "ispc.zip"
           7z x ispc.zip
           "ispc-v1.28.1-windows/bin" >> $env:GITHUB_PATH
 
