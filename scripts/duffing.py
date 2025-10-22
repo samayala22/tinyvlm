@@ -10,19 +10,9 @@ import harmonic_balance as hb
 import plotting as plot
 import newmark
 
-@dataclass
-class System:
-    M      : callable
-    C      : callable
-    K      : callable
-    dMdU   : callable
-    dCdU   : callable
-    dKdU   : callable
-    fnlt   : callable        # time‐domain NL force
-    fnlf   : callable        # frequency‐domain NL force
-
-def create_motion_system() -> System:
+def create_motion_system():
     def fnlt(t, X, u, u_dot, omega, U):
+        # Colaitis
         k_nl0 = 1.0
         k_nl1 = 1.0
         F0 = 2
@@ -55,9 +45,10 @@ def create_motion_system() -> System:
         return C_s
     
     def K(omega):
-        k1 = 1
-        k2 = 1
-        k12 = 5
+        k1 = 1.0
+        k2 = 1.0
+        # k12 = 5.0 # Colaitis
+        k12 = 1.0 # Weak coupling
         K_s = np.array([
             [k1 + k12, -k12],
             [-k12, k2 + k12]
@@ -68,12 +59,12 @@ def create_motion_system() -> System:
     def dCdU(U): return np.zeros((2, 2))
     def dKdU(U): return np.zeros((2, 2))
     
-    return System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
+    return cont.System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
 
 if __name__ == "__main__":
     INITIAL_ONLY = 0
     omega_beg = 0.05
-    omega_end = 5.0
+    omega_end = 6.0
     
     # Independent params
     dims = hb.Dims(
@@ -118,7 +109,7 @@ if __name__ == "__main__":
     metadata.ds = 0.02
     metadata.dims = dims
     
-    metadata = cont.continuation(X0, create_motion_system, metadata)
+    metadata = cont.continuation(X0, motion, metadata)
     
     if not helpers.getenv("PLOT"):
         sys.exit(0)

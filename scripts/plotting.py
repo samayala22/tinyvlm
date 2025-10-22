@@ -13,42 +13,54 @@ def fig_dims(fig):
     return list(rows_range)[-1]+1, list(cols_range)[-1]+1
 
 @helpers.measure
-def fig_create(rows, cols, subplot_titles: tuple[str], fig_title: str = ""):
+def fig_create_multi(rows, cols, subplot_titles: tuple[str] = "", fig_title: str = ""):
     fig = make_subplots(
         rows=rows, cols=cols,
-        subplot_titles=subplot_titles,
+        # subplot_titles=subplot_titles,
+        # horizontal_spacing=0.2,
+        # vertical_spacing=0.2
     )
     
     fig.update_layout(
-        title=fig_title,
+        # title=fig_title,
         title_x=0.5,
         # showlegend=True,
-        font_family="Times New Roman",
-        # font_size=16,
+        font_family="Latin Modern Roman",
+        font_size=25,
         template="plotly_white",
         legend=dict(
             yanchor="top",
             y=1.0,
             xanchor="left",
-            x=1.0
+            x=1.01
         )
     )
     return fig
 
 def create_dofs_figure(dof_names: list[str], title: str = ""):
-    return fig_create(len(dof_names)*2, 3, tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]), title)
+    return fig_create_multi(len(dof_names)*2, 3, tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]), title)
 
 @helpers.measure
 def fig_save(fig, filename, pdf=True):
+    print(f"Saving {filename} ...")
     Path(filename).parent.mkdir(parents=True, exist_ok=True)
     ratio = 4/3
-    height = 1000
+    height = 500
     width = int(ratio * height)
     fig.update_layout(autosize=True)
     fig.write_html(f"{filename}.html", include_mathjax='cdn')
     if not pdf:
         return
-    fig.update_layout(width=width, height=height)
+    fig.update_layout(
+        width=width,
+        height=height,
+        margin=dict(
+            l=10,   # Left margin
+            r=10,   # Right margin  
+            t=10,   # Top margin
+            b=10,   # Bottom margin
+            pad=0   # Padding between plot and margins
+    ))
     kaleido.write_fig_sync(fig, path=f"{filename}.pdf")
 
 plotly_axes = {
@@ -79,7 +91,7 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         title_text=ylabel,
         row=row,
         col=col,
-        tickformat=".2e",
+        # tickformat=".2e",
         **plotly_axes
     )
 
@@ -112,7 +124,7 @@ def add_data(fig, time, data, name, row, col, data_id=0, mode='lines', marker_si
     line = {"color": COLORS[data_id]}
 
     fig.add_trace(
-        go.Scattergl(
+        go.Scatter(
             x=time, 
             y=data, 
             name=name,
@@ -134,7 +146,7 @@ def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', m
     # Add time series data
     start = int(0.75*len(data))
     fig.add_trace(
-        go.Scattergl(
+        go.Scatter(
             x=time[start:], 
             y=data[start:], 
             name=name,
@@ -150,7 +162,7 @@ def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', m
 
     # peaks_idx = find_peak_idx(data)
     # fig.add_trace(
-    #     go.Scatterglgl(
+    #     go.Scattergl(
     #         x=time[peaks_idx], 
     #         y=data[peaks_idx],
     #         mode='markers',
@@ -162,7 +174,7 @@ def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', m
     # Add PSD data
     frequencies, psd = compute_psd(time, data)
     fig.add_trace(
-        go.Scattergl(
+        go.Scatter(
             x=frequencies,
             y=psd,
             name=name,

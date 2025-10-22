@@ -364,9 +364,9 @@ def continuation(X0, motion, metadata: Metadata):
 
             # Bifurcation tests
             metadata.bifurcation_test[0, iteration] = lp_test(X[-1], X_mat[-1, iteration-1]) if iteration > 0 else 0.0
-            # metadata.bifurcation_test[1, iteration] = bp_test(J @ np.diag(1.0 / Dscale))
-            # metadata.bifurcation_test[2, iteration] = ns_test(floquet_exponents)
-            # metadata.bifurcation_test[3, iteration] = pd_test(floquet_exponents, X[omega_idx])
+            metadata.bifurcation_test[1, iteration] = bp_test(J @ np.diag(1.0 / Dscale))
+            metadata.bifurcation_test[2, iteration] = ns_test(floquet_exponents)
+            metadata.bifurcation_test[3, iteration] = pd_test(floquet_exponents, X[omega_idx])
 
             # Bifurcation detection
             if iteration > 1: # first iteration is inaccurate
@@ -413,13 +413,8 @@ def plot_hb_continuation(metadata):
     dofs = metadata.dims.n_d
     omega_idx = metadata.dims.n_u - metadata.X.shape[0]
     print(f"dofs: {dofs}")
-    
-    cols = 2
-    rows = (dofs + cols - 1) // cols
-    # cols = 1
-    # rows = dofs
-    fig = plot.fig_create(rows, cols, tuple(f"DOF {i+1}" for i in range(dofs)), "Continuation")
-    
+    hash_str = hash_metadata(metadata)
+        
     stable_mask = np.array(metadata.stable)
     stable_mask2 = stable_mask.copy()
     
@@ -439,96 +434,90 @@ def plot_hb_continuation(metadata):
     
     X_stable, X_unstable = masked(metadata.X)
 
-    for r in range(rows):
-        for c in range(cols):
-            dof = r * cols + c
-            if dof >= dofs: break
+    for dof in range(dofs):
+        X_h = metadata.X[dof:omega_idx:dofs, :]
+        A = np.sqrt(X_h[1::2, :]**2 + X_h[2::2, :]**2)
+        rms = np.sqrt(X_h[0, :]**2 + 0.5 * np.sum(A**2, axis=0))
+        A_stable, A_unstable = masked(A)
+        rms_stable, rms_unstable = masked(rms)
 
-            X_h = metadata.X[dof:omega_idx:dofs, :]
-            A = np.sqrt(X_h[1::2, :]**2 + X_h[2::2, :]**2)
-            rms = np.sqrt(X_h[0, :]**2 + 0.5 * np.sum(A**2, axis=0))
-            A_stable, A_unstable = masked(A)
-            rms_stable, rms_unstable = masked(rms)
+        fig = plot.fig_create_multi(1,1)
 
-            for h in range(metadata.dims.n_h):
-                name = f"Harmonic {h+1}"
+        # for h in range(metadata.dims.n_h):
+        #     name = f"Harmonic {h+1}"
 
-                fig.add_trace(
-                    go.Scattergl(
-                        x = X_stable[-1, :],
-                        y = A_stable[h, :],
-                        name = name,
-                        legendgroup = name,
-                        mode = "lines",
-                        line = {"dash": "solid"},
-                        showlegend = True if dof == 0 else False
-                    ),
-                    row=r+1,
-                    col=c+1
-                )
-                fig.add_trace(
-                    go.Scattergl(
-                        x = X_unstable[-1, :],
-                        y = A_unstable[h, :],
-                        name = name,
-                        legendgroup = name,
-                        mode = "lines",
-                        line = {"dash": "dash"},
-                        showlegend = False
-                    ),
-                    row=r+1,
-                    col=c+1
-                )
+        #     fig.add_trace(
+        #         go.Scatter(
+        #             x = X_stable[-1, :],
+        #             y = A_stable[h, :],
+        #             name = name,
+        #             legendgroup = name,
+        #             mode = "lines",
+        #             line = {"dash": "solid"},
+        #             showlegend = True if dof == 0 else False
+        #         ),
+        #         row=r+1,
+        #         col=c+1
+        #     )
+        #     fig.add_trace(
+        #         go.Scatter(
+        #             x = X_unstable[-1, :],
+        #             y = A_unstable[h, :],
+        #             name = name,
+        #             legendgroup = name,
+        #             mode = "lines",
+        #             line = {"dash": "dash"},
+        #             showlegend = False
+        #         ),
+        #         row=r+1,
+        #         col=c+1
+        #     )
 
+        fig.add_trace(
+            go.Scatter(
+                x = X_stable[-1, :],
+                y = rms_stable,
+                name = f"RMS",
+                mode = "lines",
+                line = {"dash": "solid"},
+                showlegend = False
+            ),
+            row=1,
+            col=1
+        )
+        fig.add_trace(
+            go.Scatter(
+                x = X_unstable[-1, :],
+                y = rms_unstable,
+                name = f"RMS",
+                legendgroup = "RMS",
+                mode = "lines",
+                line = {"dash": "dash"},
+                showlegend = False
+            ),
+            row=1,
+            col=1
+        )
+
+        symbols = ["circle", "square", "diamond", "triangle"]
+        for i, b in enumerate(BIFURCATIONS):
+            indices = np.array(metadata.bifurcation[b])
+            if len(indices) == 0: continue
             fig.add_trace(
-                go.Scattergl(
-                    x = X_stable[-1, :],
-                    y = rms_stable,
-                    name = f"RMS",
-                    legendgroup = "RMS",
-                    mode = "lines",
-                    line = {"dash": "solid"},
-                    showlegend = True if dof == 0 else False
+                go.Scatter(
+                    x = metadata.X[-1, indices],
+                    y = rms[indices],
+                    name = b,
+                    mode = "markers",
+                    marker = {"size": 10, "symbol": symbols[i]},
+                    showlegend = True
                 ),
-                row=r+1,
-                col=c+1
-            )
-            fig.add_trace(
-                go.Scattergl(
-                    x = X_unstable[-1, :],
-                    y = rms_unstable,
-                    name = f"RMS",
-                    legendgroup = "RMS",
-                    mode = "lines",
-                    line = {"dash": "dash"},
-                    showlegend = False
-                ),
-                row=r+1,
-                col=c+1
+                row=1,
+                col=1
             )
 
-            symbols = ["circle", "square", "diamond", "triangle"]
-            for i, b in enumerate(BIFURCATIONS):
-                h=1 # only plot the bifurcations for the first harmonic
-                indices = np.array(metadata.bifurcation[b])
-                if len(indices) == 0: continue
-                fig.add_trace(
-                    go.Scattergl(
-                        x = metadata.X[-1, indices],
-                        y = rms[indices],
-                        name = b,
-                        legendgroup = b,
-                        mode = "markers",
-                        marker = {"size": 10, "symbol": symbols[i]},
-                        showlegend = True if dof == 0 else False
-                    ),
-                    row=r+1,
-                    col=c+1
-                )
-
-            plot.format_subplot(fig, r+1, c+1, r"$\bar{U}$", f"$||H||^{2}$")
-
-    plot.fig_save(fig, f"build/continuation/continuation_{hash_metadata(metadata)}", pdf=False)
+        plot.format_subplot(fig, 1, 1, r"$\Large{\omega}$", r"$\Large{RMS(x_{" + str(dof+1) + r"})}$")
+        plot.fig_save(fig, f"build/continuation/continuation_{hash_str}_rms_{dof}", pdf=True)
 
 def parser():
     parser = argparse.ArgumentParser()

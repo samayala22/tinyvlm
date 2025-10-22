@@ -432,7 +432,7 @@ if __name__ == "__main__":
 
             # Poincare sections
             start = int(0.9*len(monolithic_sol.t))
-            fig2 = plot.fig_create(2, 1, ("Heave", "Pitch"))
+            fig2 = plot.fig_create_multi(2, 1, ("Heave", "Pitch"))
             for i in range(2):
                 fig2.add_trace(
                     go.Scatter(
@@ -457,7 +457,7 @@ if __name__ == "__main__":
                 peaks_U[i].append(np.array([U_vel] * peaks_data[i][-1].shape[0]))
 
     if (len(vec_U) > 1):
-        fig = plot.fig_create(2, 1, ("Heave", "Pitch"))
+        fig = plot.fig_create_multi(2, 1, ("Heave", "Pitch"))
         for i in range(2):
             fig.add_trace(
                 go.Scatter(
@@ -481,7 +481,7 @@ if __name__ == "__main__":
         
         plot.fig_save(fig, f"build/2dof/2dof_{torsional_spring_names[torsional_spring]}_bifurcation")
 
-        fig2 = plot.fig_create(2, 1, ("Damping", "Frequency"))
+        fig2 = plot.fig_create_multi(2, 1, ("Damping", "Frequency"))
         for i in range(2*dofs):
             fig2.add_trace(
                 go.Scatter(

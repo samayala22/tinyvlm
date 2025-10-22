@@ -410,7 +410,7 @@ if __name__ == "__main__":
                 peaks_U[i].append(np.array([U] * peaks_data[i][-1].shape[0]))
 
     if len(U_vec) > 1:
-        fig = plot.fig_create(3, 1, ("Heave", "Pitch", "Control"))
+        fig = plot.fig_create_multi(3, 1, ("Heave", "Pitch", "Control"))
         for i in range(3):
             fig.add_trace(
                 go.Scattergl(
