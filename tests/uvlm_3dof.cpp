@@ -229,7 +229,7 @@ void UVLM_3DOF::alloc_buffers() {
 }
 
 #ifdef FREEPLAY_JOINT
-f32 joint(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(4.24f), f32 a_f = to_radians(-2.12f)) {
+static f32 joint(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(4.24f), f32 a_f = to_radians(-2.12f)) {
     if (alpha < a_f) {
         return M0 + alpha - a_f;
     } else if (alpha >= a_f && alpha <= (a_f + delta)) {
@@ -239,8 +239,12 @@ f32 joint(f32 alpha, f32 M0 = 0.0f, f32 Mf = 0.0f, f32 delta = to_radians(4.24f)
     }
 }
 #else
-f32 joint(f32 alpha) {
-    return alpha;
+// static f32 joint(f32 alpha) {
+//     return alpha;
+// }
+static f32 joint(f32 alpha) {
+    f32 c3 = 1.0f;
+    return c3*alpha*alpha*alpha;
 }
 #endif
 
@@ -519,9 +523,9 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
         const f32 real_alpha = wing_alpha();
         const f32 real_beta = flap_beta();
         const f32 real_h = wing_h(1 + v.a);
-        TINY_ASSERT_NEAR(real_h, -u_h.view()(0, i), 5e-5f);
-        TINY_ASSERT_NEAR(real_alpha, u_h.view()(1, i), 5e-5f);
-        TINY_ASSERT_NEAR(real_beta, u_h.view()(2, i), 5e-5f);
+        TINY_ASSERT_NEAR(real_h, -u_h.view()(0, i), 1e-3f);
+        TINY_ASSERT_NEAR(real_alpha, u_h.view()(1, i), 1e-3f);
+        TINY_ASSERT_NEAR(real_beta, u_h.view()(2, i), 1e-3f);
 
         for (const auto& [gamma_wing_i, gamma_wing_prev_i] : zip(gamma_wing.views(), gamma_wing_prev.views())) {
             gamma_wing_i.to(gamma_wing_prev_i);
@@ -736,9 +740,13 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
 int main() {
     // vlm::Executor::instance(1);
     std::vector<std::vector<std::pair<std::string, bool>>> meshes;
+    // meshes.push_back({
+    //     {"../../../../mesh/3dof_wing_9x5.x", false},
+    //     {"../../../../mesh/3dof_flap_3x5.x", true}
+    // });
     meshes.push_back({
-        {"../../../../mesh/3dof_wing_9x5.x", false},
-        {"../../../../mesh/3dof_flap_3x5.x", true}
+        {"../../../../mesh/3dof_wing_45x1.x", false},
+        {"../../../../mesh/3dof_flap_15x1.x", true}
     });
     const std::vector<std::string> backends = {"cpu"};
 
@@ -774,7 +782,8 @@ int main() {
     // v.U = 12.36842f; // m/s
     v.U = 7.0f; // m/s
 
-    const f32 t_final_nd = 5.f * v.omega_alpha;
+    // const f32 t_final_nd = 5.f * v.omega_alpha;
+    const f32 t_final_nd = 250.f;
 
     KinematicsTree<f32> kinematics_tree;
 

@@ -336,15 +336,33 @@ void UVLM::alloc_buffers() {
     condition0.resize(assembly_wings.size()*assembly_wings.size());
 }
 
+// template<i64 Dim>
+// static void print_tensorview(TensorView<f32, Dim, Location::Device>& tensor, const char* name) {
+//     std::printf("%s\n", name);
+//     if constexpr (Dim == 2) {
+//         for (i64 j = 0; j < tensor.shape(1); j++) {
+//             for (i64 i = 0; i < tensor.shape(0); i++) {
+//                 std::printf("%6.6f ", tensor(i, j));
+//             }
+//             std::printf("\n");
+//         }
+//     } else if constexpr (Dim == 3) {
+//         for (i64 j = 0; j < tensor.shape(1); j++) {
+//             for (i64 i = 0; i < tensor.shape(0); i++) {
+//                 std::printf("x: %6.6f y: %6.6f z: %6.6f\n", tensor(i, j, 0), tensor(i, j, 1), tensor(i, j, 2));
+//             }
+//         }
+//     }
+// }
 
-void UVLM::run(Assembly<f32>& assembly, f32 t_final) {
+void UVLM::run(Assembly<f32>& assembly, f32 t_final, f32 k) {
     const tiny::ScopedTimer timer("UVLM");
     const f32 rho = 1.0f; // TODO: take this as input
     // Copy raw meshes to device
     for (const auto& [init_h, init_d] : zip(verts_wing_init_h.views(), verts_wing_init.views())) {
         // init_h.to(init_d);
-        const f32 vars_b = 0.5f;
-        backend->blas->scal(1.0f / vars_b, init_d.slice(All, All, Range{0, 3}).reshape(3*init_d.shape(0)*init_d.shape(1)));
+        // const f32 vars_b = 0.5f;
+        // backend->blas->scal(1.0f / vars_b, init_d.slice(All, All, Range{0, 3}).reshape(3*init_d.shape(0)*init_d.shape(1)));
         init_d.to(init_h);
     }
     for (const auto& [kinematics, transform_h, transform_d] : zip(assembly.surface_kinematics(), transforms_h.views(), transforms.views())) {
@@ -385,10 +403,7 @@ void UVLM::run(Assembly<f32>& assembly, f32 t_final) {
     solver->factorize(lhs.view());
 
     std::ofstream cl_data("cl_data_" + backend->name + ".txt");
-    cl_data << "0.5" << "\n"; // TODO: this should be according to inputs
-
-    // TEMPORARY
-    std::ofstream uvlm_data("uvlm_data_" + backend->name + ".txt");
+    cl_data << k << "\n"; // TODO: this should be according to inputs
 
     // 4. Transient simulation loop
     // for (i32 i = 0; i < vec_t.size()-1; i++) {
@@ -469,14 +484,6 @@ void UVLM::run(Assembly<f32>& assembly, f32 t_final) {
             });
 
             cl_data << t << " " << verts_wing_h.views()[0](0, 0, 2) << " " << cl << " " << std::atan2(-chord_axis.z, chord_axis.x) << "\n";
-        
-            // TEMPORARY
-            if (backend->name == "CPU") {
-                const f32 gam = gamma_wing.views()[0](0,0);
-                const f32 gam_prev = gamma_wing_prev.views()[0](0,0);
-                const f32 dgam = (gam - gam_prev) / dt;
-                uvlm_data << t << " " << gam << " " << cl << " " << cm_y << " " << dgam << "\n";
-            }
         }
 
         {

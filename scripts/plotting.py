@@ -6,7 +6,7 @@ import scipy as sp
 from pathlib import Path
 import helpers
 
-COLORS = ['royalblue', 'red', 'green', 'orange', 'purple']
+COLORS = ['royalblue', 'orange', 'green', 'red', 'purple']
 
 def fig_dims(fig):
     rows_range, cols_range = fig._get_subplot_rows_columns()
@@ -17,8 +17,9 @@ def fig_create_multi(rows, cols, subplot_titles: tuple[str] = "", fig_title: str
     fig = make_subplots(
         rows=rows, cols=cols,
         # subplot_titles=subplot_titles,
-        # horizontal_spacing=0.2,
-        # vertical_spacing=0.2
+        horizontal_spacing=0.1,
+        # shared_xaxes=True,
+        vertical_spacing=0.04,
     )
     
     fig.update_layout(
@@ -41,14 +42,14 @@ def create_dofs_figure(dof_names: list[str], title: str = ""):
     return fig_create_multi(len(dof_names)*2, 3, tuple(f"{dof_name} {var} {psd}" for dof_name in dof_names for psd in ["", "PSD"] for var in ["Position", "Velocity", "Force"]), title)
 
 @helpers.measure
-def fig_save(fig, filename, pdf=True):
+def fig_save(fig, filename, html=False, pdf=True, height=500):
     print(f"Saving {filename} ...")
     Path(filename).parent.mkdir(parents=True, exist_ok=True)
     ratio = 4/3
-    height = 500
     width = int(ratio * height)
     fig.update_layout(autosize=True)
-    fig.write_html(f"{filename}.html", include_mathjax='cdn')
+    if html:
+        fig.write_html(f"{filename}.html", include_mathjax='cdn')
     if not pdf:
         return
     fig.update_layout(
@@ -91,7 +92,7 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         title_text=ylabel,
         row=row,
         col=col,
-        # tickformat=".2e",
+        tickformat=".0e",
         **plotly_axes
     )
 
@@ -138,13 +139,13 @@ def add_data(fig, time, data, name, row, col, data_id=0, mode='lines', marker_si
         col=col
     )
 
-def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', marker_size=4):
+def add_data_and_psd(fig, time, data, name, row, col, data_id=0, mode='lines', dash="solid", marker_size=4):
     assert data_id < len(COLORS)
-    line = {"color": COLORS[data_id]}
+    line = {"dash": dash, "color": COLORS[data_id]}
 
     """Add time series and PSD data to plotly figure"""
     # Add time series data
-    start = int(0.75*len(data))
+    start = int(0.8*len(data))
     fig.add_trace(
         go.Scatter(
             x=time[start:], 

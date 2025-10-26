@@ -125,7 +125,7 @@ class UVLM final: public Simulation {
     public:
         UVLM(const std::string& backend_name, const std::vector<std::string>& meshes);
         ~UVLM() = default;
-        void run(Assembly<f32>& assembly, f32 t_final);
+        void run(Assembly<f32>& assembly, f32 t_final, f32 k);
 
         MultiTensor3fD colloc_d{backend->memory.get()};
         MultiTensor3fH colloc_h{backend->memory.get()};
