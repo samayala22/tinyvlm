@@ -101,7 +101,7 @@ def lp_test(om_i, om_im1):
     Limit point test function (Delbé 3.3)
     """
     diff = om_i - om_im1
-    return diff / np.abs(diff)
+    return diff / (np.abs(diff) + 1e-12)
 
 def bp_test(J):
     """
@@ -285,7 +285,7 @@ def continuation(X0, motion, metadata: Metadata):
 
     # Scaling
     Dscale0 = np.ones_like(X0)
-    Dscale0[-1] = X0[-1]
+    if metadata.scaling: Dscale0[-1] = X0[-1]
     Dscale = Dscale0.copy()
     Dscale_prev = Dscale.copy()
     X0 = X0 / Dscale # scaled X0
@@ -338,7 +338,7 @@ def continuation(X0, motion, metadata: Metadata):
             success, results = solve_nonlinear_system(Xp, X_ref, z_ref, Dscale, parametrisation, ds, omega_idx, motion, metadata.dims)
             if not success:
                 if ds > ds_min and iteration > 0:
-                    print(f"Nonlinear solver failed, reducing step size from {ds:.3f} to {ds/2:.3f}")
+                    print(f"Nonlinear solver failed, reducing step size from {ds * Dscale[-1]:.3f} to {ds/2 * Dscale[-1]:.3f}")
                     ds /= 2.0
                     continue
                 else:
@@ -516,7 +516,7 @@ def plot_hb_continuation(metadata):
                 col=1
             )
 
-        plot.format_subplot(fig, 1, 1, r"$\Large{\omega}$", r"$\Large{RMS(x_{" + str(dof+1) + r"})}$")
+        plot.format_subplot(fig, 1, 1, r"$\Large{U}$", r"$\Large{RMS(x_{" + str(dof+1) + r"})}$")
         plot.fig_save(fig, f"build/continuation/continuation_{hash_str}_rms_{dof}", pdf=True)
 
 def parser():

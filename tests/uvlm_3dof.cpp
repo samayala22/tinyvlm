@@ -783,7 +783,7 @@ int main() {
     v.U = 7.0f; // m/s
 
     // const f32 t_final_nd = 5.f * v.omega_alpha;
-    const f32 t_final_nd = 250.f;
+    const f32 t_final_nd = 500.f;
 
     KinematicsTree<f32> kinematics_tree;
 

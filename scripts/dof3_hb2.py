@@ -11,18 +11,7 @@ import finite_diff as fd
 import plotting as plot
 
 BETA_NL_DAMPING = False
-INITIAL_ONLY = True
-
-@dataclass
-class System:
-    M      : callable
-    C      : callable
-    K      : callable
-    dMdU   : callable
-    dCdU   : callable
-    dKdU   : callable
-    fnlt   : callable        # time‐domain NL force
-    fnlf   : callable        # frequency‐domain NL force
+INITIAL_ONLY = False
  
 def nonlinear_damping(A, omega):
     """
@@ -34,12 +23,134 @@ def nonlinear_damping(A, omega):
     olog = np.log10(omega)
     return v.zeta_beta * np.max(a3 * olog**3 + a2 * olog**2 + 1, 0.2)
 
-def create_motion_system() -> System:
+class AeroelasticSystem:
+    def __init__(self, v):
+        self.M_s = np.zeros((3,3)) # dimensionless structural intertia matrix
+        self.D_s = np.zeros((3,3)) # dimensionless structural damping matrix
+        self.K_s = np.zeros((3,3)) # dimensionless structural stiffness matrix
+
+        self.v = v
+
+        self.M_s[0, 0] = v.m_t / v.m
+        self.M_s[0, 1] = v.x_alpha
+        self.M_s[0, 2] = v.x_beta
+        self.M_s[1, 0] = v.x_alpha
+        self.M_s[1, 1] = v.r_alpha**2
+        self.M_s[1, 2] = (v.c - v.a) * v.x_beta + v.r_beta**2
+        self.M_s[2, 0] = v.x_beta
+        self.M_s[2, 1] = (v.c - v.a) * v.x_beta + v.r_beta**2
+        self.M_s[2, 2] = v.r_beta**2
+        self.M_s = v.mu * self.M_s
+
+        self.D_s[0, 0] = v.sigma * v.zeta_h
+        self.D_s[1, 1] = v.r_alpha**2 * v.zeta_alpha
+        self.D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
+        self.D_s = 2 * v.mu * self.D_s
+
+        # K_s[0, 0] = sigma**2 * (1 + gamma * y[3]**2)
+        self.K_s[1, 1] = v.r_alpha**2
+        # K_s[2, 2] = (v.omega_beta / v.omega_alpha)**2 * v.r_beta**2
+        self.K_s = v.mu * self.K_s
+
+        sqrt_1_minus_c2 = np.sqrt(1 - v.c**2)
+        acos_c = np.arccos(v.c)
+
+        T1 = (-1/3) * sqrt_1_minus_c2 * (2 + v.c**2) + v.c * acos_c
+        T2 = v.c * (1 - v.c**2) - sqrt_1_minus_c2 * (1 + v.c**2) * acos_c + v.c * (acos_c)**2
+        T3 = -((1/8) + v.c**2) * (acos_c)**2 + (1/4) * v.c * sqrt_1_minus_c2 * acos_c * (7 + 2*v.c**2) - (1/8) * (1 - v.c**2) * (5 * v.c**2 + 4)
+        T4 = -acos_c + v.c * sqrt_1_minus_c2
+        T5 = -(1 - v.c**2) - (acos_c)**2 + 2 * v.c * sqrt_1_minus_c2 * acos_c
+        T6 = T2
+        T7 = -((1/8) + v.c**2) * acos_c + (1/8) * v.c * sqrt_1_minus_c2 * (7 + 2 * v.c**2)
+        T8 = (-1/3) * sqrt_1_minus_c2 * (2 * v.c**2 + 1) + v.c * acos_c
+        T9 = (1/2) * ((1/3) * (sqrt_1_minus_c2)**3 + v.a * T4)
+        T10 = sqrt_1_minus_c2 + acos_c
+        T11 = acos_c * (1 - 2 * v.c) + sqrt_1_minus_c2 * (2 - v.c)
+        T12 = sqrt_1_minus_c2 * (2 + v.c) - acos_c * (2 * v.c + 1)
+        T13 = (1/2) * (-T7 - (v.c - v.a) * T1)
+        T14 = (1/16) + (1/2) * v.a * v.c
+
+        self.M_a = np.zeros((3,3)) # dimensionless aerodynamic inertia matrix
+        self.D_a = np.zeros((3,3)) # dimensionless aerodynamic damping matrix
+        self.K_a = np.zeros((3,3)) # dimensionless aerodynamic stiffness matrix
+        self.L_delta = np.zeros((3, 2)) # dimensionless aero lagging matrix
+        self.Q_a = np.zeros((2, 3)) # matrix of terms multiplied by the modal accelerations
+        self.Q_v = np.zeros((2, 3)) # matrix of terms multiplied by the modal velocities
+        self.L_lambda = np.zeros((2, 2))
+
+        self.M_a[0, 0] = -1
+        self.M_a[0, 1] = v.a
+        self.M_a[0, 2] = T1 / np.pi
+        self.M_a[1, 0] = v.a
+        self.M_a[1, 1] = -(1/8 + v.a**2)
+        self.M_a[1, 2] = -2 * T13 / np.pi
+        self.M_a[2, 0] = T1 / np.pi
+        self.M_a[2, 1] = -2 * T13 / np.pi
+        self.M_a[2, 2] = T3 / (np.pi**2)
+
+        self.D_a[0, 0] = (-2)
+        self.D_a[0, 1] = (-2 * (1 - v.a))
+        self.D_a[0, 2] = (T4 - T11) / np.pi
+        self.D_a[1, 0] = (1 + 2 * v.a)
+        self.D_a[1, 1] = (v.a * (1 - 2 * v.a))
+        self.D_a[1, 2] = (T8 - T1 + (v.c - v.a) * T4 + v.a * T11) / np.pi
+        self.D_a[2, 0] = (-T12 / np.pi)
+        self.D_a[2, 1] = (2 * T9 + T1 + (T12 - T4) * (v.a - 0.5)) / np.pi
+        self.D_a[2, 2] = (T11 * (T4 - T12)) / (2 * np.pi**2)
+
+        self.K_a[0, 0] = 0
+        self.K_a[0, 1] = (-2)
+        self.K_a[0, 2] = (-2 * T10) / np.pi
+        self.K_a[1, 0] = 0
+        self.K_a[1, 1] = (1 + 2 * v.a)
+        self.K_a[1, 2] = (2 * v.a * T10 - T4) / np.pi
+        self.K_a[2, 0] = 0
+        self.K_a[2, 1] = (-T12) / np.pi
+        self.K_a[2, 2] = (-1 / np.pi**2) * (T5 - T10 * (T4 - T12))
+        
+        # Difference lies between coeffs of R.T Jones and W.P Jones
+        # Yung p220
+        d1 = 0.165
+        d2 = 0.335
+        # l1 = 0.041
+        # l2 = 0.320
+        l1 = 0.0455
+        l2 = 0.300
+
+        self.L_delta[0, 0] = d1
+        self.L_delta[0, 1] = d2
+        self.L_delta[1, 0] = - (0.5 + v.a) * d1
+        self.L_delta[1, 1] = - (0.5 + v.a) * d2
+        self.L_delta[2, 0] = T12 * d1 / (2 * np.pi)
+        self.L_delta[2, 1] = T12 * d2 / (2 * np.pi)
+
+        self.Q_a[0, 0] = 1
+        self.Q_a[0, 1] = 0.5 - v.a
+        self.Q_a[0, 2] = T11 / (2 * np.pi)
+        self.Q_a[1, 0] = 1
+        self.Q_a[1, 1] = 0.5 - v.a
+        self.Q_a[1, 2] = T11 / (2 * np.pi)
+
+        self.Q_v[0, 1] = 1
+        self.Q_v[0, 2] = T10 / np.pi
+        self.Q_v[1, 1] = 1
+        self.Q_v[1, 2] = T10 / np.pi
+
+        self.L_lambda[0, 0] = - l1
+        self.L_lambda[1, 1] = - l2
+
+        self.M2 = np.zeros((8, 8))
+        self.M2[0:3, 0:3] = self.M_s - self.M_a
+        self.M2[3:6, 3:6] = np.eye(3)
+        self.M2[6:8, 6:8] = np.eye(2)
+        self.M2[6:8, 0:3] = - self.Q_a
+
+def create_motion_system():
     def fnlt(t, X, u, u_dot, omega, U):
         f = np.zeros((8, t.shape[0]))
         gamma = 0
         f[0, :] = v.mu * u[3, :] * v.sigma**2 * (1 + gamma * u[3, :]**2)
-        f[2, :] = v.mu * ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * dof3.alpha_freeplay(u[5, :])      
+        f[2, :] = v.mu * ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * torsional_func(u[5, :])      
         return -f
 
     def fnlf(X, omega, U):
@@ -50,45 +161,41 @@ def create_motion_system() -> System:
         return M_s
     
     def C(U):
-        v.U = U
-        v.V = v.U / (v.b * v.omega_alpha)
-        sys = dof3.AeroelasticSystem(v, True)
-        M2 = np.zeros((8, 8))
-
-        M2[0:3, 0:3] = sys.M_s - sys.M_a
-        M2[3:6, 3:6] = np.eye(3)
-        M2[6:8, 6:8] = np.eye(2)
-        M2[6:8, 0:3] = - sys.Q_a
-        return M2
+        return sys.M2
     
     def K(U):
-        v.U = U
-        v.V = v.U / (v.b * v.omega_alpha)
-        sys = dof3.AeroelasticSystem(v, True)
+        V = U / (v.b * v.omega_alpha)
+        D_a = V * sys.D_a
+        D_s = sys.D_s
+        K_a = V**2 * sys.K_a
+        K_s = sys.K_s
+        L_delta = 2 * V * sys.L_delta
+        Q_v = V * sys.Q_v
+        L_lambda = V * sys.L_lambda
 
         M1 = np.zeros((8, 8))
-        M1[0:3, 0:3] = sys.D_a - sys.D_s
-        M1[0:3, 3:6] = sys.K_a - sys.K_s
-        M1[0:3, 6:8] = sys.L_delta
+        M1[0:3, 0:3] = D_a - D_s
+        M1[0:3, 3:6] = K_a - K_s
+        M1[0:3, 6:8] = L_delta
         M1[3:6, 0:3] = np.eye(3)
-        M1[6:8, 0:3] = sys.Q_v
-        M1[6:8, 6:8] = sys.L_lambda
+        M1[6:8, 0:3] = Q_v
+        M1[6:8, 6:8] = L_lambda
         return -M1
     
     def dMdU(U): return np.zeros((8, 8))
     def dCdU(U): return fd.cd2(C, U)
     def dKdU(U): return fd.cd2(K, U)
     
-    return System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
+    return cont.System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
 
 if __name__ == "__main__":
-    torsional_spring = 0
+    torsional_spring = 1
     torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
 
     if (torsional_spring == 0):
         torsional_func = dof3.alpha_freeplay
-    # elif (torsional_spring == 1):
-    #     torsional_func = dof3.alpha_cubic
+    elif (torsional_spring == 1):
+        torsional_func = dof3.alpha_poly
     else:
         torsional_func = dof3.alpha_linear
 
@@ -96,8 +203,8 @@ if __name__ == "__main__":
     flutter_speed = 23.9
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
-    param_start = 6.0
-    param_end = 22.0
+    param_start = 6.5
+    param_end = 15.0
 
     v = dof3.Vars()
     v.a = -0.5 
@@ -128,6 +235,8 @@ if __name__ == "__main__":
     v.V = v.U / (v.b * v.omega_alpha)
     v.mu = v.m / (np.pi * v.rho * v.b**2)
 
+    sys = AeroelasticSystem(v)
+
     # Independent params
     dims = hb.Dims(
         n_d=8,          # number of degrees of freedom
@@ -135,8 +244,8 @@ if __name__ == "__main__":
     ) 
 
     # Time integration
-    t_final = 4000.0
-    dt = 0.2 
+    t_final = 1000.0
+    dt = 0.1 
     vec_t = np.arange(0, t_final, dt)
     y0 = np.zeros(8, dtype=np.float64) # hd, ad, bd, h, a, b, x1, x2
     y0[3] = 0.01 / v.b # h
@@ -161,7 +270,7 @@ if __name__ == "__main__":
     metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
-    metadata.max_steps = 1 if INITIAL_ONLY else 10000
+    metadata.max_steps = 1 if INITIAL_ONLY else 20
     metadata.scaling = False
     metadata.step_adapt = True
     metadata.ds = 0.02

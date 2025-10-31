@@ -8,33 +8,33 @@ import plotting as plot
 
 @dataclass
 class Vars:
-    a: float = 0.0# Dimensionless distance between mid-chord and EA (-0.5)
-    b: float = 0.0# Semi-chord (0.127 m)
+    a: float = 0.0# Dimensionless distance between mid-chord and elastic axis (EA)
+    b: float = 0.0# Semi-chord [m]
     c: float = 0.0# Dimensionless distance between flap hinge and mid-chord (0.5)
-    I_alpha: float = 0.0# Mass moment of inertia of the wing-flap about wing EA per unit span
-    I_beta: float = 0.0# Mass moment of inertia of the flap about flap hinge line
-    k_h: float = 0.0# linear structural stiffness coefficient of plunging
-    k_alpha: float = 0.0# Linear structural stiffness coefficient of plunging
-    k_beta: float = 0.0# Linear structural stiffness coefficient of pitching
-    m: float = 0.0# Mass of wing-aileron per span
-    m_t: float = 0.0# Mass of wing-aileron and the supports per span
+    I_alpha: float = 0.0# Mass moment of inertia of the wing-flap about wing EA per unit span [kgm]
+    I_beta: float = 0.0# Mass moment of inertia of the flap about flap hinge line per unit span [kgm]
+    k_h: float = 0.0# linear structural stiffness coefficient of plunging [kg/ms^2]
+    k_alpha: float = 0.0# Linear structural stiffness coefficient of plunging [kg/ms^2]
+    k_beta: float = 0.0# Linear structural stiffness coefficient of pitching [kg/ms^2]
+    m: float = 0.0# Mass of wing-aileron per span [kg/m]
+    m_t: float = 0.0# Mass of wing-aileron and the supports per span [kg/m]
     r_alpha: float = 0.0# dimensionless radius of gyration around elastic axis
     r_beta: float = 0.0# dimensionless radius of gyration around flap hinge axis
-    S_alpha: float = 0.0# static mass moment of wing-flap about wing EA per unit span
-    S_beta: float = 0.0# static mass moment of flap about flap hinge line per unit span
+    S_alpha: float = 0.0# static mass moment of wing-flap about wing EA per unit span [kg]
+    S_beta: float = 0.0# static mass moment of flap about flap hinge line per unit span [kg]
     x_alpha: float = 0.0# dimensionless distance between airfoil EA and the center of gravity
     x_beta: float = 0.0# dimensionless distance between flap center of gravity and flap hinge axis
-    omega_h: float = 0.0# uncoupled plunge natural frequency
-    omega_alpha: float = 0.0# uncoupled pitch natural frequency
-    omega_beta: float = 0.0# uncoupled flap natural frequency
-    rho: float = 0.0# fluid density
+    omega_h: float = 0.0# uncoupled plunge natural frequency [hz]
+    omega_alpha: float = 0.0# uncoupled pitch natural frequency [hz]
+    omega_beta: float = 0.0# uncoupled flap natural frequency [hz]
+    rho: float = 0.0# fluid density [kg/m^3]
     zeta_h: float = 0.0# plunge damping ratio
     zeta_alpha: float = 0.0# pitch damping ratio
     zeta_beta: float = 0.0# flap damping ratio
-    U: float = 0.0 # velocity
-    sigma: float = 0.0
-    V: float = 0.0
-    mu: float = 0.0
+    U: float = 0.0 # dimensional freestream velocity [m/s]
+    sigma: float = 0.0 # ratio of the uncoupled plunge and pitch natural frequencies
+    V: float = 0.0 # dimensionless freestream velocity 
+    mu: float = 0.0 # mass ratio of the wing-flap mass
 
 def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=np.radians(4.24), a_f=np.radians(-2.12)):
     """
@@ -353,13 +353,16 @@ if __name__ == "__main__":
         v.zeta_beta = 0.0115
         v.U = U
         v.sigma = v.omega_h / v.omega_alpha
+        # v.sigma = 0.8079
         v.V = v.U / (v.b * v.omega_alpha)
         v.mu = v.m / (np.pi * v.rho * v.b**2)
+        # v.mu = 25.2386
+
         U_str = f"{int(U)}"
 
         dt = 0.1
         # t_final = 5.0 * v.omega_alpha
-        t_final = 250.0
+        t_final = 700.0
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
@@ -409,8 +412,8 @@ if __name__ == "__main__":
             # Poincare maps
             names = ["h", "alpha", "beta"]
             latex_names = [r"h", r"\alpha", r"\beta"]
-            mono_idx_st = int(0.95 * mono.t.shape[0])
-            uvlm_idx_st = int(0.95 * uvlm.shape[1])
+            mono_idx_st = int(0.9839 * mono.t.shape[0])
+            uvlm_idx_st = int(0.977 * uvlm.shape[1])
             for i in range(3):
                 fig = plot.fig_create_multi(1, 1)
                 fig.add_trace(
