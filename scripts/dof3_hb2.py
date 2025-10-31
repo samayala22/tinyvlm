@@ -203,7 +203,7 @@ if __name__ == "__main__":
     flutter_speed = 23.9
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
-    param_start = 6.5
+    param_start = 10.0
     param_end = 15.0
 
     v = dof3.Vars()
@@ -249,7 +249,7 @@ if __name__ == "__main__":
     vec_t = np.arange(0, t_final, dt)
     y0 = np.zeros(8, dtype=np.float64) # hd, ad, bd, h, a, b, x1, x2
     y0[3] = 0.01 / v.b # h
-    system = dof3.AeroelasticSystem(v, True)
+    system = dof3.AeroelasticSystem(v, True, torsional_func)
     sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
 
     idx_start = int(0.9 * len(sol.t))

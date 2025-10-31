@@ -61,13 +61,14 @@ def alpha_linear(alpha):
     return alpha
 
 class AeroelasticSystem:
-    def __init__(self, v: Vars, coupled=True):
+    def __init__(self, v: Vars, coupled=True, alpha_func=alpha_freeplay):
         self.M_s = np.zeros((3,3)) # dimensionless structural intertia matrix
         self.D_s = np.zeros((3,3)) # dimensionless structural damping matrix
         self.K_s = np.zeros((3,3)) # dimensionless structural stiffness matrix
 
         self.v = v
         self.coupled = coupled
+        self.alpha_func = alpha_func
 
         self.M_s[0, 0] = v.m_t / v.m
         self.M_s[0, 1] = v.x_alpha
@@ -187,7 +188,7 @@ class AeroelasticSystem:
         yn = np.zeros_like(y)
         gamma = 0 # Cubic factor (0 for linear spring)
         yn[0, :] = self.v.mu * y[3, :] * self.v.sigma**2 * (1 + gamma * y[3, :]**2)
-        yn[2, :] = self.v.mu * ((self.v.omega_beta / self.v.omega_alpha)**2 * self.v.r_beta**2) * alpha_freeplay(y[5, :])      
+        yn[2, :] = self.v.mu * ((self.v.omega_beta / self.v.omega_alpha)**2 * self.v.r_beta**2) * self.alpha_func(y[5, :])      
         return yn.reshape(y_.shape)
 
     def uncoupled_system(self, t, y: np.ndarray):
@@ -284,6 +285,15 @@ def format_plot(fig):
     plot.format_subplot(fig, 6, 3, "", "")
 
 if __name__ == "__main__":
+    torsional_spring = 0
+    torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
+
+    if (torsional_spring == 0):
+        torsional_func = alpha_freeplay
+    elif (torsional_spring == 1):
+        torsional_func = alpha_poly
+    else:
+        torsional_func = alpha_linear
     # Darabseh 2022
     # v = Vars(
     #     a = -0.5,
@@ -370,7 +380,7 @@ if __name__ == "__main__":
         y0 = np.zeros(8, dtype=np.float64)
         y0[3] = 0.01 / v.b # h
 
-        system = AeroelasticSystem(v, coupled_sim)
+        system = AeroelasticSystem(v, coupled_sim, torsional_func)
         ivp = system.coupled_system if coupled_sim else system.uncoupled_system
         mono = solve_ivp(ivp, (0, t_final), y0, t_eval=vec_t, method='RK45')
         
