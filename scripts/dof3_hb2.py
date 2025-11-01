@@ -190,7 +190,7 @@ def create_motion_system():
 
 if __name__ == "__main__":
     torsional_spring = 1
-    torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
+    torsional_spring_names = ["freeplay", "cubic", "linear"]
 
     if (torsional_spring == 0):
         torsional_func = dof3.alpha_freeplay
@@ -203,8 +203,8 @@ if __name__ == "__main__":
     flutter_speed = 23.9
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
-    param_start = 10.0
-    param_end = 15.0
+    param_start = 12.0
+    param_end = 10.0
 
     v = dof3.Vars()
     v.a = -0.5 
@@ -267,17 +267,17 @@ if __name__ == "__main__":
     # X0[-1] = param_start
 
     metadata = cont.Metadata()
-    metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
+    metadata.name = f"3dof_{torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
-    metadata.max_steps = 1 if INITIAL_ONLY else 20
+    metadata.max_steps = 1 if INITIAL_ONLY else 5000
     metadata.scaling = False
     metadata.step_adapt = True
     metadata.ds = 0.02
     metadata.dims = dims
     
     motion = create_motion_system()
-    metadata = cont.continuation(X0, motion, metadata)
+    # metadata = cont.continuation(X0, motion, metadata)
     
     if helpers.getenv("PLOT"):
         X_mat = metadata.X
@@ -294,4 +294,34 @@ if __name__ == "__main__":
             dof3.format_plot(fig)
             plot.fig_save(fig, f"build/3dof/hbvlm0")
         else:
-            cont.plot_hb_continuation(metadata)
+            cont.plot_hb_continuation([metadata])
+
+    rms_samples = 10
+    rms_param = np.linspace(5.0, 20.0, rms_samples)
+    rms_mat = np.zeros((dims.n_d, rms_samples))
+    for i, U in enumerate(rms_param):
+        v.U = U
+        v.V = v.U / (v.b * v.omega_alpha)
+        system = dof3.AeroelasticSystem(v, True, torsional_func)
+        sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
+
+        idx_start = int(0.9 * len(sol.t))
+        u_tr = sol.y[:, idx_start:]
+        rms = np.sqrt(np.mean(u_tr**2, axis=1))
+        rms_mat[:, i] = rms
+
+    if torsional_spring == 1:
+        metadata_files = [
+            "build/cont_3dof_cubic_st_6_end_20_it_285.pkl",
+            "build/cont_3dof_cubic_st_6_end_1_it_326.pkl",
+            "build/cont_3dof_cubic_st_12_end_20_it_212.pkl",
+            "build/cont_3dof_cubic_st_12_end_10_it_161.pkl"
+        ]
+    
+    metadatas = []
+    import pickle
+    for filename in metadata_files:
+        with open(filename, 'rb') as f:
+            metadatas.append(pickle.load(f))
+        print(f"Loaded: {filename}")
+    cont.plot_hb_continuation(metadatas, timeseries=(rms_param, rms_mat))

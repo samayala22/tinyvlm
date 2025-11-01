@@ -92,7 +92,7 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         title_text=ylabel,
         row=row,
         col=col,
-        tickformat=".0e",
+        tickformat=".1e",
         **plotly_axes
     )
 

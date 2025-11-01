@@ -1,4 +1,4 @@
-import argparse, hashlib, pickle, json, time
+import argparse, pickle, time, pathlib
 from dataclasses import dataclass
 from enum import Enum
 
@@ -11,7 +11,9 @@ import finite_diff as fd
 import plotting as plot
 import helpers
 
-BIFURCATIONS = ["LP", "BP", "NS", "PD"] # Maybe change to enum ?
+# BIFURCATIONS = ["LP", "BP", "NS", "PD"]
+BIFURCATIONS = ["LP", "BP"] # temporarily omit NS as they are noisy
+BIFURCATION_COLORS = ['#00cc96', '#ab63fa', "#ffa15a", "red"]
 
 class Parametrisation(Enum):
     Local = 1
@@ -33,15 +35,12 @@ class Metadata:
         self.X = None
         self.dims = None
 
-def hash_metadata(metadata):
-    params = {
-        "name":         metadata.name,
-        "start":  metadata.X[-1, 0],
-        "end":   metadata.X[-1, -1],
-        "iterations": metadata.X.shape[1]
-    }
-    j = json.dumps(params, sort_keys=True).encode("utf8")
-    return hashlib.md5(j).hexdigest()[:8]
+def metadatas_filename(mds: list):
+    total_it = sum([md.X.shape[1] for md in mds])
+    return f"cont_{mds[0].name}_combined_{len(mds)}_totalit_{total_it}"
+
+def metadata_filename(md):
+    return f"cont_{md.name}_st_{int(md.param_start)}_end_{int(md.param_end)}_it_{md.X.shape[1]}"
 
 @dataclass
 class System:
@@ -257,6 +256,7 @@ def stability_analysis(J_ext, motion, omega, omega_idx, dims, tol=1e-10):
     floquet_exponents = eigvals[sorted_idx[:num_exponents]]
     max_real_part = np.max(np.real(floquet_exponents))
     is_stable = max_real_part < 1e-8
+
     return is_stable, floquet_exponents
 
 def continuation(X0, motion, metadata: Metadata):
@@ -388,6 +388,15 @@ def continuation(X0, motion, metadata: Metadata):
             if (X[-1] - metadata.param_end) * param_direction >= 0:
                 print("Continuation reached the end")
                 break
+                
+            X_h = X[0:omega_idx:metadata.dims.n_d]
+            A = np.sqrt(X_h[1::2]**2 + X_h[2::2]**2)
+            rms_0 = np.sqrt(X_h[0]**2 + 0.5 * np.sum(A**2, axis=0))
+            print(f"rms_0: {rms_0:.6e}")
+            # if rms_0 < 1e-8 and iteration > 1:
+            #     print("Continuation reached trivial solution, stopping.")
+            #     break
+
     except KeyboardInterrupt:
         print("Continuation interrupted by user")
 
@@ -400,137 +409,153 @@ def continuation(X0, motion, metadata: Metadata):
 
     print(f"Total nfev: {total_nfev}")
     print(f"Total njev: {total_njev}")
-    
-    filename = f"build/continuation_{hash_metadata(metadata)}.pkl"
+
+    filename = f"build/{metadata_filename(metadata)}.pkl"
     print(f"Continuation data saved to {filename}")
     with open(f"{filename}", 'wb') as f:
         pickle.dump(metadata, f)
 
     return metadata
 
-@helpers.Timing()
-def plot_hb_continuation(metadata):
-    dofs = metadata.dims.n_d
-    omega_idx = metadata.dims.n_u - metadata.X.shape[0]
-    print(f"dofs: {dofs}")
-    hash_str = hash_metadata(metadata)
-        
-    stable_mask = np.array(metadata.stable)
-    stable_mask2 = stable_mask.copy()
+def create_unstable_mask(stable_mask):
+    """
+    Create an unstable mask from a stable mask to ensure line continuity.
+    """
+    unstable_mask = stable_mask.copy()
     
     # Padding to make the line continuous between stable and unstable regions
     for i in range(len(stable_mask)-1):
         if stable_mask[i+1] == False and stable_mask[i] == True:
-            stable_mask2[i] = False
+            unstable_mask[i] = False
         elif stable_mask[i+1] == True and stable_mask[i] == False:
-            stable_mask2[i+1] = False
+            unstable_mask[i+1] = False
+    return ~unstable_mask
 
-    def masked(mat):
-        mat_stable = mat.copy()
-        mat_unstable = mat.copy()
-        mat_stable[..., ~stable_mask] = np.nan
-        mat_unstable[..., stable_mask2] = np.nan
-        return mat_stable, mat_unstable
+def filter_stable_mask(stable_mask):
+    mask = stable_mask.copy()
+    count = 0
+    for i in range(1, len(mask)):
+        if mask[i] == False and mask[i-1] == True: # transition S -> U
+            count = 1
+        elif mask[i] == False and count > 0:
+            count += 1
+        elif mask[i] == True and count > 0 and count < 5:
+            mask[i-count:i] = True
+            count = 0
+    return mask
+
+def mask_data(mat, stable_mask, unstable_mask):
+    mat_stable = mat.copy()
+    mat_unstable = mat.copy()
+    mat_stable[..., ~stable_mask] = np.nan
+    mat_unstable[..., ~unstable_mask] = np.nan
+    return mat_stable, mat_unstable
+
+def plot_hb_continuation(metadata_list, timeseries=None):
+    n = len(metadata_list)
+    filename = metadatas_filename(metadata_list) if n > 1 else metadata_filename(metadata_list[0])
+    filedir = pathlib.Path(f"build/continuation/{filename}")
+    filedir.mkdir(parents=True, exist_ok=True)
     
-    X_stable, X_unstable = masked(metadata.X)
+    dofs = metadata_list[0].dims.n_d
+    omega_idx = metadata_list[0].dims.n_u - metadata_list[0].X.shape[0]
+    for i in range(n):
+        assert metadata_list[i].dims.n_d == dofs, "All metadatas must have the same number of DOFs"
+
+    stable_masks = [filter_stable_mask(md.stable) for md in metadata_list]
+    unstable_masks = [create_unstable_mask(stable_masks[i]) for i in range(n)]
 
     for dof in range(dofs):
-        X_h = metadata.X[dof:omega_idx:dofs, :]
-        A = np.sqrt(X_h[1::2, :]**2 + X_h[2::2, :]**2)
-        rms = np.sqrt(X_h[0, :]**2 + 0.5 * np.sum(A**2, axis=0))
-        A_stable, A_unstable = masked(A)
-        rms_stable, rms_unstable = masked(rms)
-
+        showed_bifurcations = set()
         fig = plot.fig_create_multi(1,1)
+        for i, md in enumerate(metadata_list):
+            masked = lambda data: mask_data(data, stable_masks[i], unstable_masks[i])
+            param_stable, param_unstable = masked(md.X[-1, :])
+            X_h = md.X[dof:omega_idx:dofs, :]
+            A = np.sqrt(X_h[1::2, :]**2 + X_h[2::2, :]**2)
+            rms = np.sqrt(X_h[0, :]**2 + 0.5 * np.sum(A**2, axis=0))
+            rms_stable, rms_unstable = masked(rms)
 
-        # for h in range(metadata.dims.n_h):
-        #     name = f"Harmonic {h+1}"
-
-        #     fig.add_trace(
-        #         go.Scatter(
-        #             x = X_stable[-1, :],
-        #             y = A_stable[h, :],
-        #             name = name,
-        #             legendgroup = name,
-        #             mode = "lines",
-        #             line = {"dash": "solid"},
-        #             showlegend = True if dof == 0 else False
-        #         ),
-        #         row=r+1,
-        #         col=c+1
-        #     )
-        #     fig.add_trace(
-        #         go.Scatter(
-        #             x = X_unstable[-1, :],
-        #             y = A_unstable[h, :],
-        #             name = name,
-        #             legendgroup = name,
-        #             mode = "lines",
-        #             line = {"dash": "dash"},
-        #             showlegend = False
-        #         ),
-        #         row=r+1,
-        #         col=c+1
-        #     )
-
-        fig.add_trace(
-            go.Scatter(
-                x = X_stable[-1, :],
-                y = rms_stable,
-                name = f"RMS",
-                mode = "lines",
-                line = {"dash": "solid"},
-                showlegend = False
-            ),
-            row=1,
-            col=1
-        )
-        fig.add_trace(
-            go.Scatter(
-                x = X_unstable[-1, :],
-                y = rms_unstable,
-                name = f"RMS",
-                legendgroup = "RMS",
-                mode = "lines",
-                line = {"dash": "dash"},
-                showlegend = False
-            ),
-            row=1,
-            col=1
-        )
-
-        symbols = ["circle", "square", "diamond", "triangle"]
-        for i, b in enumerate(BIFURCATIONS):
-            indices = np.array(metadata.bifurcation[b])
-            if len(indices) == 0: continue
             fig.add_trace(
                 go.Scatter(
-                    x = metadata.X[-1, indices],
-                    y = rms[indices],
-                    name = b,
-                    mode = "markers",
-                    marker = {"size": 10, "symbol": symbols[i]},
-                    showlegend = True
+                    x = param_stable,
+                    y = rms_stable,
+                    name = f"RMS",
+                    mode = "lines",
+                    line = {"dash": "solid", "color": "#636efa"},
+                    showlegend = False
+                ),
+                row=1,
+                col=1
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x = param_unstable,
+                    y = rms_unstable,
+                    name = f"RMS",
+                    legendgroup = "RMS",
+                    mode = "lines",
+                    line = {"dash": "dash", "color": "#ef553b"},
+                    showlegend = False
                 ),
                 row=1,
                 col=1
             )
 
-        plot.format_subplot(fig, 1, 1, r"$\Large{U}$", r"$\Large{RMS(x_{" + str(dof+1) + r"})}$")
-        plot.fig_save(fig, f"build/continuation/continuation_{hash_str}_rms_{dof}", pdf=True)
+            symbols = ["circle", "square", "diamond", "triangle"]
+            for k, b in enumerate(BIFURCATIONS):
+                indices = np.array(md.bifurcation[b])
+                if len(indices) == 0: continue
+                fig.add_trace(
+                    go.Scatter(
+                        x = md.X[-1, indices],
+                        y = rms[indices],
+                        name = b,
+                        legendgroup = b,
+                        mode = "markers",
+                        marker = {"size": 10, "symbol": symbols[k], "color": BIFURCATION_COLORS[k]},
+                        showlegend = True if b not in showed_bifurcations else False
+                    ),
+                    row=1,
+                    col=1
+                )
+                showed_bifurcations.add(b)
+
+        if timeseries is not None:
+            ts_param, ts_rms = timeseries
+            fig.add_trace(
+                go.Scatter(
+                    x = ts_param,
+                    y = ts_rms[dof, :],
+                    name = "TI",
+                    mode = "markers",
+                    marker = {"size": 10, "symbol": "star-diamond", "color": "#FFD700"},
+                    showlegend=True
+                ),
+                row=1,
+                col=1
+            )
+
+        plot.format_subplot(fig, 1, 1, r"$\Large{U}$", r"$\Large{\mathrm{RMS}(x_{" + str(dof+1) + r"})}$")
+        plot.fig_save(fig, filedir / f"{filename}_rms_{dof}", pdf=True)
+
 
 def parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("filename", type=str)
+    parser.add_argument("filenames", type=str, nargs='+', help="One or more filenames")
     return parser
 
-if __name__ == "__main__":
+def main():
     args = parser().parse_args()
-    with open(args.filename, 'rb') as f:
-        metadata = pickle.load(f)
-    print(f"Hash: {hash_metadata(metadata)}")
-    plot_hb_continuation(metadata)
+    metadatas = []
+    for filename in args.filenames:
+        with open(filename, 'rb') as f:
+            metadatas.append(pickle.load(f))
+        print(f"Loaded: {filename}")
+    plot_hb_continuation(metadatas)
 
+if __name__ == "__main__":
+    main()
 
 # REFERENCES:
 # Dimitriadis: INTRODUCTION TO NONLINEAR AEROELASTICITY 
