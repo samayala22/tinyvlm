@@ -106,13 +106,13 @@ def create_motion_system() -> System:
     return System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
 
 if __name__ == "__main__":
-    torsional_spring = 0
-    torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
+    torsional_spring = 1
+    torsional_spring_names = ["freeplay", "cubic", "linear"]
 
     if (torsional_spring == 0):
         torsional_func = dof3.alpha_freeplay
-    # elif (torsional_spring == 1):
-    #     torsional_func = dof3.alpha_cubic
+    elif (torsional_spring == 1):
+        torsional_func = dof3.alpha_poly
     else:
         torsional_func = dof3.alpha_linear
 
@@ -120,8 +120,8 @@ if __name__ == "__main__":
     flutter_speed = 23.9
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
-    param_start = 7.0
-    param_end = 15.0
+    param_start = 6.0
+    param_end = 20.0
 
     v = dof3.Vars()
     v.a = -0.5 
@@ -155,19 +155,20 @@ if __name__ == "__main__":
     # Independent params
     dims = hb.Dims(
         n_d=3,          # number of degrees of freedom
-        n_h=7          # number of harmonics
+        n_h=5          # number of harmonics
     )
 
-    hbvlm = HBVLM("cpu", ["mesh/3dof_wing_9x5.x", "mesh/3dof_flap_3x5.x"])
+    hbvlm = HBVLM("cpu", ["mesh/3dof_wing_45x1.x", "mesh/3dof_flap_15x1.x"])
+    # hbvlm = HBVLM("cpu", ["mesh/3dof_wing_9x5.x", "mesh/3dof_flap_3x5.x"])
     hbvlm.init(dims.n_h, 1.0/v.b)
 
     # Time integration
-    t_final = 4000.0
-    dt = 0.2 
+    t_final = 1000.0
+    dt = 0.1 
     vec_t = np.arange(0, t_final, dt)
     y0 = np.zeros(8, dtype=np.float64) # hd, ad, bd, h, a, b, x1, x2
     y0[3] = 0.01 / v.b # h
-    system = dof3.AeroelasticSystem(v, True)
+    system = dof3.AeroelasticSystem(v, True, torsional_func)
     sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
 
     idx_start = int(0.9 * len(sol.t))
@@ -185,17 +186,19 @@ if __name__ == "__main__":
     # X0[-1] = param_start
 
     metadata = cont.Metadata()
-    metadata.name = f"3DOF {torsional_spring_names[torsional_spring]}"
+    metadata.name = f"3dof_hbvlm_{torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
     metadata.max_steps = 1 if INITIAL_ONLY else 10000
-    metadata.scaling = False
+    metadata.scaling = True
     metadata.step_adapt = True
     metadata.ds = 0.02
     metadata.dims = dims
     
     motion = create_motion_system()
-    metadata = cont.continuation(X0, motion, metadata)
+    if not helpers.getenv("POST"):
+        metadata = cont.continuation(X0, motion, metadata)
+        # exit(0)
     
     if helpers.getenv("PLOT"):
         X_mat = metadata.X
@@ -214,6 +217,6 @@ if __name__ == "__main__":
             plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[5, :]), "HB-VLM", 5, 2, 3)
             
             dof3.format_plot(fig)
-            plot.fig_save(fig, f"build/3dof/hbvlm0")
+            plot.fig_save(fig, f"build/3dof/hbvlm0", html=True, pdf=False)
         else:
             cont.plot_hb_continuation(metadata)

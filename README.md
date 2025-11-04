@@ -5,7 +5,7 @@
 
 # TinyVLM
 
-### High Performance Potential Flow Solver
+### High Performance Potential Flow Solver for Aeroelastic Analysis
 ---
 
 ## Features:
@@ -15,15 +15,10 @@
 - [X] UVLM
 - [X] 2DOF UVLM
 - [X] 3DOF UVLM
-- [ ] HB-VLM
-- [ ] NL-UVLM
-
-# Correctors
-
-- [X] High angle of attack correction
-- [X] Dihedral / Anhedral Wings (local coordinate projection in force calculation)
-- [X] Swept Wings (coordinate rotation)
-- [ ] Compressibility Effects (Prandtl Glauert corrector)
+- [X] HBVLM
+- [X] 2DOF HBVLM
+- [X] 3DOF HBVLM
+- [X] Continuation Solver
 
 # Backends
 

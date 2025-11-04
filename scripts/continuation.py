@@ -295,7 +295,7 @@ def continuation(X0, motion, metadata: Metadata):
     X_old = X0.copy()
     z_ref = np.zeros_like(X0)
     z_ref[-1] = 1
-    ds_min = ds / 100.0
+    ds_min = ds / 10.0
     ds_max = ds * 10.0
 
     total_njev = 0

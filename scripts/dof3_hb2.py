@@ -248,7 +248,7 @@ if __name__ == "__main__":
     dt = 0.1 
     vec_t = np.arange(0, t_final, dt)
     y0 = np.zeros(8, dtype=np.float64) # hd, ad, bd, h, a, b, x1, x2
-    y0[3] = 0.1 / v.b # h
+    y0[3] = 0.01 / v.b # h
     system = dof3.AeroelasticSystem(v, True, torsional_func)
     sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
 

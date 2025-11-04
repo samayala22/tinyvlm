@@ -11,7 +11,6 @@
 #include "tinypbar.hpp"
 #include "tinytimer.hpp"
 #include "tinytest.hpp"
-#include "npy.hpp"
 
 #include "vlm.hpp"
 #include "vlm_backend.hpp"
@@ -91,7 +90,7 @@ class HBVLM {
         HBVLM(const std::string& backend_name, const std::vector<std::string>& filename);
         ~HBVLM() = default;
         void init(i32 harmonics, f64 scaling);
-        void run(f64 t_final, f64 omega, const Vars& v, const Assembly<f64>& assembly, py::array_t<double>& forces_t);
+        void run(f64 t_final, f64 omega, const Vars& v, Assembly<f64>& assembly, py::array_t<double>& forces_t);
 
         std::unique_ptr<Backend> backend;
         MultiDim<2> assembly_wings;
@@ -256,7 +255,7 @@ void gamma_wake_from_coeffs(
     }
 }
 
-void HBVLM::run(f64 t_start, f64 omega, const Vars& v, const Assembly<f64>& assembly, py::array_t<double>& forces_t) {
+void HBVLM::run(f64 t_start, f64 omega, const Vars& v, Assembly<f64>& assembly, py::array_t<double>& forces_t) {
     // const tiny::ScopedTimer timer("HBVLM::run");
 
     const f64 period = 2.0f * PI_f / omega;
@@ -463,7 +462,7 @@ void HBVLM::run(f64 t_start, f64 omega, const Vars& v, const Assembly<f64>& asse
                 }
                 velocities_h_m.to(velocities_m);
             }
-            const linalg::double3 freestream = -assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
+            linalg::double3 freestream = -assembly.kinematics()->linear_velocity(t, {0.f, 0.f, 0.f});
             
             auto gamma_wing0_s = gamma_wing0.slice(All, s).reshape(colloc_d.views()[0].shape(0), colloc_d.views()[0].shape(1));
             auto dgamma_wing0_s = dgamma_wing0.slice(All, s).reshape(colloc_d.views()[0].shape(0), colloc_d.views()[0].shape(1));
@@ -493,7 +492,7 @@ void HBVLM::run(f64 t_start, f64 omega, const Vars& v, const Assembly<f64>& asse
                 gamma_wing_delta.views()[1].slice(All, Range{1, -1})
             );
 
-            backend->forces_unsteady2(
+            backend->forces_unsteady(
                 verts_wing.views()[0],
                 gamma_wing_delta.views()[0],
                 dgamma.views()[0],
@@ -502,7 +501,7 @@ void HBVLM::run(f64 t_start, f64 omega, const Vars& v, const Assembly<f64>& asse
                 normals_d.views()[0],
                 aero_forces.views()[0]
             ); 
-            backend->forces_unsteady2(
+            backend->forces_unsteady(
                 verts_wing.views()[1],
                 gamma_wing_delta.views()[1],
                 dgamma.views()[1],
@@ -522,14 +521,15 @@ void HBVLM::run(f64 t_start, f64 omega, const Vars& v, const Assembly<f64>& asse
             const auto transform0 = assembly.surface_kinematics()[0]->transform(t);
             const auto transform1 = assembly.surface_kinematics()[1]->transform(t);
 
-            auto ref_pt_a = linalg::mul(transform0, {1 + v.a, 0.0f, 0.0f, 1.0f});
-            auto ref_pt_b = linalg::mul(transform1, {1 + v.c, 0.0f, 0.0f, 1.0f});
-
+            auto ref_pt_a4 = linalg::mul(transform0, {1 + v.a, 0.0f, 0.0f, 1.0f});
+            auto ref_pt_b4 = linalg::mul(transform1, {1 + v.c, 0.0f, 0.0f, 1.0f});
+            auto ref_pt_a = linalg::double3{ref_pt_a4.x, ref_pt_a4.y, ref_pt_a4.z};
+            auto ref_pt_b = linalg::double3{ref_pt_b4.x, ref_pt_b4.y, ref_pt_b4.z};
             forces_t_v(1, s) = backend->coeff_cm_multibody(
                 aero_forces.views(),
                 verts_wing.views(),
                 areas_d.views(),
-                {ref_pt_a.x, ref_pt_a.y, ref_pt_a.z},
+                ref_pt_a,
                 freestream,
                 rho
             ).y;
@@ -537,7 +537,7 @@ void HBVLM::run(f64 t_start, f64 omega, const Vars& v, const Assembly<f64>& asse
             forces_t_v(2, s) = backend->coeff_cm(
                 aero_forces.views()[1],
                 verts_wing.views()[1],
-                {ref_pt_b.x, ref_pt_b.y, ref_pt_b.z},
+                ref_pt_b,
                 freestream,
                 1.0f, // rho_inf = 1
                 backend->sum(areas_d.views()[1]),
