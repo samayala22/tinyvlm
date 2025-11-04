@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
 import plotting as plot
+import helpers
 
 @dataclass
 class Vars:
@@ -61,14 +62,14 @@ def alpha_linear(alpha):
     return alpha
 
 class AeroelasticSystem:
-    def __init__(self, v: Vars, coupled=True, alpha_func=alpha_freeplay):
+    def __init__(self, v: Vars, coupled=True, beta_func=alpha_freeplay):
         self.M_s = np.zeros((3,3)) # dimensionless structural intertia matrix
         self.D_s = np.zeros((3,3)) # dimensionless structural damping matrix
         self.K_s = np.zeros((3,3)) # dimensionless structural stiffness matrix
 
         self.v = v
         self.coupled = coupled
-        self.alpha_func = alpha_func
+        self.beta_func = beta_func
 
         self.M_s[0, 0] = v.m_t / v.m
         self.M_s[0, 1] = v.x_alpha
@@ -86,7 +87,7 @@ class AeroelasticSystem:
         self.D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
         self.D_s = 2 * v.mu * self.D_s
 
-        # K_s[0, 0] = sigma**2 * (1 + gamma * y[3]**2)
+        self.K_s[0, 0] = v.sigma**2
         self.K_s[1, 1] = v.r_alpha**2
         # K_s[2, 2] = (v.omega_beta / v.omega_alpha)**2 * v.r_beta**2
         self.K_s = v.mu * self.K_s
@@ -186,9 +187,10 @@ class AeroelasticSystem:
     def yn_func(self, y_: np.ndarray):
         y = y_.reshape(y_.shape[0], -1) # so that it works for both y_ as vector or matrix
         yn = np.zeros_like(y)
-        gamma = 0 # Cubic factor (0 for linear spring)
-        yn[0, :] = self.v.mu * y[3, :] * self.v.sigma**2 * (1 + gamma * y[3, :]**2)
-        yn[2, :] = self.v.mu * ((self.v.omega_beta / self.v.omega_alpha)**2 * self.v.r_beta**2) * self.alpha_func(y[5, :])      
+        # alpha_s = self.v.mu * self.v.r_alpha**2 * alpha_poly(y[4, :], c3=1.0)
+        # alpha_d = 2.0 * self.v.mu * self.v.r_alpha**2 * self.v.zeta_alpha * alpha_poly(y[1], c2=1.0, c3=0.0)
+        # yn[1, :] = alpha_s + alpha_d
+        yn[2, :] = self.v.mu * ((self.v.omega_beta / self.v.omega_alpha)**2 * self.v.r_beta**2) * self.beta_func(y[5, :])      
         return yn.reshape(y_.shape)
 
     def uncoupled_system(self, t, y: np.ndarray):
@@ -285,8 +287,8 @@ def format_plot(fig):
     plot.format_subplot(fig, 6, 3, "", "")
 
 if __name__ == "__main__":
-    torsional_spring = 0
-    torsional_spring_names = ["Freeplay", "Cubic", "Linear"]
+    torsional_spring = 1
+    torsional_spring_names = ["freeplay", "cubic", "linear"]
 
     if (torsional_spring == 0):
         torsional_func = alpha_freeplay
@@ -328,8 +330,9 @@ if __name__ == "__main__":
     # U_vec = [12.63158]
     # U_vec = [12.36842] # Non symmetric 2 period LCO
     # U_vec = [12.75168] # Bifuracation reports many points ?
-    U_vec = [7.0]
+    U_vec = [11.0]
     # U_vec = np.linspace(0.2, 22.5, 100)
+    # U_vec = np.linspace(10.0, 12.0, 50)
 
     peaks_data = [[], [], []]
     peaks_U = [[], [], []]
@@ -372,13 +375,13 @@ if __name__ == "__main__":
 
         dt = 0.1
         # t_final = 5.0 * v.omega_alpha
-        t_final = 700.0
+        t_final = 1000.0
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
         # hd, ad, bd, h, a, b, x1, x2
         y0 = np.zeros(8, dtype=np.float64)
-        y0[3] = 0.01 / v.b # h
+        y0[3] = 0.1 / v.b # h
 
         system = AeroelasticSystem(v, coupled_sim, torsional_func)
         ivp = system.coupled_system if coupled_sim else system.uncoupled_system
@@ -396,7 +399,7 @@ if __name__ == "__main__":
             plot_solution(fig, aero_forces, mono, v)
 
             uvlm_file = Path("build/windows/x64/release/3dof.txt")
-            if uvlm_file.exists():
+            if uvlm_file.exists() and helpers.getenv("UVLM"):
                 with open(uvlm_file, "r") as f:
                     uvlm_tsteps = int(f.readline())
                     uvlm = np.zeros((10, uvlm_tsteps))
@@ -417,13 +420,12 @@ if __name__ == "__main__":
                     plot.add_data_and_psd(fig, uvlm[0, :], uvlm[9, :], "UVLM", 5, 3, 1, dash="dot")
 
             format_plot(fig)
-            plot.fig_save(fig, f"build/3dof/3dof_{U_str}", html=False, height=1500)
+            plot.fig_save(fig, f"build/3dof/3dof_{torsional_spring_names[torsional_spring]}_{U_str}", html=False, height=1500)
 
             # Poincare maps
             names = ["h", "alpha", "beta"]
             latex_names = [r"h", r"\alpha", r"\beta"]
             mono_idx_st = int(0.9839 * mono.t.shape[0])
-            uvlm_idx_st = int(0.977 * uvlm.shape[1])
             for i in range(3):
                 fig = plot.fig_create_multi(1, 1)
                 fig.add_trace(
@@ -435,15 +437,17 @@ if __name__ == "__main__":
                         name="Theodorsen"
                     )
                 )
-                fig.add_trace(
-                    go.Scatter(
-                        x=uvlm[1+i, uvlm_idx_st:],
-                        y=uvlm[4+i, uvlm_idx_st:],
-                        mode="lines",
-                        line = {"dash": "dot", "width": 5, "color": "#FF8400"},
-                        name="UVLM"
+                if helpers.getenv("UVLM") and uvlm_file.exists():
+                    uvlm_idx_st = int(0.977 * uvlm.shape[1])
+                    fig.add_trace(
+                        go.Scatter(
+                            x=uvlm[1+i, uvlm_idx_st:],
+                            y=uvlm[4+i, uvlm_idx_st:],
+                            mode="lines",
+                            line = {"dash": "dot", "width": 5, "color": "#FF8400"},
+                            name="UVLM"
+                        )
                     )
-                )
                 plot.format_subplot(fig, 1, 1, r"$\Large{" + latex_names[i] + "}$", r"$\Large{\dot{" + latex_names[i] + "}}$")
                 if i != 2: fig.update_layout(showlegend=False)
                 plot.fig_save(fig, f"build/3dof/3dof_poincare_{U_str}_{names[i]}", html=False, height=500)
@@ -476,4 +480,4 @@ if __name__ == "__main__":
         fig.update_xaxes(showticklabels=False, title_text="", row=1, col=1)
         fig.update_xaxes(showticklabels=False, title_text="", row=2, col=1)
 
-        plot.fig_save(fig, f"build/3dof/3dof_Cubic_bifurcation", html=False, height=1000)
+        plot.fig_save(fig, f"build/3dof/3dof_{torsional_spring_names[torsional_spring]}_bifurcation", html=False, height=1000)

@@ -203,8 +203,8 @@ if __name__ == "__main__":
     flutter_speed = 23.9
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
-    param_start = 12.0
-    param_end = 10.0
+    param_start = 11.0
+    param_end = 1.0
 
     v = dof3.Vars()
     v.a = -0.5 
@@ -248,7 +248,7 @@ if __name__ == "__main__":
     dt = 0.1 
     vec_t = np.arange(0, t_final, dt)
     y0 = np.zeros(8, dtype=np.float64) # hd, ad, bd, h, a, b, x1, x2
-    y0[3] = 0.01 / v.b # h
+    y0[3] = 0.1 / v.b # h
     system = dof3.AeroelasticSystem(v, True, torsional_func)
     sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
 
@@ -271,13 +271,15 @@ if __name__ == "__main__":
     metadata.param_start = param_start
     metadata.param_end = param_end
     metadata.max_steps = 1 if INITIAL_ONLY else 5000
-    metadata.scaling = False
+    metadata.scaling = True
     metadata.step_adapt = True
     metadata.ds = 0.02
     metadata.dims = dims
     
     motion = create_motion_system()
-    # metadata = cont.continuation(X0, motion, metadata)
+    if not helpers.getenv("POST"):
+        metadata = cont.continuation(X0, motion, metadata)
+        exit(0)
     
     if helpers.getenv("PLOT"):
         X_mat = metadata.X
@@ -296,7 +298,7 @@ if __name__ == "__main__":
         else:
             cont.plot_hb_continuation([metadata])
 
-    rms_samples = 10
+    rms_samples = 20
     rms_param = np.linspace(5.0, 20.0, rms_samples)
     rms_mat = np.zeros((dims.n_d, rms_samples))
     for i, U in enumerate(rms_param):
@@ -315,7 +317,17 @@ if __name__ == "__main__":
             "build/cont_3dof_cubic_st_6_end_20_it_285.pkl",
             "build/cont_3dof_cubic_st_6_end_1_it_326.pkl",
             "build/cont_3dof_cubic_st_12_end_20_it_212.pkl",
-            "build/cont_3dof_cubic_st_12_end_10_it_161.pkl"
+            "build/cont_3dof_cubic_st_12_end_10_it_161.pkl",
+            "build/cont_3dof_cubic_st_11_end_1_it_405.pkl" # went back and forth
+        ]
+    elif torsional_spring == 0:
+        metadata_files = [
+            "build/cont_3dof_freeplay_st_6_end_20_it_284.pkl",
+            "build/cont_3dof_freeplay_st_6_end_1_it_808.pkl",
+            "build/cont_3dof_freeplay_st_15_end_20_it_157.pkl",
+            "build/cont_3dof_freeplay_st_15_end_1_it_495.pkl",
+            "build/cont_3dof_freeplay_st_11_end_20_it_752.pkl",
+            "build/cont_3dof_freeplay_st_11_end_9_it_85.pkl"
         ]
     
     metadatas = []

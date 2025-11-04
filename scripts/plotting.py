@@ -74,12 +74,14 @@ plotly_axes = {
     "linewidth": 1,
     "mirror": True,
     "ticks": "inside",
-    "ticklen": 8,
+    "ticklen": 9,
+    "minor_ticks": "inside",
+    "minor" : {"ticklen": 3, "showgrid": False},
     "tickwidth": 1,
     "tickcolor": "black"
 }
 
-def format_subplot(fig, row, col, xlabel, ylabel):
+def format_subplot(fig, row, col, xlabel, ylabel, ytickformat=".1e"):
     """Format a specific subplot with labels and grid"""
     fig.update_xaxes(
         title_text=xlabel,
@@ -92,7 +94,7 @@ def format_subplot(fig, row, col, xlabel, ylabel):
         title_text=ylabel,
         row=row,
         col=col,
-        tickformat=".1e",
+        tickformat=ytickformat,
         **plotly_axes
     )
 

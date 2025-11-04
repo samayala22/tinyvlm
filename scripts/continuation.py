@@ -295,7 +295,7 @@ def continuation(X0, motion, metadata: Metadata):
     X_old = X0.copy()
     z_ref = np.zeros_like(X0)
     z_ref[-1] = 1
-    ds_min = ds / 10.0
+    ds_min = ds / 100.0
     ds_max = ds * 10.0
 
     total_njev = 0
@@ -392,10 +392,10 @@ def continuation(X0, motion, metadata: Metadata):
             X_h = X[0:omega_idx:metadata.dims.n_d]
             A = np.sqrt(X_h[1::2]**2 + X_h[2::2]**2)
             rms_0 = np.sqrt(X_h[0]**2 + 0.5 * np.sum(A**2, axis=0))
-            print(f"rms_0: {rms_0:.6e}")
-            # if rms_0 < 1e-8 and iteration > 1:
-            #     print("Continuation reached trivial solution, stopping.")
-            #     break
+            # print(f"rms_0: {rms_0:.6e}")
+            if rms_0 < 1e-10 and iteration > 1:
+                print("Continuation reached trivial solution, stopping.")
+                break
 
     except KeyboardInterrupt:
         print("Continuation interrupted by user")
@@ -431,7 +431,7 @@ def create_unstable_mask(stable_mask):
             unstable_mask[i+1] = False
     return ~unstable_mask
 
-def filter_stable_mask(stable_mask):
+def filter_stable_mask(stable_mask, length=8):
     mask = stable_mask.copy()
     count = 0
     for i in range(1, len(mask)):
@@ -439,7 +439,7 @@ def filter_stable_mask(stable_mask):
             count = 1
         elif mask[i] == False and count > 0:
             count += 1
-        elif mask[i] == True and count > 0 and count < 5:
+        elif mask[i] == True and count > 0 and count < length:
             mask[i-count:i] = True
             count = 0
     return mask
@@ -495,7 +495,7 @@ def plot_hb_continuation(metadata_list, timeseries=None):
                     name = f"RMS",
                     legendgroup = "RMS",
                     mode = "lines",
-                    line = {"dash": "dash", "color": "#ef553b"},
+                    line = {"dash": "dot", "color": "#ef553b"},
                     showlegend = False
                 ),
                 row=1,
@@ -539,6 +539,24 @@ def plot_hb_continuation(metadata_list, timeseries=None):
         plot.format_subplot(fig, 1, 1, r"$\Large{U}$", r"$\Large{\mathrm{RMS}(x_{" + str(dof+1) + r"})}$")
         plot.fig_save(fig, filedir / f"{filename}_rms_{dof}", pdf=True)
 
+
+    # Frequency plot
+    fig = plot.fig_create_multi(1,1)
+    for i, md in enumerate(metadata_list):
+        fig.add_trace(
+            go.Scatter(
+                x = md.X[-1, :],
+                y = md.X[omega_idx, :],
+                name = f"Frequency {i+1}",
+                mode = "lines",
+                line = {"dash": "solid", "color": "#636efa"},
+                showlegend = False
+            ),
+            row=1,
+            col=1
+        )
+    plot.format_subplot(fig, 1, 1, r"$\Large{U}$", r"$\Large{\omega}$", ".1f")
+    plot.fig_save(fig, filedir / f"{filename}_frequency", pdf=True)
 
 def parser():
     parser = argparse.ArgumentParser()
