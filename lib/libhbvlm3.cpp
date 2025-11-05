@@ -413,7 +413,7 @@ void HBVLM::run(f64 t_start, f64 omega, const Vars& v, Assembly<f64>& assembly, 
         gamma_coeffs_v.reshape(gamma_coeffs_v.shape(0)*gamma_coeffs_v.shape(1)),
         hb_vlm_iter,
         100, // max iterations
-        1e-9, // tolerance
+        1e-12, // tolerance
         10 // history
     );
     

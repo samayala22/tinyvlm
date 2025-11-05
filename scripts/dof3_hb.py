@@ -120,7 +120,7 @@ if __name__ == "__main__":
     flutter_speed = 23.9
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
-    param_start = 6.0
+    param_start = 8.0
     param_end = 20.0
 
     v = dof3.Vars()
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     metadata.name = f"3dof_hbvlm_{torsional_spring_names[torsional_spring]}"
     metadata.param_start = param_start
     metadata.param_end = param_end
-    metadata.max_steps = 1 if INITIAL_ONLY else 10000
+    metadata.max_steps = 1 if INITIAL_ONLY else 5000
     metadata.scaling = True
     metadata.step_adapt = True
     metadata.ds = 0.02
@@ -202,21 +202,18 @@ if __name__ == "__main__":
     
     if helpers.getenv("PLOT"):
         X_mat = metadata.X
-        if X_mat.shape[1] == 1:
-            hb_sol_t, hb_sol0 = hb.to_timedomain(vec_t, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
-            aero_forces = system.aero_forces(sol.y)
-            fig = plot.create_dofs_figure(["Heave", "Pitch", "Control"])
-            dof3.plot_solution(fig, aero_forces, sol, v)
+        hb_sol_t, hb_sol0 = hb.to_timedomain(vec_t, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
+        aero_forces = system.aero_forces(sol.y)
+        fig = plot.create_dofs_figure(["Heave", "Pitch", "Control"])
+        dof3.plot_solution(fig, aero_forces, sol, v)
 
-            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[0, :], "HB-VLM", 1, 1, 3)
-            plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[1, :]), "HB-VLM", 3, 1, 3)
-            plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[2, :]), "HB-VLM", 5, 1, 3)
+        plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[0, :], "HB-VLM", 1, 1, 3)
+        plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[1, :]), "HB-VLM", 3, 1, 3)
+        plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[2, :]), "HB-VLM", 5, 1, 3)
 
-            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 1, 2, 3)
-            plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[4, :]), "HB-VLM", 3, 2, 3)
-            plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[5, :]), "HB-VLM", 5, 2, 3)
-            
-            dof3.format_plot(fig)
-            plot.fig_save(fig, f"build/3dof/hbvlm0", html=True, pdf=False)
-        else:
-            cont.plot_hb_continuation(metadata)
+        plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 1, 2, 3)
+        plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[4, :]), "HB-VLM", 3, 2, 3)
+        plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[5, :]), "HB-VLM", 5, 2, 3)
+        
+        dof3.format_plot(fig)
+        plot.fig_save(fig, f"build/3dof/hbvlm0", html=True, pdf=False)

@@ -355,6 +355,9 @@ def continuation(X0, motion, metadata: Metadata):
             X0 = Xtmp.copy()
             X = X0 * Dscale # unscaled X
             X_mat[:, iteration] = X
+            X_h = X[0:omega_idx:metadata.dims.n_d]
+            A = np.sqrt(X_h[1::2]**2 + X_h[2::2]**2)
+            rms_0 = np.sqrt(X_h[0]**2 + 0.5 * np.sum(A**2, axis=0))
 
             # Stability analysis
             is_stable, floquet_exponents = stability_analysis(J @ np.diag(1.0 / Dscale), motion, X[omega_idx], omega_idx, metadata.dims)
@@ -374,8 +377,8 @@ def continuation(X0, motion, metadata: Metadata):
                     if np.copysign(1.0, metadata.bifurcation_test[i, iteration-1]) != np.copysign(1.0, metadata.bifurcation_test[i, iteration]):
                         print(f"{name} bifurcation detected")
                         metadata.bifurcation[name].append(iteration-1)
-            
-            print(f"{iteration} | ds: {ds * Dscale[-1]:.4f}, param: {X[-1]:.3f}, omega: {X[omega_idx]:.3f}, stable: {is_stable}, nfev: {nfev}, njev: {njev}, timing: {timing:.2f}s")
+
+            print(f"{iteration} | ds: {ds * Dscale[-1]:.4f}, param: {X[-1]:.3f}, omega: {X[omega_idx]:.3f}, rms0: {rms_0:.3e}, stable: {is_stable}, nfev: {nfev}, njev: {njev}, timing: {timing:.2f}s")
 
             if metadata.step_adapt:
                 n_f = nfev + J.shape[1] * njev
@@ -389,10 +392,6 @@ def continuation(X0, motion, metadata: Metadata):
                 print("Continuation reached the end")
                 break
                 
-            X_h = X[0:omega_idx:metadata.dims.n_d]
-            A = np.sqrt(X_h[1::2]**2 + X_h[2::2]**2)
-            rms_0 = np.sqrt(X_h[0]**2 + 0.5 * np.sum(A**2, axis=0))
-            # print(f"rms_0: {rms_0:.6e}")
             if rms_0 < 1e-10 and iteration > 1:
                 print("Continuation reached trivial solution, stopping.")
                 break
