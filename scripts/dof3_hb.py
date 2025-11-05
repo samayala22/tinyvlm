@@ -105,6 +105,49 @@ def create_motion_system() -> System:
     
     return System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
 
+import pathlib 
+import plotly.graph_objects as go
+def plot_hb_continuation2(theodorsen_metadata_list, hbvlm_metadata_list):
+    filename = "cont_3dof_hbvlm_theodorsen_comparison"
+    filedir = pathlib.Path(f"build/continuation/{filename}")
+    filedir.mkdir(parents=True, exist_ok=True)
+    dash = ["solid", "dot"]
+    colors = ["#636efa", "#ef553b"]
+    megalist = [theodorsen_metadata_list, hbvlm_metadata_list]
+    labels = ["HB-Theodorsen", "HB-VLM"]
+    dofs = 3
+
+
+    for dof in range(dofs):
+        fig = plot.fig_create_multi(1,1)
+        for k in range(2):
+            metadata_list = megalist[k]
+            n = len(metadata_list)
+            omega_idx = metadata_list[0].dims.n_u - metadata_list[0].X.shape[0]
+
+            for i, md in enumerate(metadata_list):
+                true_dof = dof if md.dims.n_d == 3 else dof + 3
+                X_h = md.X[true_dof:omega_idx:md.dims.n_d, :]
+                A = np.sqrt(X_h[1::2, :]**2 + X_h[2::2, :]**2)
+                rms = np.sqrt(X_h[0, :]**2 + 0.5 * np.sum(A**2, axis=0))
+
+                fig.add_trace(
+                    go.Scatter(
+                        x = md.X[-1, :],
+                        y = rms,
+                        name = labels[k],
+                        mode = "lines",
+                        line = {"dash": dash[k], "color": colors[k]},
+                        showlegend = True if i == 0 else False
+                    ),
+                    row=1,
+                    col=1
+                )
+
+        plot.format_subplot(fig, 1, 1, r"$\Large{U}$", r"$\Large{\mathrm{RMS}(x_{" + str(dof+1) + r"})}$")
+        plot.fig_save(fig, filedir / f"{filename}_rms_{dof}", pdf=True)
+
+
 if __name__ == "__main__":
     torsional_spring = 1
     torsional_spring_names = ["freeplay", "cubic", "linear"]
@@ -198,9 +241,8 @@ if __name__ == "__main__":
     motion = create_motion_system()
     if not helpers.getenv("POST"):
         metadata = cont.continuation(X0, motion, metadata)
-        # exit(0)
     
-    if helpers.getenv("PLOT"):
+    if helpers.getenv("PLOT") and not helpers.getenv("POST"):
         X_mat = metadata.X
         hb_sol_t, hb_sol0 = hb.to_timedomain(vec_t, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
         aero_forces = system.aero_forces(sol.y)
@@ -217,3 +259,33 @@ if __name__ == "__main__":
         
         dof3.format_plot(fig)
         plot.fig_save(fig, f"build/3dof/hbvlm0", html=True, pdf=False)
+
+    if not helpers.getenv("POST"):
+        exit(0)
+    if torsional_spring == 1:
+        theodorsen_metadata_files = [
+            "build/cont_3dof_cubic_st_6_end_20_it_285.pkl",
+            "build/cont_3dof_cubic_st_6_end_1_it_326.pkl",
+            "build/cont_3dof_cubic_st_12_end_20_it_212.pkl",
+            "build/cont_3dof_cubic_st_12_end_10_it_161.pkl",
+            "build/cont_3dof_cubic_st_11_end_1_it_405.pkl" # went back and forth
+        ]
+        hbvlm_metadata_files = [
+            # "build/cont_3dof_hbvlm_cubic_st_8_end_20_it_192.pkl",
+            "build/cont_3dof_hbvlm_cubic_st_6_end_20_it_695.pkl"
+        ]
+    elif torsional_spring == 0:
+        theodorsen_metadata_files = [
+            "build/cont_3dof_freeplay_st_6_end_20_it_284.pkl",
+            "build/cont_3dof_freeplay_st_6_end_1_it_808.pkl",
+            "build/cont_3dof_freeplay_st_15_end_20_it_157.pkl",
+            "build/cont_3dof_freeplay_st_15_end_1_it_495.pkl",
+            "build/cont_3dof_freeplay_st_11_end_20_it_752.pkl",
+            "build/cont_3dof_freeplay_st_11_end_9_it_85.pkl"
+        ]
+        hbvlm_metadata_files = []
+    
+    plot_hb_continuation2(
+        [cont.load_metadata(f) for f in theodorsen_metadata_files],
+        [cont.load_metadata(f) for f in hbvlm_metadata_files]
+    )

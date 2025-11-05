@@ -11,7 +11,7 @@ import finite_diff as fd
 import plotting as plot
 
 BETA_NL_DAMPING = False
-INITIAL_ONLY = False
+INITIAL_ONLY = True
  
 def nonlinear_damping(A, omega):
     """
@@ -203,8 +203,8 @@ if __name__ == "__main__":
     flutter_speed = 23.9
     # param_start = flutter_speed * 0.3
     # param_end = flutter_speed * 0.6
-    param_start = 11.0
-    param_end = 1.0
+    param_start = 8.0
+    param_end = 20.0
 
     v = dof3.Vars()
     v.a = -0.5 
@@ -240,7 +240,7 @@ if __name__ == "__main__":
     # Independent params
     dims = hb.Dims(
         n_d=8,          # number of degrees of freedom
-        n_h=10          # number of harmonics
+        n_h=5          # number of harmonics
     ) 
 
     # Time integration
@@ -279,24 +279,23 @@ if __name__ == "__main__":
     motion = create_motion_system()
     if not helpers.getenv("POST"):
         metadata = cont.continuation(X0, motion, metadata)
-        exit(0)
     
     if helpers.getenv("PLOT"):
         X_mat = metadata.X
-        if X_mat.shape[1] == 1:
-            hb_sol_t, hb_sol0 = hb.to_timedomain(vec_t, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
-            aero_forces = system.aero_forces(sol.y)
-            fig = plot.create_dofs_figure(["Heave", "Pitch", "Control"])
-            dof3.plot_solution(fig, aero_forces, sol, v)
+        hb_sol_t, hb_sol0 = hb.to_timedomain(vec_t, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
+        aero_forces = system.aero_forces(sol.y)
+        fig = plot.create_dofs_figure(["Heave", "Pitch", "Control"])
+        dof3.plot_solution(fig, aero_forces, sol, v)
 
-            plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 1, 1, 3)
-            plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[4, :]), "HB-VLM", 3, 1, 3)
-            plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[5, :]), "HB-VLM", 5, 1, 3)
+        plot.add_data_and_psd(fig, hb_sol_t, hb_sol0[3, :], "HB-VLM", 1, 1, 3)
+        plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[4, :]), "HB-VLM", 3, 1, 3)
+        plot.add_data_and_psd(fig, hb_sol_t, np.degrees(hb_sol0[5, :]), "HB-VLM", 5, 1, 3)
 
-            dof3.format_plot(fig)
-            plot.fig_save(fig, f"build/3dof/hbvlm0")
-        else:
-            cont.plot_hb_continuation([metadata])
+        dof3.format_plot(fig)
+        plot.fig_save(fig, f"build/3dof/hbvlm0", html=True, pdf=False)
+
+    if not helpers.getenv("POST"):
+        exit(0)
 
     rms_samples = 20
     rms_param = np.linspace(5.0, 20.0, rms_samples)

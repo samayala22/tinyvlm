@@ -42,6 +42,12 @@ def metadatas_filename(mds: list):
 def metadata_filename(md):
     return f"cont_{md.name}_st_{int(md.param_start)}_end_{int(md.param_end)}_it_{md.X.shape[1]}"
 
+def load_metadata(filepath):
+    with open(filepath, "rb") as f:
+        metadata = pickle.load(f)
+    print(f"Loaded: {filepath}")
+    return metadata
+
 @dataclass
 class System:
     """
