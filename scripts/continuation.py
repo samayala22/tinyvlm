@@ -416,9 +416,9 @@ def continuation(X0, motion, metadata: Metadata):
     print(f"Total njev: {total_njev}")
 
     filename = f"build/{metadata_filename(metadata)}.pkl"
-    print(f"Continuation data saved to {filename}")
     with open(f"{filename}", 'wb') as f:
         pickle.dump(metadata, f)
+    print(f"Continuation data saved to {filename}")
 
     return metadata
 

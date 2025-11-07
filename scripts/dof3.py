@@ -330,7 +330,7 @@ if __name__ == "__main__":
     # U_vec = [12.63158]
     # U_vec = [12.36842] # Non symmetric 2 period LCO
     # U_vec = [12.75168] # Bifuracation reports many points ?
-    U_vec = [11.0]
+    U_vec = [16.0]
     # U_vec = np.linspace(0.2, 22.5, 100)
     # U_vec = np.linspace(10.0, 12.0, 50)
 
@@ -375,13 +375,13 @@ if __name__ == "__main__":
 
         dt = 0.1
         # t_final = 5.0 * v.omega_alpha
-        t_final = 1000.0
+        t_final = 100.0
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
         # hd, ad, bd, h, a, b, x1, x2
         y0 = np.zeros(8, dtype=np.float64)
-        y0[3] = 0.1 / v.b # h
+        y0[3] = 0.01 / v.b # h
 
         system = AeroelasticSystem(v, coupled_sim, torsional_func)
         ivp = system.coupled_system if coupled_sim else system.uncoupled_system

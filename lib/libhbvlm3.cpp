@@ -36,6 +36,8 @@ namespace py = pybind11;
         std::exit(1); \
     }
 
+#define EXACT 1
+
 struct Vars {
     f64 a; // Dimensionless distance between mid-chord and EA (-0.5)
     f64 b; // Semi-chord (0.127 m)
@@ -578,7 +580,7 @@ PYBIND11_MODULE(libhbvlm3, m) {
             v.zeta_beta = 0.0115f;
             v.U = U;
 
-            const f64 cycles = 3.0f;
+            const f64 cycles = 2.0f;
             const f64 t_final = cycles * 2.0f * PI_f / omega;
             const i32 H = self.m_harmonics;
 

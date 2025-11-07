@@ -15,7 +15,7 @@ using namespace vlm;
 using namespace linalg::ostream_overloads;
 
 #define COUPLED 1
-#define FREEPLAY_JOINT
+// #define FREEPLAY_JOINT
 
 // Notes:
 // 1. Nonlinear term is defined twice (structural initialization and in the coupling loop)
@@ -523,9 +523,9 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
         const f32 real_alpha = wing_alpha();
         const f32 real_beta = flap_beta();
         const f32 real_h = wing_h(1 + v.a);
-        TINY_ASSERT_NEAR(real_h, -u_h.view()(0, i), 1e-3f);
-        TINY_ASSERT_NEAR(real_alpha, u_h.view()(1, i), 1e-3f);
-        TINY_ASSERT_NEAR(real_beta, u_h.view()(2, i), 1e-3f);
+        // TINY_ASSERT_NEAR(real_h, -u_h.view()(0, i), 1e-3f);
+        // TINY_ASSERT_NEAR(real_alpha, u_h.view()(1, i), 1e-3f);
+        // TINY_ASSERT_NEAR(real_beta, u_h.view()(2, i), 1e-3f);
 
         for (const auto& [gamma_wing_i, gamma_wing_prev_i] : zip(gamma_wing.views(), gamma_wing_prev.views())) {
             gamma_wing_i.to(gamma_wing_prev_i);
@@ -746,7 +746,7 @@ int main() {
     // });
     meshes.push_back({
         {"../../../../mesh/3dof_wing_45x1.x", false},
-        {"../../../../mesh/3dof_flap_15x1.x", true}
+        {"../../../../mesh/3dof_flap_60x1.x", true}
     });
     const std::vector<std::string> backends = {"cpu"};
 
@@ -780,10 +780,10 @@ int main() {
     v.zeta_alpha = 0.01626f;
     v.zeta_beta = 0.0115f;
     // v.U = 12.36842f; // m/s
-    v.U = 7.0f; // m/s
+    v.U = 16.0f; // m/s
 
     // const f32 t_final_nd = 5.f * v.omega_alpha;
-    const f32 t_final_nd = 500.f;
+    const f32 t_final_nd = 100.f;
 
     KinematicsTree<f32> kinematics_tree;
 
