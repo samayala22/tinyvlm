@@ -15,7 +15,7 @@ def main(args):
 
     new_filename = cont.metadata_filename(new_md)
 
-    with open(f"build/{new_filename}", 'wb') as f:
+    with open(f"build/{new_filename}.pkl", 'wb') as f:
         pickle.dump(new_md, f)
     print(f"Truncated metadata saved to build/{new_filename}")
 

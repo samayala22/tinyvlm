@@ -19,6 +19,7 @@
 #include "vlm_utils.hpp"
 #include "vlm_io.hpp"
 #include "vlm_solvers.hpp"
+#include "vlm_executor.hpp"
 
 using namespace vlm;
 using namespace linalg::ostream_overloads;
@@ -174,6 +175,7 @@ HBVLM::HBVLM(const std::string& backend_name, const std::vector<std::string>& me
 }
 
 void HBVLM::init(i32 harmonics, f64 scaling) {
+    // vlm::Executor::instance(8); // set number of threads
     m_harmonics = harmonics;
     m_coeffs = 2*harmonics+1;
     alloc_buffers();

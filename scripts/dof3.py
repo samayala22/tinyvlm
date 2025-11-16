@@ -287,7 +287,7 @@ def format_plot(fig):
     plot.format_subplot(fig, 6, 3, "", "")
 
 if __name__ == "__main__":
-    torsional_spring = 1
+    torsional_spring = 0
     torsional_spring_names = ["freeplay", "cubic", "linear"]
 
     if (torsional_spring == 0):
@@ -323,7 +323,8 @@ if __name__ == "__main__":
     #     zeta_beta = 0.0133,
     #     U = 23.72 # m/s
     # )
-
+    
+    U_flutter = 23.9
     # U_vec = [0.49 * 23.9]
     # Interesting velocities:
     # U_vec = [12.7778] # LCO transition
@@ -332,13 +333,14 @@ if __name__ == "__main__":
     # U_vec = [12.75168] # Bifuracation reports many points ?
     U_vec = [16.0]
     # U_vec = np.linspace(0.2, 22.5, 100)
-    # U_vec = np.linspace(10.0, 12.0, 50)
+    # U_vec = np.linspace(1.0, 22.0, 50)
 
     peaks_data = [[], [], []]
     peaks_U = [[], [], []]
+    rms_data = np.zeros((3, len(U_vec)))
     coupled_sim = True
 
-    for U in tqdm(U_vec): 
+    for U_idx, U in tqdm(enumerate(U_vec), total=len(U_vec)): 
         # Conner
         v = Vars()
         v.a = -0.5 
@@ -375,7 +377,7 @@ if __name__ == "__main__":
 
         dt = 0.1
         # t_final = 5.0 * v.omega_alpha
-        t_final = 100.0
+        t_final = 1000.0
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
@@ -398,7 +400,7 @@ if __name__ == "__main__":
             fig = plot.create_dofs_figure(["Wing Heave", "Wing Pitch", "Flap Pitch"])
             plot_solution(fig, aero_forces, mono, v)
 
-            uvlm_file = Path("build/windows/x64/release/3dof.txt")
+            uvlm_file = Path(f"build/windows/x64/release/3dof_{int(U)}.txt")
             if uvlm_file.exists() and helpers.getenv("UVLM"):
                 with open(uvlm_file, "r") as f:
                     uvlm_tsteps = int(f.readline())
@@ -455,6 +457,7 @@ if __name__ == "__main__":
         else:
             slice_start = int(0.9 * n)
             peaks_slice = mono.y[3:6, slice_start:]
+            rms_data[:, U_idx] = np.sqrt(np.mean(peaks_slice**2, axis=1))
             
             for i in range(3):
                 peaks_data[i].append(peaks_slice[i, plot.find_peak_idx(peaks_slice[i, :])])
@@ -462,6 +465,7 @@ if __name__ == "__main__":
 
     if len(U_vec) > 1:
         names = ["Heave", "Pitch", "Control"]
+        # Bifurcation plots
         fig = plot.fig_create_multi(3, 1)
         for i in range(3):
             fig.add_trace(

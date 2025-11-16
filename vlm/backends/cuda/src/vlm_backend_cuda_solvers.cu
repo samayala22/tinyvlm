@@ -44,6 +44,10 @@ class CUDA_LU final : public LU {
         void init(const TensorView2fD& A) override;
         void factorize(const TensorView2fD& A) override;
         void solve(const TensorView2fD& A, const TensorView2fD& x) override;
+
+        void init(const TensorView2dD& A) override;
+        void factorize(const TensorView2dD& A) override;
+        void solve(const TensorView2dD& A, const TensorView2dD& x) override;
     private:
         Tensor<i32, 1, Location::Device> ipiv{m_memory.get()};
         Tensor<f32, 1, Location::Device> buffer{m_memory.get()};
@@ -104,14 +108,11 @@ class CUDA_LSQ final : public LSQ {
             m_memory->free(Location::Device, m_workspace);
         };
         
-        void init(
-            const TensorView2fD& A,
-            const TensorView2fD& B
-        ) override;
-        void solve(
-            const TensorView2fD& A,
-            const TensorView2fD& B
-        ) override;
+        void init(const TensorView2fD& A, const TensorView2fD& B) override;
+        void solve(const TensorView2fD& A, const TensorView2fD& B) override;
+
+        void init(const TensorView2dD& A, const TensorView2dD& B) override {};
+        void solve(const TensorView2dD& A, const TensorView2dD& B) override {};
 
     protected:
         Tensor2fD m_X{m_memory.get()};

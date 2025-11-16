@@ -1,7 +1,6 @@
 #pragma once 
 
 #include "vlm_backend.hpp" // base class
-#include "vlm_data.hpp" // TODO: remove ?
 #include "vlm_memory.hpp" // View, Layouts
 
 namespace vlm {
@@ -10,58 +9,32 @@ class BackendCUDA final : public Backend {
     public:
         BackendCUDA();
         ~BackendCUDA() override;
-        void lhs_assemble(TensorView2fD& lhs, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wing, const MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) override;
-        void rhs_assemble_velocities(TensorView1fD& rhs, const MultiTensorView3fD& normals, const MultiTensorView3fD& velocities) override;
-        void rhs_assemble_wake_influence(TensorView1fD& rhs, const MultiTensorView2fD& gamma_wake, const MultiTensorView3fD& colloc, const MultiTensorView3fD& normals, const MultiTensorView3fD& verts_wake, const std::vector<bool>& lifting, i32 iteration) override;
-        void displace_wake_rollup(MultiTensorView3fD& wake_rollup, const MultiTensorView3fD& verts_wake, const MultiTensorView3fD& verts_wing, const MultiTensorView2fD& gamma_wing, const MultiTensorView2fD& gamma_wake, f32 dt, i32 iteration) override;
 
-        // TODO: deprecate
-        f32 coeff_steady_cl_single(const TensorView3fD& verts_wing, const TensorView2fD& gamma_delta, const FlowData& flow, f32 area) override;
-        f32 coeff_steady_cd_single(const TensorView3fD& verts_wake, const TensorView2fD& gamma_wake, const FlowData& flow, f32 area) override;
+        void lhs_assemble(TV2f& lhs, MTV3f& colloc, MTV3f& normals, MTV3f& verts_wing, MTV3f& verts_wake, std::vector<i32>& condition, i32 iteration) override;
+        void rhs_assemble_velocities(TV1f& rhs, MTV3f& normals, MTV3f& velocities) override;
+        void rhs_assemble_wake_influence(TV1f& rhs, MTV2f& gamma_wake, MTV3f& colloc, MTV3f& normals, MTV3f& verts_wake, std::vector<bool>& lifting, i32 iteration) override;
+        void forces_steady(TV3f& verts_wing, TV2f& gamma_delta, TV3f& velocities, TV3f& forces) override;
+        void forces_unsteady(TV3f& verts_wing, TV2f& gamma_delta, TV2f& dgamma_dt, TV3f& velocities, TV2f& areas, TV3f& normals, TV3f& forces) override;
+        f32 coeff_cl(TV3f& forces, f32x3& lift_axis, f32x3& freestream, f32 rho, f32 area) override;
+        f32x3 coeff_cm(TV3f& forces, TV3f& verts_wing, f32x3& ref_pt, f32x3& freestream, f32 rho, f32 area, f32 mac) override;
+        void mesh_metrics(f32 alpha_rad, MTV3f& verts_wing, MTV3f& colloc, MTV3f& normals, MTV2f& areas) override;
+        f32 mesh_mac(TV3f& verts_wing, TV2f& areas) override;
+        void gamma_wake_from_coeffs(TV2f& gamma_wake, TV2f& gamma_coeffs, i32 harmonics, f32 tn, f32 omega, f32 dt, i64 iteration) override;
+        f32 sum(TV1f& tensor) override;
+        f32 sum(TV2f& tensor) override;
 
-        void forces_unsteady(
-            const TensorView3fD& verts_wing,
-            const TensorView2fD& gamma_delta,
-            const TensorView2fD& gamma,
-            const TensorView2fD& gamma_prev,
-            const TensorView3fD& velocities,
-            const TensorView2fD& areas,
-            const TensorView3fD& normals,
-            const TensorView3fD& forces,
-            f32 dt
-        ) override;
-        f32 coeff_cl(
-            const TensorView3fD& forces,
-            const linalg::float3& lift_axis,
-            const linalg::float3& freestream,
-            const f32 rho,
-            const f32 area
-        ) override;
-        linalg::float3 coeff_cm(
-            const TensorView3fD& forces,
-            const TensorView3fD& verts_wing,
-            const linalg::float3& ref_pt,
-            const linalg::float3& freestream,
-            const f32 rho,
-            const f32 area,
-            const f32 mac
-        ) override;
-
-        void mesh_metrics(const f32 alpha_rad, const MultiTensorView3fD& verts_wing, MultiTensorView3fD& colloc, MultiTensorView3fD& normals, MultiTensorView2fD& areas) override;
-        f32 mesh_mac(const TensorView3fD& verts_wing, const TensorView2fD& areas) override;
-
-        void gamma_wake_from_coeffs(
-            const TensorView2fD& gamma_wake,
-            const TensorView2fD& gamma_coeffs,
-            i32 harmonics,
-            f32 tn,
-            f32 omega,
-            f32 dt,
-            i64 iteration
-        ) override;
-
-        f32 sum(const TensorView1fD& tensor) override;
-        f32 sum(const TensorView2fD& tensor) override;
+        void lhs_assemble(TV2d& lhs, MTV3d& colloc, MTV3d& normals, MTV3d& verts_wing, MTV3d& verts_wake, std::vector<i32>& condition, i32 iteration) override;
+        void rhs_assemble_velocities(TV1d& rhs, MTV3d& normals, MTV3d& velocities) override;
+        void rhs_assemble_wake_influence(TV1d& rhs, MTV2d& gamma_wake, MTV3d& colloc, MTV3d& normals, MTV3d& verts_wake, std::vector<bool>& lifting, i32 iteration) override;
+        void forces_steady(TV3d& verts_wing, TV2d& gamma_delta, TV3d& velocities, TV3d& forces) override;
+        void forces_unsteady(TV3d& verts_wing, TV2d& gamma_delta, TV2d& dgamma_dt, TV3d& velocities, TV2d& areas, TV3d& normals, TV3d& forces) override;
+        f64 coeff_cl(TV3d& forces, f64x3& lift_axis, f64x3& freestream, f64 rho, f64 area) override;
+        f64x3 coeff_cm(TV3d& forces, TV3d& verts_wing, f64x3& ref_pt, f64x3& freestream, f64 rho, f64 area, f64 mac) override;
+        void mesh_metrics(f64 alpha_rad, MTV3d& verts_wing, MTV3d& colloc, MTV3d& normals, MTV2d& areas) override;
+        f64 mesh_mac(TV3d& verts_wing, TV2d& areas) override;
+        void gamma_wake_from_coeffs(TV2d& gamma_wake, TV2d& gamma_coeffs, i32 harmonics, f64 tn, f64 omega, f64 dt, i64 iteration) override;
+        f64 sum(TV1d& tensor) override;
+        f64 sum(TV2d& tensor) override;
 
         std::unique_ptr<Memory> create_memory_manager() override;
         // std::unique_ptr<Kernels> create_kernels() override;

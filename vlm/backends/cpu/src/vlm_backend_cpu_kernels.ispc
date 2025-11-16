@@ -154,8 +154,15 @@ export void kernel_wake_influence(uniform f32* uniform colloc, uniform i64 collo
 
     float<3> induced_vel = {0.0f, 0.0f, 0.0f};
 
+    i64 end;
+    if (iteration > 5000) {
+        end = v_m - 1 - iteration + 5000;
+    } else {
+        end = v_m - 1;
+    }
+
     // Wake influence on wing
-    for (i64 i = v_m - iteration - 1; i < v_m-1; i++) {
+    for (i64 i = v_m - iteration - 1; i < end; i++) {
         foreach(j = 0 ... v_n - 1) {
             const i64 v0 = (i+0) * v_n + j;
             const i64 v1 = (i+0) * v_n + j + 1;

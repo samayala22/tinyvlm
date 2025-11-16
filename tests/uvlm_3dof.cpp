@@ -15,7 +15,7 @@ using namespace vlm;
 using namespace linalg::ostream_overloads;
 
 #define COUPLED 1
-// #define FREEPLAY_JOINT
+#define FREEPLAY_JOINT
 
 // Notes:
 // 1. Nonlinear term is defined twice (structural initialization and in the coupling loop)
@@ -494,7 +494,7 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
     solver->solve(lhs.view(), rhs.view().reshape(rhs.size(), 1));
     update_wake_and_gamma(0);
 
-    std::ofstream data_3dof("3dof.txt");
+    std::ofstream data_3dof("3dof_" + std::to_string((i32)v.U) + ".txt");
     data_3dof << t_steps-2 << "\n";
 
     // Transient simulation loop
@@ -537,7 +537,7 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
         i32 iteration = 0;
         const i32 max_iter = 50;
 
-        while (backend->blas->norm(du_k.view()) > 2.f * EPS_f) {
+        while (backend->blas->norm(du_k.view()) > 1e-5) {
             du.view().to(du_k.view());
             integrator.step(
                 M_d.view(),
@@ -737,7 +737,7 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
     } // simulation loop
 }
 
-int main() {
+int main(int argc, char** argv) {
     // vlm::Executor::instance(1);
     std::vector<std::vector<std::pair<std::string, bool>>> meshes;
     // meshes.push_back({
@@ -746,7 +746,7 @@ int main() {
     // });
     meshes.push_back({
         {"../../../../mesh/3dof_wing_45x1.x", false},
-        {"../../../../mesh/3dof_flap_60x1.x", true}
+        {"../../../../mesh/3dof_flap_15x1.x", true}
     });
     const std::vector<std::string> backends = {"cpu"};
 
@@ -780,10 +780,15 @@ int main() {
     v.zeta_alpha = 0.01626f;
     v.zeta_beta = 0.0115f;
     // v.U = 12.36842f; // m/s
-    v.U = 16.0f; // m/s
+
+    if (argc == 2) {
+        v.U = (f32)std::atof(argv[1]);
+    } else {
+        v.U = 16.0f;
+    }
 
     // const f32 t_final_nd = 5.f * v.omega_alpha;
-    const f32 t_final_nd = 100.f;
+    const f32 t_final_nd = 1000.f;
 
     KinematicsTree<f32> kinematics_tree;
 

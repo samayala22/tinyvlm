@@ -10,6 +10,8 @@ else:
 import numpy as np
 import scipy as sp
 from dataclasses import dataclass
+import pathlib 
+import plotly.graph_objects as go
 
 # local imports
 import dof3
@@ -104,10 +106,8 @@ def create_motion_system() -> System:
     
     return System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
 
-import pathlib 
-import plotly.graph_objects as go
 def plot_hb_continuation2(theodorsen_metadata_list, hbvlm_metadata_list):
-    filename = "cont_3dof_hbvlm_theodorsen_comparison"
+    filename = f"cont_3dof_{torsional_spring_names[torsional_spring]}_hbvlm_theodorsen_comparison"
     filedir = pathlib.Path(f"build/continuation/{filename}")
     filedir.mkdir(parents=True, exist_ok=True)
     dash = ["solid", "dot"]
@@ -116,12 +116,10 @@ def plot_hb_continuation2(theodorsen_metadata_list, hbvlm_metadata_list):
     labels = ["HB-Theodorsen", "HB-VLM"]
     dofs = 3
 
-
     for dof in range(dofs):
         fig = plot.fig_create_multi(1,1)
         for k in range(2):
             metadata_list = megalist[k]
-            n = len(metadata_list)
             omega_idx = metadata_list[0].dims.n_u - metadata_list[0].X.shape[0]
 
             for i, md in enumerate(metadata_list):
@@ -146,9 +144,43 @@ def plot_hb_continuation2(theodorsen_metadata_list, hbvlm_metadata_list):
         plot.format_subplot(fig, 1, 1, r"$\Large{U}$", r"$\Large{\mathrm{RMS}(x_{" + str(dof+1) + r"})}$")
         plot.fig_save(fig, filedir / f"{filename}_rms_{dof}", pdf=True)
 
+    
+    # Frequency plot
+    fig = plot.fig_create_multi(1,1)
+    for k in range(2):
+        metadata_list = megalist[k]
+        omega_idx = metadata_list[0].dims.n_u - metadata_list[0].X.shape[0]
+        for i, md in enumerate(metadata_list):
+            fig.add_trace(
+                go.Scatter(
+                    x = md.X[-1, :],
+                    y = md.X[omega_idx, :],
+                    name = labels[k],
+                    mode = "lines",
+                    line = {"dash": dash[k], "color": colors[k]},
+                    showlegend = True if i == 0 else False
+                ),
+                row=1,
+                col=1
+            )
+    plot.format_subplot(fig, 1, 1, r"$\Large{U}$", r"$\Large{\omega}$", ".1f")
+    plot.fig_save(fig, filedir / f"{filename}_frequency", pdf=True)
+
 
 if __name__ == "__main__":
-    torsional_spring = 1
+    argv = sys.argv
+    if len(argv) == 4:
+        torsional_spring = int(argv[1])
+        param_start = float(argv[2])
+        param_end = float(argv[3])
+    else:
+        torsional_spring = 0
+        flutter_speed = 23.9
+        # param_start = flutter_speed * 0.3
+        # param_end = flutter_speed * 0.6
+        param_start = 6.0
+        param_end = 20.0
+    
     torsional_spring_names = ["freeplay", "cubic", "linear"]
 
     if (torsional_spring == 0):
@@ -157,18 +189,6 @@ if __name__ == "__main__":
         torsional_func = dof3.alpha_poly
     else:
         torsional_func = dof3.alpha_linear
-
-    # Params
-    flutter_speed = 23.9
-    # param_start = flutter_speed * 0.3
-    # param_end = flutter_speed * 0.6
-    param_start = 10.5
-    param_end = 20.0
-
-    argv = sys.argv
-    if len(argv) == 3:
-        param_start = float(argv[1])
-        param_end = float(argv[2])
 
     print(f"Param start: {param_start}, Param end: {param_end}")
 
@@ -229,10 +249,16 @@ if __name__ == "__main__":
     X0[-2] = omega0
     X0[-1] = param_start
 
-    # X0[2] = 5e-3
-    # X0[3] = 5e-3
-    # X0[-2] = 0.085
-    # X0[-1] = param_start
+    # temporary
+    if torsional_spring == 1:
+        md = cont.load_metadata("build/cont_3dof_hbvlm_cubic_st_9_end_20_it_166.pkl")
+        idx = np.argmax(md.X[-1, :])
+        X0 = md.X[:, idx]
+        X0[-1] = param_start
+
+    if torsional_spring == 0:
+        md = cont.load_metadata("build/cont_3dof_hbvlm_freeplay_st_6_end_20_it_111.pkl")
+        X0 = md.X[:, -1]
 
     metadata = cont.Metadata()
     metadata.name = f"3dof_hbvlm_{torsional_spring_names[torsional_spring]}"
@@ -296,7 +322,9 @@ if __name__ == "__main__":
             "build/cont_3dof_hbvlm_cubic_st_12_end_10_it_168.pkl",
             "build/cont_3dof_hbvlm_cubic_st_6_end_10_it_66.pkl",
             "build/cont_3dof_hbvlm_cubic_st_6_end_1_it_75",
-            "build/cont_3dof_hbvlm_cubic_st_9_end_20_it_166.pkl"
+            "build/cont_3dof_hbvlm_cubic_st_9_end_20_it_166.pkl",
+            "build/cont_3dof_hbvlm_cubic_st_14_end_20_it_20.pkl",
+            "build/cont_3dof_hbvlm_cubic_st_14_end_12_it_47.pkl"
         ]
     elif torsional_spring == 0:
         theodorsen_metadata_files = [
@@ -307,7 +335,12 @@ if __name__ == "__main__":
             "build/cont_3dof_freeplay_st_11_end_20_it_752.pkl",
             "build/cont_3dof_freeplay_st_11_end_9_it_85.pkl"
         ]
-        hbvlm_metadata_files = []
+        hbvlm_metadata_files = [
+            "build/cont_3dof_hbvlm_freeplay_st_6_end_20_it_111.pkl",
+            "build/cont_3dof_hbvlm_freeplay_st_6_end_1_it_215.pkl",
+            "build/cont_3dof_hbvlm_freeplay_st_15_end_20_it_45.pkl",
+            "build/cont_3dof_hbvlm_freeplay_st_15_end_1_it_93.pkl"
+        ]
     
     plot_hb_continuation2(
         [cont.load_metadata(f) for f in theodorsen_metadata_files],

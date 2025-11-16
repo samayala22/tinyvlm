@@ -47,6 +47,13 @@ class CUDA_BLAS final : public BLAS {
         void axpy(const f32 alpha, const TensorView2fD& x, const TensorView2fD& y) override;
         void scal(const f32 alpha, const TensorView1fD& x) override;
         f32 norm(const TensorView1fD& x) override;
+
+        void gemv(const f64 alpha, const TensorView2dD& A, const TensorView1dD& x, const f64 beta, const TensorView1dD& y, Trans trans = Trans::No) override;
+        void gemm(const f64 alpha, const TensorView2dD& A, const TensorView2dD& B, const f64 beta, const TensorView2dD& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
+        void axpy(const f64 alpha, const TensorView1dD& x, const TensorView1dD& y) override;
+        void axpy(const f64 alpha, const TensorView2dD& x, const TensorView2dD& y) override; // Y = alpha *  overrideY
+        void scal(const f64 alpha, const TensorView1dD& x) override;
+        f64 norm(const TensorView1dD& x) override;
 };
 
 std::unique_ptr<BLAS> BackendCUDA::create_blas() { return std::make_unique<CUDA_BLAS>(); }

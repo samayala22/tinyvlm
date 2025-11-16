@@ -9,3 +9,5 @@ target("backend-cuda")
     add_includedirs("../../include")
     add_files("src/*.cu")
     add_includedirs("include", {public = true})
+    add_cugencodes("native") -- otherwise will complain about missing ptx target
+    add_links("cublas", "cudart", "cusolver") -- why is this needed?
