@@ -741,14 +741,14 @@ void UVLM_3DOF::run(const Vars& v, f32 t_final_nd) {
 int main(int argc, char** argv) {
     vlm::Executor::instance(8);
     std::vector<std::vector<std::pair<std::string, bool>>> meshes;
-    // meshes.push_back({
-    //     {"../../../../mesh/3dof_wing_9x5.x", false},
-    //     {"../../../../mesh/3dof_flap_3x5.x", true}
-    // });
     meshes.push_back({
-        {"../../../../mesh/3dof_wing_45x1.x", false},
-        {"../../../../mesh/3dof_flap_15x1.x", true}
+        {"../../../../mesh/3dof_wing_9x5.x", false},
+        {"../../../../mesh/3dof_flap_3x5.x", true}
     });
+    // meshes.push_back({
+    //     {"../../../../mesh/3dof_wing_45x1.x", false},
+    //     {"../../../../mesh/3dof_flap_15x1.x", true}
+    // });
     const std::vector<std::string> backends = {"cpu"};
 
     auto simulations = tiny::make_combination(meshes, backends);
@@ -789,7 +789,7 @@ int main(int argc, char** argv) {
     }
 
     // const f32 t_final_nd = 5.f * v.omega_alpha;
-    const f32 t_final_nd = 1000.f;
+    const f32 t_final_nd = 100.f;
 
     KinematicsTree<f32> kinematics_tree;
 
