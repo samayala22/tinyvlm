@@ -269,42 +269,6 @@ __global__ void __launch_bounds__(X*Y*Z) kernel_mesh_metrics(i64 m, i64 n, f32* 
     colloc[2*colloc_ld + lidx] = colloc_pt.z;
 }
 
-template<i32 X, i32 Y = 1, i32 Z = 1>
-__global__ void __launch_bounds__(X*Y*Z) kernel_coeff_steady_cl_single(i64 m, i64 n, const f32* verts_wing, i64 verts_wing_surface_ld, i64 verts_wing_ld, const f32* gamma_delta, i64 gamma_delta_surface_ld, float3 freestream, float3 lift_axis, f32 rho, f32* cl) {
-    static_assert(X == 32);
-
-    cg::thread_block block = cg::this_thread_block();
-
-    const i64 j = blockIdx.x * blockDim.x + threadIdx.x;
-    const i64 i = blockIdx.y * blockDim.y + threadIdx.y;
-    const i32 wid = block.thread_rank() / warpSize;
-    const i32 lane = block.thread_rank() % warpSize;
-
-    __shared__ f32 shared[32];
-
-    if (wid == 0) shared[lane] = 0.0f;
-    block.sync();
-
-    if (j >= n || i >= m) return;
-
-    const i64 v0 = (i+0) * verts_wing_surface_ld + j;
-    const i64 v1 = (i+0) * verts_wing_surface_ld + j + 1;
-    const float3 vertex0{verts_wing[0*verts_wing_ld + v0], verts_wing[1*verts_wing_ld + v0], verts_wing[2*verts_wing_ld + v0]}; // upper left
-    const float3 vertex1{verts_wing[0*verts_wing_ld + v1], verts_wing[1*verts_wing_ld + v1], verts_wing[2*verts_wing_ld + v1]}; // upper right
-    // Leading edge vector pointing outward from wing root
-    const float3 dl = vertex1 - vertex0;
-    const float3 force = cross(freestream, dl) * rho * gamma_delta[i * gamma_delta_surface_ld + j];
-
-    f32 cl_local = dot(force, lift_axis);
-
-    atomicAdd(cl, cl_local); // naive reduction (works but 50x slower)
-    // cl_local = warp_reduce_sum(cl_local); // reduce of the warp
-    // if (lane == 0) shared[wid] = cl_local; // write to smem
-    // block.sync(); // wait for threads to write to smem
-    // if (wid == 0) cl_local = warp_reduce_sum(shared[lane]);// reduce of the block
-    // if (block.thread_rank() == 0) atomicAdd(cl, cl_local); // reduce of the grid
-}
-
 inline __device__ float3 quad_normal(const float3 v0, const float3 v1, const float3 v2, const float3 v3) {
     return normalize(cross(v3-v1, v2-v0));
 }
@@ -411,13 +375,11 @@ __global__ void kernel_forces_unsteady(
     DataDims dims,
     f32* verts_wing,
     f32* gamma_delta,
-    f32* gamma,
-    f32* gamma_prev,
+    f32* gamma_dt,
     f32* velocities,
     f32* areas,
     f32* normals,
-    f32* forces,
-    f32 dt
+    f32* forces
 )
 {
     const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // ns
@@ -452,11 +414,10 @@ __global__ void kernel_forces_unsteady(
     };
 
     float3 force{0.f, 0.f, 0.f};
-    const f32 gamma_dt = (gamma[j * dims.panel_stride_1 + i] - gamma_prev[j * dims.panel_stride_1 + i]) / dt; // backward difference
 
     // Joukowski method (https://arc.aiaa.org/doi/10.2514/1.J052136)
     force += rho * gamma_delta[j * dims.panel_stride_1 + i] * cross(V, vertex1 - vertex0); // steady contribution
-    force += rho * gamma_dt * areas[j * dims.panel_stride_1 + i] * normal; // unsteady contribution
+    force += rho * gamma_dt[j * dims.panel_stride_1 + i] * areas[j * dims.panel_stride_1 + i] * normal; // unsteady contribution
     
     forces[0 * dims.panel_stride_2 + j * dims.panel_stride_1 + i] = force.x;
     forces[1 * dims.panel_stride_2 + j * dims.panel_stride_1 + i] = force.y;
@@ -575,6 +536,37 @@ __global__ void kernel_mac(
     mac_local = warp_reduce_sum(mac_local);
     if (lane == 0) {
         atomicAdd(mac, mac_local);
+    }
+}
+
+__global__ void kernel_gamma_wake_from_coeffs(
+    DataDims dims, 
+    f32* gamma_wake,
+    f32* gamma_coeffs,
+    i64 gamma_coeffs_ld,
+    i32 harmonics,
+    f32 tn,
+    f32 omega,
+    f32 dt
+)
+{
+    const cg::thread_block block = cg::this_thread_block();
+    const i64 lane = block.thread_rank() % warpSize;
+    const i64 i = blockIdx.x * blockDim.x + threadIdx.x; // ns
+    const i64 j = blockIdx.y * blockDim.y + threadIdx.y; // nc
+
+    const i32 unknowns = 2 * harmonics + 1;
+    const f32 sqrt_unknowns = 1.f / sqrt((f32)(unknowns));
+    const f32 sqrt_unknowns_2 = sqrt(2.f) * sqrt_unknowns;
+
+    if (i < dims.panel_shape_0 && j < dims.panel_shape_1) {
+        f32 gamma_w = gamma_coeffs[i + 0 * gamma_coeffs_ld] * sqrt_unknowns;
+        for (i64 h = 0; h < harmonics; h++) {
+            const f32 omega_k = omega * (f32)(h+1);
+            gamma_w += gamma_coeffs[i + (2*h + 1) * gamma_coeffs_ld] * cos(omega_k * (tn - (f32)(j + 1)*dt)) * sqrt_unknowns_2;
+            gamma_w += gamma_coeffs[i + (2*h + 2) * gamma_coeffs_ld] * sin(omega_k * (tn - (f32)(j + 1)*dt)) * sqrt_unknowns_2;
+        }
+        gamma_wake[i + j * dims.panel_stride_1] = gamma_w;
     }
 }
 

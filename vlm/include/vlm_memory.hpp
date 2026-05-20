@@ -10,6 +10,7 @@
 #include <ostream>
 
 #include "vlm_types.hpp"
+#include "tinytest.hpp"
 
 namespace vlm {
 
@@ -123,7 +124,7 @@ class TensorView {
                 contiguous *= shape(i);
             }
 
-            assert(contiguous % new_shape[0] == 0);
+            TINY_ASSERT_EQ(contiguous % new_shape[0], 0);
             contiguous /= new_shape[0];
             new_strides[0] = stride(0);
 
@@ -135,7 +136,7 @@ class TensorView {
                     ++i;
                 }
 
-                assert(contiguous % ns == 0);
+                TINY_ASSERT_EQ(contiguous % ns, 0);
                 contiguous /= ns;
                 
                 if (contiguous * ns == shape(i-1)) {
@@ -328,8 +329,18 @@ public:
     inline i64 size() const { return m_view.size(); }
     inline i64 size_bytes() const { return m_view.size_bytes(); }
     
-    inline const View& view() const { return m_view; }
-    inline View& view() { return m_view; }
+    inline const View& view() const {
+        if (m_view.ptr() == nullptr) {
+            TINY_ABORT("Tensor::view() called on uninitialized tensor");
+        }
+        return m_view;
+    }
+    inline View& view() {
+        if (m_view.ptr() == nullptr) {
+            TINY_ABORT("Tensor::view() called on uninitialized tensor");
+        }
+        return m_view;
+    }
 
     inline T& operator[](i64 i) { return ptr()[i]; }
 };
@@ -360,18 +371,74 @@ class MultiTensor {
         std::vector<TensorView<T, Dim, L>> m_tensor_views;
 };
 
-template<Location L> using Tensor1D = Tensor<f32, 1, L>;
-template<Location L> using Tensor2D = Tensor<f32, 2, L>;
-template<Location L> using Tensor3D = Tensor<f32, 3, L>;
-template<Location L> using TensorView1D = TensorView<f32, 1, L>;
-template<Location L> using TensorView2D = TensorView<f32, 2, L>;
-template<Location L> using TensorView3D = TensorView<f32, 3, L>;
-template<Location L> using MultiTensor1D = MultiTensor<f32, 1, L>;
-template<Location L> using MultiTensor2D = MultiTensor<f32, 2, L>;
-template<Location L> using MultiTensor3D = MultiTensor<f32, 3, L>;
+
 template<typename T, int Dim, Location L> using MultiTensorView = std::vector<TensorView<T, Dim, L>>;
-template<Location L> using MultiTensorView1D = MultiTensorView<f32, 1, L>;
-template<Location L> using MultiTensorView2D = MultiTensorView<f32, 2, L>;
-template<Location L> using MultiTensorView3D = MultiTensorView<f32, 3, L>;
+
+// SINGLE PRECISION
+
+using Tensor1fD = Tensor<f32, 1, Location::Device>;
+using Tensor2fD = Tensor<f32, 2, Location::Device>;
+using Tensor3fD = Tensor<f32, 3, Location::Device>;
+
+using Tensor1fH = Tensor<f32, 1, Location::Host>;
+using Tensor2fH = Tensor<f32, 2, Location::Host>;
+using Tensor3fH = Tensor<f32, 3, Location::Host>;
+
+using TensorView1fD = TensorView<f32, 1, Location::Device>;
+using TensorView2fD = TensorView<f32, 2, Location::Device>;
+using TensorView3fD = TensorView<f32, 3, Location::Device>;
+
+using TensorView1fH = TensorView<f32, 1, Location::Host>;
+using TensorView2fH = TensorView<f32, 2, Location::Host>;
+using TensorView3fH = TensorView<f32, 3, Location::Host>;
+
+using MultiTensor1fD = MultiTensor<f32, 1, Location::Device>;
+using MultiTensor2fD = MultiTensor<f32, 2, Location::Device>;
+using MultiTensor3fD = MultiTensor<f32, 3, Location::Device>;
+
+using MultiTensor1fH = MultiTensor<f32, 1, Location::Host>;
+using MultiTensor2fH = MultiTensor<f32, 2, Location::Host>;
+using MultiTensor3fH = MultiTensor<f32, 3, Location::Host>;
+
+using MultiTensorView1fD = MultiTensorView<f32, 1, Location::Device>;
+using MultiTensorView2fD = MultiTensorView<f32, 2, Location::Device>;
+using MultiTensorView3fD = MultiTensorView<f32, 3, Location::Device>;
+
+using MultiTensorView1fH = MultiTensorView<f32, 1, Location::Host>;
+using MultiTensorView2fH = MultiTensorView<f32, 2, Location::Host>;
+using MultiTensorView3fH = MultiTensorView<f32, 3, Location::Host>;
+
+// DOUBLE PRECISION 
+using Tensor1dD = Tensor<f64, 1, Location::Device>;
+using Tensor2dD = Tensor<f64, 2, Location::Device>;
+using Tensor3dD = Tensor<f64, 3, Location::Device>;
+
+using Tensor1dH = Tensor<f64, 1, Location::Host>;
+using Tensor2dH = Tensor<f64, 2, Location::Host>;
+using Tensor3dH = Tensor<f64, 3, Location::Host>;
+
+using TensorView1dD = TensorView<f64, 1, Location::Device>;
+using TensorView2dD = TensorView<f64, 2, Location::Device>;
+using TensorView3dD = TensorView<f64, 3, Location::Device>;
+
+using TensorView1dH = TensorView<f64, 1, Location::Host>;
+using TensorView2dH = TensorView<f64, 2, Location::Host>;
+using TensorView3dH = TensorView<f64, 3, Location::Host>;
+
+using MultiTensor1dD = MultiTensor<f64, 1, Location::Device>;
+using MultiTensor2dD = MultiTensor<f64, 2, Location::Device>;
+using MultiTensor3dD = MultiTensor<f64, 3, Location::Device>;
+
+using MultiTensor1dH = MultiTensor<f64, 1, Location::Host>;
+using MultiTensor2dH = MultiTensor<f64, 2, Location::Host>;
+using MultiTensor3dH = MultiTensor<f64, 3, Location::Host>;
+
+using MultiTensorView1dD = MultiTensorView<f64, 1, Location::Device>;
+using MultiTensorView2dD = MultiTensorView<f64, 2, Location::Device>;
+using MultiTensorView3dD = MultiTensorView<f64, 3, Location::Device>;
+
+using MultiTensorView1dH = MultiTensorView<f64, 1, Location::Host>;
+using MultiTensorView2dH = MultiTensorView<f64, 2, Location::Host>;
+using MultiTensorView3dH = MultiTensorView<f64, 3, Location::Host>;
 
 } // namespace vlm

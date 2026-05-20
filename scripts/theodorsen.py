@@ -1,8 +1,17 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import scipy.integrate as spi
 import scipy.special as scsp
 from pathlib import Path
+import plotting as plot
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    'font.size': 20,
+    "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amsfonts}\usepackage{amssymb}"
+})
 
 EPS_sqrt_f = np.sqrt(1.19209e-07)
 
@@ -27,7 +36,7 @@ def uvlm_data(filename):
     uvlm_t = []
     uvlm_z = []
     uvlm_alpha = []
-    filepath = f"build/windows/x64/debug/{filename}.txt"
+    filepath = f"build/windows/x64/release/{filename}.txt"
     if Path(filepath).exists():
         with open(filepath, "r") as f:
             k = float(f.readline()) # get reduced frequency of the simulation
@@ -62,19 +71,13 @@ a = ar / c # full span
 pitch_axis = -0.5 # quarter chord
 
 # Theodorsen numerical simulation param
-cycles = 5 # number of periods
+cycles = 3 # number of periods
 nb_pts = 1000
 cycle_idx = int((1 - 1 / cycles) * nb_pts - 1)
 
-fig, axs = plt.subplot_mosaic(
-    [["time"], ["heave"]],  # Disposition des graphiques
-    constrained_layout=True,  # Demander à Matplotlib d'essayer d'optimiser la disposition des graphiques pour que les axes ne se superposent pas
-    figsize=(11, 6),  # Ajuster la taille de la figure (x,y)
-)
-
 files = [
     "cl_data_CPU",
-    "cl_data_CUDA",
+    # "cl_data_CUDA",
     # "cl_data_025",
     # "cl_data_050",
     # "cl_data_075",
@@ -88,7 +91,7 @@ for file in files:
     vec_t = np.linspace(0, t_final, nb_pts)
 
     n = len(uvlm_t) # number of time steps
-    uvlm_cycle_idx = int((1 - 1 / cycles) * n - 1)
+    uvlm_cycle_idx = int((1 - 1 / cycles) * n - 2)
 
     # sudden acceleration
     # def pitch(t): return np.radians(5)
@@ -99,7 +102,7 @@ for file in files:
     # def heave(t): return -0.1 * np.sin(omega * t)
 
     # pure pitching
-    def pitch(t): return np.radians(3.0 * np.sin(omega * t))
+    def pitch(t): return np.radians(1.0) *(np.sin(omega * t) + 2.0 * np.sin(3.0 * omega * t))
     def heave(t): return 0
 
     def w(s: float): 
@@ -123,40 +126,40 @@ for file in files:
     h = np.array([-heave(ti) / c for ti in vec_t])
     angle = np.array([np.degrees(pitch(ti)) for ti in vec_t])
 
-    plotc, = axs["time"].plot(vec_t, cl_theo, label=f"Theodorsen (k={k})")
-    axs["heave"].plot(angle[cycle_idx:], cl_theo[cycle_idx:], label=f"Theodorsen (k={k})")
+    fig_section = plot.fig_create_multi(1,1)
+    fig_section.add_trace(
+        go.Scatter(
+            x = angle[cycle_idx:],
+            y = cl_theo[cycle_idx:],
+            mode='lines',
+            line = {"dash": "solid", "width": 5, "simplify": False, "color": '#0066CC'},
+            name="Theodorsen"
+        )
+    )
+    fig_section.add_trace(
+        go.Scatter(
+            x = np.degrees(uvlm_alpha[uvlm_cycle_idx:]),
+            y = uvlm_cl[uvlm_cycle_idx:],
+            # mode='markers',
+            # marker= {"size": 6, "color": "white", "line": {"width": 1, "color": "red"}},
+            mode='lines',
+            line = {"dash": "dash", "width": 5, "simplify": False, "color": "#FF8400"},
+            name="UVLM"
+        )
+    )
+    plot.format_subplot(fig_section, 1, 1, r"$\Large{\alpha} [\mathrm{deg}]$", r"$\Large{\mathrm{C_L}}$")
+    plot.fig_save(fig_section, f"build/uvlm_{str(k).replace('.','')}")
 
-    axs["time"].scatter(uvlm_t, uvlm_cl, label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
-    axs["heave"].scatter(np.degrees(uvlm_alpha[uvlm_cycle_idx:]), uvlm_cl[uvlm_cycle_idx:], label=f"UVLM (k={k})", facecolors='none', edgecolors=plotc.get_color(), s=20)
+
+    # plt.Figure(figsize=(4/3*500, 500))
+    # plt.plot(angle[cycle_idx:], cl_theo[cycle_idx:], linewidth=4, label="Theodorsen")
+    # plt.plot(np.degrees(uvlm_alpha[uvlm_cycle_idx:]), uvlm_cl[uvlm_cycle_idx:], linestyle=":", linewidth=4, label="UVLM")
+    # plt.xlabel(r"$\alpha [\mathrm{deg}]$")
+    # plt.ylabel(r"$\mathrm{CL}$")
+    # plt.legend()
+    # plt.savefig(f"build/uvlm_{str(k).replace('.','')}_mpl.pdf", bbox_inches='tight')
 
     analytical_cl = np.array([np.interp(ut, vec_t, cl_theo) for ut in uvlm_t[uvlm_cycle_idx:]])
     difference = uvlm_cl[uvlm_cycle_idx:] - analytical_cl
     error = np.sqrt(np.dot(difference, difference) / (n-uvlm_cycle_idx)) 
     print(f"Freq: {k}, Error: {100 * error / np.max(np.abs(analytical_cl)):.3f}%", )
-
-# axs["time"].plot(vec_t, [0.548311] * len(vec_t), label="VLM (alpha=5)")
-
-# jl_t = []
-# jl_cl = []
-# with open("build/windows/x64/release/jl_cl.txt", "r") as f:
-#     for line in f:
-#         t, cl = line.split()
-#         jl_t.append(float(t))
-#         jl_cl.append(float(cl))
-
-# axs["time"].plot(jl_t, jl_cl, label="VortexLattice.jl")
-
-axs["time"].set_xlabel('t')
-axs["time"].set_ylabel('CL')
-axs["time"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-axs["time"].legend()
-
-axs["heave"].set_xlabel('h/c')
-axs["heave"].set_ylabel('CL')
-axs["heave"].grid(True, which='both', linestyle=':', linewidth=1.0, color='gray')
-axs["heave"].legend()
-
-plt.suptitle("Verification of UVLM with Theodorsen harmonic heave motion")
-# plt.suptitle("Verification of UVLM with sudden acceleration motion")
-
-plt.show()

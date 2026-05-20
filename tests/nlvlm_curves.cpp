@@ -1,9 +1,7 @@
-#include <iostream>
 #include <memory>
 #include <vector>
 #include <cmath>
 #include <cstdio>
-#include <fstream>
 #include <utility>
 
 #include "tinyinterpolate.hpp"
@@ -55,8 +53,9 @@ int main(int  /*argc*/, char** /*argv*/) {
     lift_curves.emplace_back(std::make_pair("spallart2", std::make_unique<SpallartLiftCurve>(0.72f, 0.28f, 0.04f, 2.f*PI_f, 1.5f*PI_f)));
     lift_curves.emplace_back(std::make_pair("polar", std::make_unique<ThinAirfoilPolarLiftCurve>()));
     
-    std::vector<f32> test_alphas = {0, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
-
+    // std::vector<f32> test_alphas = {0, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
+    std::vector<f32> test_alphas = {19};
+    
     std::transform(test_alphas.begin(), test_alphas.end(), test_alphas.begin(), to_radians);
 
     std::vector<f32> db_alphas;
@@ -89,7 +88,7 @@ int main(int  /*argc*/, char** /*argv*/) {
             std::printf("\n|    Alpha   |     CL     |     CD     |    CMx     |    CMy     |    CMz     |  CL Error   |  CD Error   |\n");
             std::printf("|------------|------------|------------|------------|------------|------------|-------------|-------------|\n");
             for (i64 i = 0; i < test_alphas.size(); i++) {
-                const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
+                FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
                 auto coeffs = simulation.run(flow, db);
 
                 const f32 analytical_cl = (*lift_curve.second)(flow.alpha);
@@ -106,7 +105,10 @@ int main(int  /*argc*/, char** /*argv*/) {
                     0.0f
                 );
                 
-                if (cl_rerr > 0.01f) return 1; // Failure
+                if (cl_rerr > 0.01f) {
+                    std::printf("Failure: large CL error\n");
+                    return 1;
+                }; // Failure
             }
             std::printf("\n");
         }

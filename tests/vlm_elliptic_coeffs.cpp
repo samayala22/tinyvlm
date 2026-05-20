@@ -1,6 +1,5 @@
 #include <vector>
 #include <string>
-#include <fstream>
 #include <cmath>
 #include <cstdio>
 
@@ -12,24 +11,24 @@
 using namespace vlm;
 
 // area of whole wing
-float s_ref(float a, float b) {
+static float s_ref(float a, float b) {
     return 0.5f * vlm::PI_f * a * b;
 }
 
 // wing aspect ratio
-float aspect_ratio(float a, float b) {
+static float aspect_ratio(float a, float b) {
     return (2*b)*(2*b) / s_ref(a, b);
 }
 
-float compute_analytical_cl(float alpha, float a, float b) {
+static float compute_analytical_cl(float alpha, float a, float b) {
     return 2.0f * vlm::PI_f * alpha / (1.0f + 2.0f/aspect_ratio(a, b));
 }
 
-float compute_analytical_cd(float cl, float a, float b) {
+static float compute_analytical_cd(float cl, float a, float b) {
     return cl*cl / (vlm::PI_f * aspect_ratio(a, b));
 }
 
-float compute_analytical_gamma(float y, float a, float b, float alpha) {
+static float compute_analytical_gamma(float y, float a, float b, float alpha) {
     const float gamma0 = compute_analytical_cl(alpha, a, b) * 1.0f * s_ref(a, b) / (vlm::PI_f * b);
     const float ratio = y / b;
     return gamma0 * std::sqrt(1.0f - ratio*ratio);
@@ -53,14 +52,15 @@ int main(int  /*argc*/, char ** /*argv*/) {
         std::printf("|------------|------------|------------|------------|------------|------------|-------------|-------------|\n");
 
         for (i64 i = 0; i < test_alphas.size(); i++) {
-            const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
+            FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
             const auto coeffs = simulation.run(flow);
             const f32 analytical_cl = compute_analytical_cl(flow.alpha, a, b);
             const f32 analytical_cd = compute_analytical_cd(analytical_cl, a, b);
             const f32 cl_aerr = std::abs(coeffs.cl - analytical_cl);
             const f32 cl_rerr = analytical_cl < EPS_f ? 0.f : cl_aerr / analytical_cl;
-            const f32 cd_aerr = std::abs(coeffs.cd - analytical_cd);
-            const f32 cd_rerr = analytical_cd < EPS_f ? 0.f : cd_aerr / analytical_cd;
+            // const f32 cd_aerr = std::abs(coeffs.cd - analytical_cd);
+            // const f32 cd_rerr = analytical_cd < EPS_f ? 0.f : cd_aerr / analytical_cd;
+            f32 cd_rerr = 0.0f; // CD is not computed anymore by the VLM
             std::printf("| %10.1f | %10.6f | %10.7f | %10.6f | %10.6f | %10.6f | %10.3f%% | %10.3f%% |\n",
                 to_degrees(flow.alpha),
                 coeffs.cl,

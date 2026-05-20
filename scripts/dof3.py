@@ -1,51 +1,57 @@
+from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from dataclasses import dataclass
-import scipy as sp
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
-from pathlib import Path
+import plotting as plot
+import helpers
 
 @dataclass
 class Vars:
-    a: float = 0.0  # Dimensionless distance between mid-chord and EA (-0.5)
-    b: float = 0.0  # Semi-chord (0.127 m)
-    c: float = 0.0  # Dimensionless distance between flap hinge and mid-chord (0.5)
-    I_alpha: float = 0.0  # Mass moment of inertia of the wing-flap about wing EA per unit span
-    I_beta: float = 0.0  # Mass moment of inertia of the flap about flap hinge line
-    k_h: float = 0.0  # linear structural stiffness coefficient of plunging
-    k_alpha: float = 0.0  # Linear structural stiffness coefficient of plunging
-    k_beta: float = 0.0  # Linear structural stiffness coefficient of pitching
-    m: float = 0.0  # Mass of wing-aileron per span
-    m_t: float = 0.0  # Mass of wing-aileron and the supports per span
-    r_alpha: float = 0.0  # dimensionless radius of gyration around elastic axis
-    r_beta: float = 0.0  # dimensionless radius of gyration around flap hinge axis
-    S_alpha: float = 0.0  # static mass moment of wing-flap about wing EA per unit span
-    S_beta: float = 0.0  # static mass moment of flap about flap hinge line per unit span
-    x_alpha: float = 0.0  # dimensionless distance between airfoil EA and the center of gravity
-    x_beta: float = 0.0  # dimensionless distance between flap center of gravity and flap hinge axis
-    omega_h: float = 0.0  # uncoupled plunge natural frequency
-    omega_alpha: float = 0.0  # uncoupled pitch natural frequency
-    omega_beta: float = 0.0  # uncoupled flap natural frequency
-    rho: float = 0.0  # fluid density
-    zeta_h: float = 0.0  # plunge damping ratio
-    zeta_alpha: float = 0.0  # pitch damping ratio
-    zeta_beta: float = 0.0  # flap damping ratio
-    U: float = 0.0  # velocity
-    sigma: float = 0.0
-    V: float = 0.0
-    mu: float = 0.0
+    a: float = -0.5# Dimensionless distance between mid-chord and elastic axis (EA)
+    b: float = 0.127# Semi-chord [m]
+    c: float = 0.5# Dimensionless distance between flap hinge and mid-chord (0.5)
+    I_alpha: float = 0.01347# Mass moment of inertia of the wing-flap about wing EA per unit span [kgm]
+    I_beta: float = 0.0003264# Mass moment of inertia of the flap about flap hinge line per unit span [kgm]
+    k_h: float = 2818.8# linear structural stiffness coefficient of plunging [kg/ms^2]
+    k_alpha: float = 37.34# Linear structural stiffness coefficient of plunging [kg/ms^2]
+    k_beta: float = 3.9# Linear structural stiffness coefficient of pitching [kg/ms^2]
+    m: float = 1.5666# Mass of wing-aileron per span [kg/m]
+    m_t: float = 3.39298# Mass of wing-aileron and the supports per span [kg/m]
+    r_alpha: float = 0.7321# dimensionless radius of gyration around elastic axis
+    r_beta: float = 0.1140# dimensionless radius of gyration around flap hinge axis
+    S_alpha: float = 0.08587# static mass moment of wing-flap about wing EA per unit span [kg]
+    S_beta: float = 0.00395# static mass moment of flap about flap hinge line per unit span [kg]
+    x_alpha: float = 0.4340# dimensionless distance between airfoil EA and the center of gravity
+    x_beta: float = 0.02# dimensionless distance between flap center of gravity and flap hinge axis
+    omega_h: float = 42.5352# uncoupled plunge natural frequency [hz]
+    omega_alpha: float = 52.6506# uncoupled pitch natural frequency [hz]
+    omega_beta: float = 109.3093# uncoupled flap natural frequency [hz]
+    rho: float = 1.225# fluid density [kg/m^3]
+    zeta_h: float = 0.0113# plunge damping ratio
+    zeta_alpha: float = 0.01626# pitch damping ratio
+    zeta_beta: float = 0.0115# flap damping ratio
+    U: float = 0.0 # dimensional freestream velocity [m/s]
+    sigma: float = 0.0 # ratio of the uncoupled plunge and pitch natural frequencies
+    V: float = 0.0 # dimensionless freestream velocity 
+    mu: float = 0.0 # mass ratio of the wing-flap mass
 
-# def alpha_freeplay(alpha, M0 = 0.0, Mf = 0.0, delta = np.radians(4.24), a_f = np.radians(-2.12)):
-#     if (alpha < a_f):
-#         return M0 + alpha - a_f
-#     elif (alpha <= (a_f + delta)):
-#         return M0 + Mf * (alpha - a_f)
-#     else: # alpha > a_F + delta
-#         return M0 + alpha - a_f + delta * (Mf - 1)
+def update_vars(v: Vars, U: float):
+    v.U = U
+    v.sigma = v.omega_h / v.omega_alpha
+    v.V = v.U / (v.b * v.omega_alpha)
+    v.mu = v.m / (np.pi * v.rho * v.b**2)
+    return v
 
 def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=np.radians(4.24), a_f=np.radians(-2.12)):
+    """
+    alpha: dof angle
+    M0: preload
+    Mf: freeplay region stiffness
+    delta: freeplay region width
+    a_f: freeplay region start angle
+    """
     return np.where(
         alpha < a_f,
         M0 + alpha - a_f,
@@ -56,17 +62,21 @@ def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=np.radians(4.24), a_f=np.radians
         )
     )
 
+def alpha_poly(alpha, c2 = 0.0, c3 = 1.0):
+    return c2 * alpha**2 + c3 * alpha**3
+
 def alpha_linear(alpha):
     return alpha
 
 class AeroelasticSystem:
-    def __init__(self, v: Vars, coupled=True):
+    def __init__(self, v: Vars, coupled=True, beta_func=alpha_freeplay):
         self.M_s = np.zeros((3,3)) # dimensionless structural intertia matrix
         self.D_s = np.zeros((3,3)) # dimensionless structural damping matrix
         self.K_s = np.zeros((3,3)) # dimensionless structural stiffness matrix
 
         self.v = v
         self.coupled = coupled
+        self.beta_func = beta_func
 
         self.M_s[0, 0] = v.m_t / v.m
         self.M_s[0, 1] = v.x_alpha
@@ -84,7 +94,7 @@ class AeroelasticSystem:
         self.D_s[2, 2] = (v.omega_beta / v.omega_alpha) * v.r_beta**2 * v.zeta_beta
         self.D_s = 2 * v.mu * self.D_s
 
-        # K_s[0, 0] = sigma**2 * (1 + gamma * y[3]**2)
+        self.K_s[0, 0] = v.sigma**2
         self.K_s[1, 1] = v.r_alpha**2
         # K_s[2, 2] = (v.omega_beta / v.omega_alpha)**2 * v.r_beta**2
         self.K_s = v.mu * self.K_s
@@ -182,11 +192,12 @@ class AeroelasticSystem:
         self.L_lambda = v.V * self.L_lambda
 
     def yn_func(self, y_: np.ndarray):
-        y = y_.reshape(y_.shape[0], -1)
+        y = y_.reshape(y_.shape[0], -1) # so that it works for both y_ as vector or matrix
         yn = np.zeros_like(y)
-        gamma = 0 # Cubic factor (0 for linear spring)
-        yn[0, :] = self.v.mu * y[3, :] * self.v.sigma**2 * (1 + gamma * y[3, :]**2)
-        yn[2, :] = self.v.mu * ((self.v.omega_beta / self.v.omega_alpha)**2 * self.v.r_beta**2) * alpha_freeplay(y[5, :])      
+        # alpha_s = self.v.mu * self.v.r_alpha**2 * alpha_poly(y[4, :], c3=1.0)
+        # alpha_d = 2.0 * self.v.mu * self.v.r_alpha**2 * self.v.zeta_alpha * alpha_poly(y[1], c2=1.0, c3=0.0)
+        # yn[1, :] = alpha_s + alpha_d
+        yn[2, :] = self.v.mu * ((self.v.omega_beta / self.v.omega_alpha)**2 * self.v.r_beta**2) * self.beta_func(y[5, :])      
         return yn.reshape(y_.shape)
 
     def uncoupled_system(self, t, y: np.ndarray):
@@ -251,85 +262,47 @@ class AeroelasticSystem:
         # assert np.isclose(force_structure, forces_aero).all()
         return forces_aero
     
-def compute_psd(t, data):
-    """Compute PSD with consistent parameters"""
-    sampling_rate = 1 / np.mean(np.diff(t))
-    frequencies, psd = sp.signal.welch(
-        data, 
-        fs=sampling_rate,
-        nperseg=len(t)//2
-    )
-    mask = frequencies < 1.0
-    psd_db = 10 * np.log10(psd)
+def plot_solution(fig, aero_forces, mono, v):
+    plot.add_data_and_psd(fig, mono.t, mono.y[3, :], "Theodorsen", 1, 1) # h
+    plot.add_data_and_psd(fig, mono.t, mono.y[0, :], "Theodorsen", 1, 2) # dh
+    plot.add_data_and_psd(fig, mono.t, aero_forces[0, :]/v.mu, "Theodorsen", 1, 3) # force h
+    plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1) # alpha
+    plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2) # dalpha
+    plot.add_data_and_psd(fig, mono.t, aero_forces[1, :]/v.mu, "Theodorsen", 3, 3) # force alpha
+    plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1) # beta
+    plot.add_data_and_psd(fig, mono.t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
+    plot.add_data_and_psd(fig, mono.t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
 
-    return frequencies[mask], psd[mask]
-    # return frequencies, psd
-
-def add_data_and_psd(fig, time, data, name, row_data, col_data, mode='lines', marker_size=4):
-    """Add time series and PSD data to plotly figure"""
-    # Add time series data
-    fig.add_trace(
-        go.Scattergl(
-            x=time, 
-            y=data, 
-            name=name,
-            mode=mode,
-            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            showlegend=True
-        ),
-        row=row_data, 
-        col=col_data
-    )
-
-    # Plot peaks and valleys
-    # peaks_idx0, _ = sp.signal.find_peaks(data) # peaks
-    # peaks_idx1, _ = sp.signal.find_peaks(-data) # valleys
-    # peaks_idx = np.concatenate((peaks_idx0, peaks_idx1))
-    # fig.add_trace(
-    #     go.Scattergl(
-    #         x=time[peaks_idx], 
-    #         y=data[peaks_idx],
-    #         mode='markers',
-    #     ),
-    #     row=row_data, 
-    #     col=col_data
-    # )
-    
-    # Add PSD data
-    frequencies, psd = compute_psd(time, data)
-    fig.add_trace(
-        go.Scattergl(
-            x=frequencies,
-            y=psd,
-            name=name,
-            mode=mode,
-            marker=dict(size=marker_size) if mode in ['markers', 'lines+markers'] else None,
-            showlegend=True
-        ),
-        row=row_data+1,
-        col=col_data
-    )
-
-def format_subplot(fig, row, col, xlabel, ylabel):
-    """Format a specific subplot with labels and grid"""
-    fig.update_xaxes(
-        title_text=xlabel,
-        row=row,
-        col=col,
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(128, 128, 128, 0.2)',
-    )
-    fig.update_yaxes(
-        title_text=ylabel,
-        row=row,
-        col=col,
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(128, 128, 128, 0.2)',
-    )
+def format_plot(fig):
+    plot.format_subplot(fig, 1, 1, "", r"$\Large{h}$")
+    plot.format_subplot(fig, 1, 2, "", r"$\Large{\dot{h}}$")
+    plot.format_subplot(fig, 1, 3, "", "Lift")
+    plot.format_subplot(fig, 2, 1, "", "")
+    plot.format_subplot(fig, 2, 2, "", "")
+    plot.format_subplot(fig, 2, 3, "", "")
+    plot.format_subplot(fig, 3, 1, "", r"$\Large{\alpha}$")
+    plot.format_subplot(fig, 3, 2, "", r"$\Large{\dot{\alpha}}$")
+    plot.format_subplot(fig, 3, 3, "", "Moment")
+    plot.format_subplot(fig, 4, 1, "", "")
+    plot.format_subplot(fig, 4, 2, "", "")
+    plot.format_subplot(fig, 4, 3, "", "")
+    plot.format_subplot(fig, 5, 1, "", r"$\Large{\beta}$")
+    plot.format_subplot(fig, 5, 2, "", r"$\Large{\dot{\beta}}$")
+    plot.format_subplot(fig, 5, 3, "", "Moment")
+    plot.format_subplot(fig, 6, 1, "", "")
+    plot.format_subplot(fig, 6, 2, "", "")
+    plot.format_subplot(fig, 6, 3, "", "")
 
 if __name__ == "__main__":
+    torsional_spring = 0
+    torsional_spring_names = ["freeplay", "cubic", "linear"]
+
+    if (torsional_spring == 0):
+        torsional_func = alpha_freeplay
+    elif (torsional_spring == 1):
+        torsional_func = alpha_poly
+    else:
+        torsional_func = alpha_linear
     # Darabseh 2022
     # v = Vars(
     #     a = -0.5,
@@ -357,21 +330,24 @@ if __name__ == "__main__":
     #     zeta_beta = 0.0133,
     #     U = 23.72 # m/s
     # )
-
+    
+    U_flutter = 23.9
     # U_vec = [0.49 * 23.9]
     # Interesting velocities:
     # U_vec = [12.7778] # LCO transition
     # U_vec = [12.63158]
     # U_vec = [12.36842] # Non symmetric 2 period LCO
     # U_vec = [12.75168] # Bifuracation reports many points ?
-    U_vec = [7.0]
-    # U_vec = np.linspace(2, 20, 150)
+    U_vec = [16.0]
+    # U_vec = np.linspace(0.2, 22.5, 100)
+    # U_vec = np.linspace(1.0, 22.0, 50)
 
-    beta_peaks = []
-    beta_vel = []
+    peaks_data = [[], [], []]
+    peaks_U = [[], [], []]
+    rms_data = np.zeros((3, len(U_vec)))
     coupled_sim = True
 
-    for U in tqdm(U_vec): 
+    for U_idx, U in tqdm(enumerate(U_vec), total=len(U_vec)): 
         # Conner
         v = Vars()
         v.a = -0.5 
@@ -399,11 +375,16 @@ if __name__ == "__main__":
         v.zeta_beta = 0.0115
         v.U = U
         v.sigma = v.omega_h / v.omega_alpha
+        # v.sigma = 0.8079
         v.V = v.U / (v.b * v.omega_alpha)
         v.mu = v.m / (np.pi * v.rho * v.b**2)
+        # v.mu = 25.2386
 
-        dt = 0.02
-        t_final = 5 * v.omega_alpha
+        U_str = f"{int(U)}"
+
+        dt = 0.1
+        # t_final = 5.0 * v.omega_alpha
+        t_final = 1000.0
         vec_t = np.arange(0, t_final, dt)
         n = len(vec_t)
 
@@ -411,7 +392,7 @@ if __name__ == "__main__":
         y0 = np.zeros(8, dtype=np.float64)
         y0[3] = 0.01 / v.b # h
 
-        system = AeroelasticSystem(v, coupled_sim)
+        system = AeroelasticSystem(v, coupled_sim, torsional_func)
         ivp = system.coupled_system if coupled_sim else system.uncoupled_system
         mono = solve_ivp(ivp, (0, t_final), y0, t_eval=vec_t, method='RK45')
         
@@ -419,49 +400,15 @@ if __name__ == "__main__":
             print("Monolithic solver failed")
             exit(1)
 
-        aero_forces = system.aero_forces(mono.y)
-
-        angle_tolerance = 0.25 # degrees
-        last25_amp = np.degrees(mono.y[5, int(0.75 * n):])
-        peaks_idx0, _ = sp.signal.find_peaks(last25_amp)
-        peaks_idx1, _ = sp.signal.find_peaks(-last25_amp)
-        peaks_idx = np.sort(np.concatenate((peaks_idx0, peaks_idx1)))
-        amp_local = last25_amp[peaks_idx]
-        amp_peaks_local_unique = [amp_local[0]]
-        for amp in amp_local[1:]:
-            if not np.any(np.abs(amp - np.array(amp_peaks_local_unique)) < angle_tolerance):
-                amp_peaks_local_unique.append(amp)
-            
-        beta_peaks.extend(amp_peaks_local_unique)
-        beta_vel.extend([U] * len(amp_peaks_local_unique))
-
         if len(U_vec) == 1:
-            # Plotting
-            fig = make_subplots(
-                rows=6, cols=3,
-                subplot_titles=(
-                    'Heave', 'Heave Velocity', 'Heave Force',
-                    'Heave PSD', 'Heave Velocity PSD', 'Heave Force PSD',
-                    'Wing Pitch', 'Wing Pitch Velocity', 'Wing Pitch Force',
-                    'Pitch PSD', 'Pitch Velocity PSD', 'Pitch Force PSD',
-                    'Flap', 'Flap Velocity', 'Flap Force',
-                    'Flap PSD', 'Flap Velocity PSD' ,'Flap Force PSD'
-                ),
-                vertical_spacing=0.1,
-                horizontal_spacing=0.08
-            )
-            add_data_and_psd(fig, vec_t, mono.y[3, :], "Theodorsen", 1, 1) # h
-            add_data_and_psd(fig, vec_t, mono.y[0, :], "Theodorsen", 1, 2) # dh
-            add_data_and_psd(fig, vec_t, aero_forces[0, :]/v.mu, "Theodorsen", 1, 3) # force h
-            add_data_and_psd(fig, vec_t, np.degrees(mono.y[4, :]), "Theodorsen", 3, 1) # alpha
-            add_data_and_psd(fig, vec_t, np.degrees(mono.y[1, :]), "Theodorsen", 3, 2) # dalpha
-            add_data_and_psd(fig, vec_t, aero_forces[1, :]/v.mu, "Theodorsen", 3, 3) # force alpha
-            add_data_and_psd(fig, vec_t, np.degrees(mono.y[5, :]), "Theodorsen", 5, 1) # beta
-            add_data_and_psd(fig, vec_t, np.degrees(mono.y[2, :]), "Theodorsen", 5, 2) # dbeta
-            add_data_and_psd(fig, vec_t, aero_forces[2, :]/v.mu, "Theodorsen", 5, 3) # force beta
+            aero_forces = system.aero_forces(mono.y)
 
-            uvlm_file = Path("build/windows/x64/release/3dof.txt")
-            if uvlm_file.exists():
+            # Plotting
+            fig = plot.create_dofs_figure(["Wing Heave", "Wing Pitch", "Flap Pitch"])
+            plot_solution(fig, aero_forces, mono, v)
+
+            uvlm_file = Path(f"build/windows/x64/release/3dof_{int(U)}.txt")
+            if uvlm_file.exists() and helpers.getenv("UVLM"):
                 with open(uvlm_file, "r") as f:
                     uvlm_tsteps = int(f.readline())
                     uvlm = np.zeros((10, uvlm_tsteps))
@@ -471,80 +418,77 @@ if __name__ == "__main__":
                         i += 1
                     uvlm = uvlm[:, :i] # shrink in case the number of steps is not equal (stopped simulation)
 
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[1, :], "UVLM", 1, 1)
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[4, :], "UVLM", 1, 2)
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[7, :], "UVLM", 1, 3)
-                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[2, :]), "UVLM", 3, 1)
-                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[5, :]), "UVLM", 3, 2)
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[8, :], "UVLM", 3, 3)
-                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[3, :]), "UVLM", 5, 1)
-                    add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[6, :]), "UVLM", 5, 2)
-                    add_data_and_psd(fig, uvlm[0, :], uvlm[9, :], "UVLM", 5, 3)
-                
-            format_subplot(fig, 1, 1, "t", r"y")
-            format_subplot(fig, 1, 2, "t", r"$\dot{y}$")
-            format_subplot(fig, 1, 3, "t", "Lift")
-            format_subplot(fig, 2, 1, "f", "Amplitude (dB)")
-            format_subplot(fig, 2, 2, "f", "Amplitude (dB)")
-            format_subplot(fig, 2, 3, "f", "Amplitude (dB)")
-            format_subplot(fig, 3, 1, "t", r"$\alpha$")
-            format_subplot(fig, 3, 2, "t", r"$\dot{\alpha}$")
-            format_subplot(fig, 3, 3, "t", "Moment")
-            format_subplot(fig, 4, 1, "f", "Amplitude (dB)")
-            format_subplot(fig, 4, 2, "f", "Amplitude (dB)")
-            format_subplot(fig, 4, 3, "f", "Amplitude (dB)")
-            format_subplot(fig, 5, 1, "t", r"$\beta$")
-            format_subplot(fig, 5, 2, "t", r"$\dot{\beta}$")
-            format_subplot(fig, 5, 3, "t", "Moment")
-            format_subplot(fig, 6, 1, "f", "Amplitude (dB)")
-            format_subplot(fig, 6, 2, "f", "Amplitude (dB)")
-            format_subplot(fig, 6, 3, "f", "Amplitude (dB)")
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[1, :], "UVLM", 1, 1, 1, dash="dot")
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[4, :], "UVLM", 1, 2, 1, dash="dot")
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[7, :], "UVLM", 1, 3, 1, dash="dot")
+                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[2, :]), "UVLM", 3, 1, 1, dash="dot")
+                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[5, :]), "UVLM", 3, 2, 1, dash="dot")
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[8, :], "UVLM", 3, 3, 1, dash="dot")
+                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[3, :]), "UVLM", 5, 1, 1, dash="dot")
+                    plot.add_data_and_psd(fig, uvlm[0, :], np.degrees(uvlm[6, :]), "UVLM", 5, 2, 1, dash="dot")
+                    plot.add_data_and_psd(fig, uvlm[0, :], uvlm[9, :], "UVLM", 5, 3, 1, dash="dot")
 
-            fig.update_layout(
-                title="Theodorsen 3DOF Aeroelastic Response",
-                title_x=0.5,
-                autosize=True,
-                showlegend=True,
-                template="plotly_white",
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=1.0
+            format_plot(fig)
+            plot.fig_save(fig, f"build/3dof/3dof_{torsional_spring_names[torsional_spring]}_{U_str}", html=False, height=1500)
+
+            # Poincare maps
+            names = ["h", "alpha", "beta"]
+            latex_names = [r"h", r"\alpha", r"\beta"]
+            mono_idx_st = int(0.9839 * mono.t.shape[0])
+            for i in range(3):
+                fig = plot.fig_create_multi(1, 1)
+                fig.add_trace(
+                    go.Scatter(
+                        x=mono.y[3+i, mono_idx_st:],
+                        y=mono.y[i, mono_idx_st:],
+                        mode="lines",
+                        line = {"dash": "solid", "width": 5, "color": '#0066CC'},
+                        name="Theodorsen"
+                    )
                 )
-            )
+                if helpers.getenv("UVLM") and uvlm_file.exists():
+                    uvlm_idx_st = int(0.977 * uvlm.shape[1])
+                    fig.add_trace(
+                        go.Scatter(
+                            x=uvlm[1+i, uvlm_idx_st:],
+                            y=uvlm[4+i, uvlm_idx_st:],
+                            mode="lines",
+                            line = {"dash": "dot", "width": 5, "color": "#FF8400"},
+                            name="UVLM"
+                        )
+                    )
+                plot.format_subplot(fig, 1, 1, r"$\Large{" + latex_names[i] + "}$", r"$\Large{\dot{" + latex_names[i] + "}}$")
+                if i != 2: fig.update_layout(showlegend=False)
+                plot.fig_save(fig, f"build/3dof/3dof_poincare_{U_str}_{names[i]}", html=False, height=500)
 
-            fig.write_html("build/3dof.html", include_mathjax='cdn')
+        else:
+            slice_start = int(0.9 * n)
+            peaks_slice = mono.y[3:6, slice_start:]
+            rms_data[:, U_idx] = np.sqrt(np.mean(peaks_slice**2, axis=1))
+            
+            for i in range(3):
+                peaks_data[i].append(peaks_slice[i, plot.find_peak_idx(peaks_slice[i, :])])
+                peaks_U[i].append(np.array([U] * peaks_data[i][-1].shape[0]))
 
     if len(U_vec) > 1:
-        fig = make_subplots(
-            rows=1, cols=1,
-            subplot_titles=(
-                'Bifurcation Diagram'
-            ),
-            vertical_spacing=0.1,
-            horizontal_spacing=0.08
-        )
+        names = ["Heave", "Pitch", "Control"]
+        # Bifurcation plots
+        fig = plot.fig_create_multi(3, 1)
+        for i in range(3):
+            fig.add_trace(
+                go.Scatter(
+                    x=np.concatenate(peaks_U[i]), 
+                    y=np.concatenate(peaks_data[i]), 
+                    mode="markers",
+                    marker = {"size": 3},
+                    name = names[i]
+                ),
+                row=i + 1, 
+                col=1
+            )
+            plot.format_subplot(fig, i + 1, 1, r"Reduced Velocity $V$", "Amplitude")
+        
+        fig.update_xaxes(showticklabels=False, title_text="", row=1, col=1)
+        fig.update_xaxes(showticklabels=False, title_text="", row=2, col=1)
 
-        fig.add_trace(
-            go.Scattergl(
-                x=beta_vel, 
-                y=beta_peaks, 
-                name="beta",
-                mode='markers',
-                showlegend=True
-            ),
-            row=1, 
-            col=1
-        )
-
-        fig.update_xaxes(
-            title_text="U",
-            row=1,
-            col=1,
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='rgba(128, 128, 128, 0.2)',
-        )
-
-        fig.write_html("build/bifurcation.html", include_mathjax='cdn')
+        plot.fig_save(fig, f"build/3dof/3dof_{torsional_spring_names[torsional_spring]}_bifurcation", html=False, height=1000)

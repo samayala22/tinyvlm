@@ -13,21 +13,12 @@ namespace vlm {
 
 using SurfDims = std::pair<i64, i64>; // nc, ns
 
-class MeshFile {
-public:
-    virtual ~MeshFile() = default;
-    virtual SurfDims get_dims(std::ifstream& file) const = 0;
-    virtual void read(std::ifstream& file, const TensorView3D<Location::Host>& vertices) const = 0;
-};
-
 class MeshIO {
 public:
     MeshIO(const std::string& format);
     SurfDims get_dims(const std::string& filename) const;
-    void read(const std::string& filename, const TensorView3D<Location::Host>& vertices, bool qc = true) const;
-
-private:
-    std::unique_ptr<MeshFile> _file;
+    void read(const std::string& filename, const TensorView3fH& vertices, bool qc = true) const;
+    void read(const std::string& filename, const TensorView3dH& vertices, bool qc = true) const;
 };
 
 } // namespace vlm
