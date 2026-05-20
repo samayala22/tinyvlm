@@ -14,24 +14,33 @@
 using namespace vlm;
 using namespace linalg::ostream_overloads;
 
-int main() {
-    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_10x5.x"};
+int main(int argc, char** argv) {
+    // const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_160x5.x"};
+    const std::vector<std::string> meshes = {"../../../../mesh/infinite_rectangular_5x100.x"};
+    
     const std::vector<std::string> backends = get_available_backends();
 
     auto solvers = tiny::make_combination(meshes, backends);
+
+    f32 k; // reduced frequency
+    if (argc == 2) {
+        k = std::stof(argv[1]);
+    } else {
+        k = 0.25f;
+    }
 
     // Geometry
     const f32 b = 0.5f; // half chord
 
     // Define simulation length
-    const f32 cycles = 5.0f;
+    const f32 cycles = 3.0f;
     const f32 u_inf = 1.0f; // freestream velocity
-    const f32 k = 0.5; // reduced frequency
     const f32 omega = k * u_inf / b;
-    const f32 t_final = cycles * 2.0f * PI_f / omega; // 4 periods
+    // const f32 omega = 0.145f;
+    const f32 t_final = cycles * 2.0f * PI_f / omega;
     //const f32 t_final = 5.0f;
 
-    KinematicsTree kinematics_tree;
+    KinematicsTree<f32> kinematics_tree;
 
     // Periodic heaving
     // const f32 amplitude = 0.1f; // amplitude of the wing motion
@@ -43,12 +52,18 @@ int main() {
     // });
 
     // Periodic pitching
-    const f32 amplitude = 3.f; // amplitude in degrees
+    const f32 amplitude = to_radians(1.f); // amplitude in degrees
+    // const f32 amplitude = 0.05f;
     auto fs = kinematics_tree.add([=](const fwd::Float& t) {
         return translation_matrix<fwd::Float>({-u_inf * t, 0.f, 0.f});
     });
     auto pitch = kinematics_tree.add([=](const fwd::Float& t) {
-        return rotation_matrix<fwd::Float>({0.25f, 0.0f, 0.0f},{0.0f, 1.0f, 0.0f}, to_radians(amplitude) * fwd::sin(omega * t));
+        return rotation_matrix<fwd::Float>(
+            {0.25f, 0.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f},
+            // amplitude * fwd::sin(omega * t) + to_radians(2.f) * fwd::sin(3.f * omega * t)
+            amplitude * (fwd::sin(omega * t) + 2.f* fwd::sin(3.f * omega * t))
+        );
     })->after(fs);
     
     // Sudden acceleration
@@ -62,10 +77,10 @@ int main() {
     // });
 
     for (const auto& [mesh_name, backend_name] : solvers) {
-        Assembly assembly(fs);
+        Assembly<f32> assembly(fs);
         assembly.add(mesh_name, pitch);
         UVLM simulation{backend_name, {mesh_name}};
-        simulation.run(assembly, t_final);
+        simulation.run(assembly, t_final, k);
     }
     return 0;
 }

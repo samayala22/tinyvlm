@@ -165,7 +165,7 @@ std::unique_ptr<Memory> BackendCUDA::create_memory_manager() { return std::make_
 /// @param verts_wing vertices of the wing surfaces
 /// @param verts_wake vertices of the wake surfaces
 /// @param iteration iteration number (VLM = 1, UVLM = [0 ... N tsteps])
-void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView3D<Location::Device>& verts_wake, std::vector<i32>& condition, i32 iteration) {
+void BackendCUDA::lhs_assemble(TensorView2fD& lhs, MultiTensorView3fD& colloc, MultiTensorView3fD& normals, MultiTensorView3fD& verts_wing, MultiTensorView3fD& verts_wake, std::vector<i32>& condition, i32 iteration) {
     // tiny::ScopedTimer timer("LHS");
     std::fill(condition.begin(), condition.end(), 0); // reset conditon increment vars
     constexpr Dim3<i32> block{32, 16};
@@ -178,7 +178,7 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
     for (i32 m_j = 0; m_j < colloc.size(); m_j++) {
         i64 offset_i = 0;
         for (i32 m_i = 0; m_i < colloc.size(); m_i++) {
-            const i64 condition_idx = m_i + m_j * static_cast<i64>(colloc.size());
+            i64 condition_idx = m_i + m_j * static_cast<i64>(colloc.size());
             auto colloc_i = colloc[m_i];
             auto colloc_j = colloc[m_j];
             auto normals_i = normals[m_i];
@@ -187,11 +187,11 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
 
             f32* lhs_section = lhs.ptr() + offset_i + offset_j * lhs.stride(1);
 
-            const i64 zero = 0;
-            const i64 end_wing = (colloc_j.shape(1) - 1) * colloc_j.shape(0);
+            i64 zero = 0;
+            i64 end_wing = (colloc_j.shape(1) - 1) * colloc_j.shape(0);
             
             auto wing_pass = graph.emplace([=](){
-                const Dim3<i64> n{colloc_i.stride(2), end_wing};
+                Dim3<i64> n{colloc_i.stride(2), end_wing};
                 kernel_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
                     n.x,
                     n.y,
@@ -210,7 +210,7 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
             }).name("wing pass");
 
             auto last_row = graph.emplace([=](){
-                const Dim3<i64> n{colloc_i.stride(2), colloc_j.shape(0)};
+                Dim3<i64> n{colloc_i.stride(2), colloc_j.shape(0)};
                 kernel_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
                     n.x,
                     n.y,
@@ -233,7 +233,7 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
             }).name("condition");
 
             auto wake_pass = graph.emplace([=, &condition](){
-                const Dim3<i64> n{colloc_i.stride(2), colloc_j.shape(0)};
+                Dim3<i64> n{colloc_i.stride(2), colloc_j.shape(0)};
                 kernel_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
                     n.x,
                     n.y,
@@ -278,16 +278,16 @@ void BackendCUDA::lhs_assemble(TensorView<f32, 2, Location::Device>& lhs, const 
 /// @param rhs right hand side vector
 /// @param normals normals of all surfaces
 /// @param velocities displacement velocities of all surfaces
-void BackendCUDA::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& velocities) {
-    // const tiny::ScopedTimer timer("RHS");
+void BackendCUDA::rhs_assemble_velocities(TensorView1fD& rhs, MultiTensorView3fD& normals, MultiTensorView3fD& velocities) {
+    // tiny::ScopedTimer timer("RHS");
     
     i64 offset = 0;
     for (i64 m = 0; m < normals.size(); m++) {
         assert(offset <= rhs.size());
-        const auto& normals_i = normals[m];
-        const auto& velocities_m = velocities[m];
+        auto& normals_i = normals[m];
+        auto& velocities_m = velocities[m];
         constexpr Dim3<i32> block{768};
-        const Dim3<i64> n{normals_i.stride(2)};
+        Dim3<i64> n{normals_i.stride(2)};
         kernel_rhs_assemble_velocities<block.x><<<grid_size(block, n)(), block()>>>(
             n.x,
             rhs.ptr() + offset,
@@ -300,22 +300,22 @@ void BackendCUDA::rhs_assemble_velocities(TensorView<f32, 1, Location::Device>& 
     }
 }
 
-void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Device>& rhs, const MultiTensorView2D<Location::Device>& gamma_wake, const MultiTensorView3D<Location::Device>& colloc, const MultiTensorView3D<Location::Device>& normals, const MultiTensorView3D<Location::Device>& verts_wake, const std::vector<bool>& lifting, i32 iteration) {
+void BackendCUDA::rhs_assemble_wake_influence(TensorView1fD& rhs, MultiTensorView2fD& gamma_wake, MultiTensorView3fD& colloc, MultiTensorView3fD& normals, MultiTensorView3fD& verts_wake, std::vector<bool>& lifting, i32 iteration) {
     if (iteration == 0) return; // cuda doesnt support 0 sized domain
     constexpr Dim3<i32> block{32, 16}; // TODO: do not modify this 
 
     i64 offset = 0;
     for (i32 m_i = 0; m_i < normals.size(); m_i++) {
-        const i64 m_i_num_panels = normals[m_i].shape(0) * normals[m_i].shape(1);
+        i64 m_i_num_panels = normals[m_i].shape(0) * normals[m_i].shape(1);
         for (i32 m_j = 0; m_j < normals.size(); m_j++) {
             if (!lifting[m_j]) continue;
-            const auto& colloc_i = colloc[m_i];
-            const auto& normals_i = normals[m_i];
-            const auto& gamma_wake_j = gamma_wake[m_j];
-            const auto& verts_wake_j = verts_wake[m_j];
-            const i64 wake_m  = iteration; 
-            const i64 wake_n  = verts_wake_j.shape(0) - 1; // spanwise number of wake panels
-            const Dim3<i64> n{wake_m * wake_n, m_i_num_panels};
+            auto& colloc_i = colloc[m_i];
+            auto& normals_i = normals[m_i];
+            auto& gamma_wake_j = gamma_wake[m_j];
+            auto& verts_wake_j = verts_wake[m_j];
+            i64 wake_m  = iteration; 
+            i64 wake_n  = verts_wake_j.shape(0) - 1; // spanwise number of wake panels
+            Dim3<i64> n{wake_m * wake_n, m_i_num_panels};
             kernel_wake_influence<block.x, block.y><<<grid_size(block, n)(), block()>>>(
                 wake_m, 
                 wake_n,
@@ -336,50 +336,18 @@ void BackendCUDA::rhs_assemble_wake_influence(TensorView<f32, 1, Location::Devic
     }
 }
 
-void BackendCUDA::displace_wake_rollup(MultiTensorView3D<Location::Device>& wake_rollup, const MultiTensorView3D<Location::Device>& verts_wake, const MultiTensorView3D<Location::Device>& verts_wing, const MultiTensorView2D<Location::Device>& gamma_wing, const MultiTensorView2D<Location::Device>& gamma_wake, f32 dt, i32 iteration) {
-    // TODO
-}
-
-// TODO: deprecate
-f32 BackendCUDA::coeff_steady_cl_single(const TensorView3D<Location::Device>& verts_wing, const TensorView2D<Location::Device>& gamma_delta, const FlowData& flow, f32 area) {
-    f32 h_cl = 0.0f;
-    cudaMemset(d_cl, 0, sizeof(f32));
-    constexpr Dim3<i32> block{32, 16};
-    const Dim3<i64> n{gamma_delta.shape(0), gamma_delta.shape(1)};
-    kernel_coeff_steady_cl_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
-        n.y,
-        n.x,
-        verts_wing.ptr(),
-        verts_wing.stride(1),
-        verts_wing.stride(2),
-        gamma_delta.ptr(),
-        gamma_delta.stride(1),
-        float3{flow.freestream.x, flow.freestream.y, flow.freestream.z},
-        float3{flow.lift_axis.x, flow.lift_axis.y, flow.lift_axis.z},
-        flow.rho,
-        d_cl
-    );
-    CHECK_CUDA(cudaGetLastError());
-    memory->copy(Location::Host, &h_cl, 1, Location::Device, d_cl, 1, sizeof(f32), 1);
-    CtxManager::getInstance().sync();
-    
-    return h_cl / (0.5f * flow.rho * linalg::length2(flow.freestream) * area);
-}
-
 void BackendCUDA::forces_unsteady(
-    const TensorView3D<Location::Device>& verts_wing,
-    const TensorView2D<Location::Device>& gamma_delta,
-    const TensorView2D<Location::Device>& gamma,
-    const TensorView2D<Location::Device>& gamma_prev,
-    const TensorView3D<Location::Device>& velocities,
-    const TensorView2D<Location::Device>& areas,
-    const TensorView3D<Location::Device>& normals,
-    const TensorView3D<Location::Device>& forces,
-    f32 dt
+    TensorView3fD& verts_wing,
+    TensorView2fD& gamma_delta,
+    TensorView2fD& gamma_dt,
+    TensorView3fD& velocities,
+    TensorView2fD& areas,
+    TensorView3fD& normals,
+    TensorView3fD& forces
 )
 {
     constexpr Dim3<i32> block{32, 16};
-    const Dim3<i64> n{gamma_delta.shape(0), gamma_delta.shape(1)};
+    Dim3<i64> n{gamma_delta.shape(0), gamma_delta.shape(1)};
     DataDims dims;
     dims.panel_shape_0 = normals.shape(0);
     dims.panel_shape_1 = normals.shape(1);
@@ -393,29 +361,27 @@ void BackendCUDA::forces_unsteady(
         dims,
         verts_wing.ptr(),
         gamma_delta.ptr(),
-        gamma.ptr(),
-        gamma_prev.ptr(),
+        gamma_dt.ptr(),
         velocities.ptr(),
         areas.ptr(),
         normals.ptr(),
-        forces.ptr(),
-        dt
+        forces.ptr()
     );
     CHECK_CUDA(cudaGetLastError());
     // stream sync
 }
 
 f32 BackendCUDA::coeff_cl(
-    const TensorView3D<Location::Device>& forces,
-    const linalg::float3& lift_axis,
-    const linalg::float3& freestream,
-    const f32 rho,
-    const f32 area
+    TensorView3fD& forces,
+    linalg::float3& lift_axis,
+    linalg::float3& freestream,
+    f32 rho,
+    f32 area
 )
 {
     cudaMemset(d_cl, 0, sizeof(f32));
     constexpr Dim3<i32> block{32, 16};
-    const Dim3<i64> n{forces.shape(0), forces.shape(1)};
+    Dim3<i64> n{forces.shape(0), forces.shape(1)};
     DataDims dims;
     dims.panel_shape_0 = forces.shape(0);
     dims.panel_shape_1 = forces.shape(1);
@@ -435,13 +401,13 @@ f32 BackendCUDA::coeff_cl(
 }
 
 linalg::float3 BackendCUDA::coeff_cm(
-    const TensorView3D<Location::Device>& forces,
-    const TensorView3D<Location::Device>& verts_wing,
-    const linalg::float3& ref_pt,
-    const linalg::float3& freestream,
-    const f32 rho,
-    const f32 area,
-    const f32 mac
+    TensorView3fD& forces,
+    TensorView3fD& verts_wing,
+    linalg::float3& ref_pt,
+    linalg::float3& freestream,
+    f32 rho,
+    f32 area,
+    f32 mac
 )
 {
     cudaMemset(d_cm_x, 0, sizeof(f32));
@@ -449,7 +415,7 @@ linalg::float3 BackendCUDA::coeff_cm(
     cudaMemset(d_cm_z, 0, sizeof(f32));
 
     constexpr Dim3<i32> block{32, 16};
-    const Dim3<i64> n{forces.shape(0), forces.shape(1)};
+    Dim3<i64> n{forces.shape(0), forces.shape(1)};
     DataDims dims;
     dims.panel_shape_0 = forces.shape(0);
     dims.panel_shape_1 = forces.shape(1);
@@ -478,35 +444,15 @@ linalg::float3 BackendCUDA::coeff_cm(
     return h_cm / (0.5f * rho * linalg::length2(freestream) * area * mac);
 }
 
-f32 BackendCUDA::coeff_steady_cd_single(const TensorView3D<Location::Device>& verts_wake, const TensorView2D<Location::Device>& gamma_wake, const FlowData& flow, f32 area) {
-    f32 h_cd = 0.0f;
-    cudaMemset(d_cd, 0, sizeof(f32));
-    constexpr Dim3<i32> block{64, 8};
-    const Dim3<i64> n{verts_wake.shape(0)-1, verts_wake.shape(0)-1};
-    kernel_coeff_steady_cd_single<block.x, block.y><<<grid_size(block, n)(), block()>>>(
-        verts_wake.ptr(),
-        verts_wake.stride(2),
-        verts_wake.shape(1),
-        verts_wake.shape(0),
-        gamma_wake.ptr(),
-        sigma_vatistas,
-        d_cd
-    );
-    CHECK_CUDA(cudaGetLastError());
-    memory->copy(Location::Host, &h_cd, 1, Location::Device, d_cd, 1, sizeof(f32), 1);
-    CtxManager::getInstance().sync();
-    return h_cd / (linalg::length2(flow.freestream) * area);
-}
-
-void BackendCUDA::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Location::Device>& verts_wing, MultiTensorView3D<Location::Device>& colloc, MultiTensorView3D<Location::Device>& normals, MultiTensorView2D<Location::Device>& areas) {
+void BackendCUDA::mesh_metrics(f32 alpha_rad, MultiTensorView3fD& verts_wing, MultiTensorView3fD& colloc, MultiTensorView3fD& normals, MultiTensorView2fD& areas) {
     for (int m = 0; m < colloc.size(); m++) {
-        const auto& colloc_i = colloc[m];
-        const auto& normals_i = normals[m];
-        const auto& areas_i = areas[m];
-        const auto& verts_wing_m = verts_wing[m];
+        auto& colloc_i = colloc[m];
+        auto& normals_i = normals[m];
+        auto& areas_i = areas[m];
+        auto& verts_wing_m = verts_wing[m];
 
         constexpr Dim3<i32> block{32, 16}; // ns, nc
-        const Dim3<i64> n{colloc_i.shape(0), colloc_i.shape(1)};
+        Dim3<i64> n{colloc_i.shape(0), colloc_i.shape(1)};
         kernel_mesh_metrics<block.x, block.y><<<grid_size(block, n)(), block()>>>(
             n.y,
             n.x,
@@ -523,13 +469,13 @@ void BackendCUDA::mesh_metrics(const f32 alpha_rad, const MultiTensorView3D<Loca
 }
 
 f32 BackendCUDA::mesh_mac(
-    const TensorView3D<Location::Device>& verts_wing,
-    const TensorView2D<Location::Device>& areas
+    TensorView3fD& verts_wing,
+    TensorView2fD& areas
 ) 
 {
     cudaMemset(d_mac, 0, sizeof(f32));
     constexpr Dim3<i32> block{768};
-    const Dim3<i64> n{areas.shape(0)};
+    Dim3<i64> n{areas.shape(0)};
     DataDims dims;
     dims.panel_shape_0 = areas.shape(0);
     dims.panel_shape_1 = areas.shape(1);
@@ -549,12 +495,41 @@ f32 BackendCUDA::mesh_mac(
     return h_mac / sum(areas);
 }
 
-f32 BackendCUDA::sum(const TensorView1D<Location::Device>& tensor) {
+void BackendCUDA::gamma_wake_from_coeffs(
+    TensorView2fD& gamma_wake,
+    TensorView2fD& gamma_coeffs,
+    i32 harmonics,
+    f32 tn,
+    f32 omega,
+    f32 dt,
+    i64 iteration
+) {
+    constexpr Dim3<i32> block{16, 32};
+    Dim3<i64> n{gamma_wake.shape(0), iteration};
+    auto gamma_wake_it = gamma_wake.slice(All, Range{-iteration, -1});
+    DataDims dims;
+    dims.panel_shape_0 = gamma_wake.shape(0);
+    dims.panel_shape_1 = iteration;
+    dims.panel_stride_1 = gamma_wake.stride(1);
+    kernel_gamma_wake_from_coeffs<<<grid_size(block, n)(), block()>>>(
+        dims, 
+        gamma_wake_it.ptr(),
+        gamma_coeffs.ptr(),
+        gamma_coeffs.stride(1),
+        harmonics,
+        tn,
+        omega,
+        dt
+    );
+    CHECK_CUDA(cudaGetLastError());
+}
+
+f32 BackendCUDA::sum(TensorView1fD& tensor) {
     f32* d_sum = (f32*)memory->alloc(Location::Device, sizeof(*d_sum));
     f32 h_sum;
     cudaMemset(d_sum, 0, sizeof(f32)); // TODO: use fill instead ?
     constexpr Dim3<i32> block{768};
-    const Dim3<i64> n{tensor.size()};
+    Dim3<i64> n{tensor.size()};
     kernel_reduce<<<grid_size(block, n)(), block()>>>(
         tensor.shape(0),
         tensor.ptr(),
@@ -566,12 +541,12 @@ f32 BackendCUDA::sum(const TensorView1D<Location::Device>& tensor) {
     return h_sum;
 }
 
-f32 BackendCUDA::sum(const TensorView2D<Location::Device>& tensor) {
+f32 BackendCUDA::sum(TensorView2fD& tensor) {
     f32* d_sum = (f32*)memory->alloc(Location::Device, sizeof(*d_sum));
     f32 h_sum;
     cudaMemset(d_sum, 0, sizeof(f32));
     constexpr Dim3<i32> block{768};
-    const Dim3<i64> n{tensor.size()};
+    Dim3<i64> n{tensor.size()};
     kernel_reduce_2D<<<grid_size(block, n)(), block()>>>(
         tensor.shape(0),
         tensor.shape(1),

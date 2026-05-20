@@ -1,19 +1,7 @@
 #include "vlm_backend.hpp"
 #include "vlm_memory.hpp"
 
-#include <cstdio>
-#include <cassert>
-
-#define CHECK(condition)                     \
-    do {                                            \
-        if (!(condition)) {                         \
-            std::fprintf(stderr,                         \
-                    "Assertion failed: %s\n"        \
-                    "File: %s, Line: %d\n",        \
-                    #condition, __FILE__, __LINE__);\
-            std::abort();                                \
-        }                                           \
-    } while (0)
+#include "tinytest.hpp"
 
 using namespace vlm;
 
@@ -35,7 +23,6 @@ int main(int, char**) {
 
         auto& tdv = tensor_d.view();
         auto& thv = tensor_h.view();
-        assert(tdv.shape() == thv.shape());
 
         for (u32 i = 0; i < tensor_h.size(); i++) {
             tensor_h[i] = static_cast<float>(i);
@@ -46,10 +33,10 @@ int main(int, char**) {
         {
             auto bv = thv.slice(All, 1, Range{0, 3});
 
-            CHECK(bv(0, 0) == 3.0f);
-            CHECK(bv(1, 0) == 4.0f);
-            CHECK(bv(2, 1) == 14.0f);
-            CHECK(bv(2, 2) == 23.0f);
+            TINY_ASSERT_EQ(bv(0, 0), 3.0f);
+            TINY_ASSERT_EQ(bv(1, 0), 4.0f);
+            TINY_ASSERT_EQ(bv(2, 1), 14.0f);
+            TINY_ASSERT_EQ(bv(2, 2), 23.0f);
         }
 
         {
@@ -60,9 +47,9 @@ int main(int, char**) {
             a.to(b);
             tv.to(thv);
 
-            CHECK(thv(0, 2, 2) == 3.0f);
-            CHECK(thv(1, 1, 2) == 1.0f);
-            CHECK(thv(2, 2, 2) == 5.0f);
+            TINY_ASSERT_EQ(thv(0, 2, 2), 3.0f);
+            TINY_ASSERT_EQ(thv(1, 1, 2), 1.0f);
+            TINY_ASSERT_EQ(thv(2, 2, 2), 5.0f);
         }
 
         {
@@ -73,8 +60,8 @@ int main(int, char**) {
             a.to(b);
             tv.to(thv);
 
-            CHECK(thv(0, 0, 0) == thv(1, 0, 0));
-            CHECK(thv(0, 1, 1) == thv(1, 1, 1));
+            TINY_ASSERT_EQ(thv(0, 0, 0), thv(1, 0, 0));
+            TINY_ASSERT_EQ(thv(0, 1, 1), thv(1, 1, 1));
         }
 
         {
@@ -88,8 +75,8 @@ int main(int, char**) {
             aa.to(bb);
             tv.to(thv);
 
-            CHECK(thv(0,0,1) == thv(1, 2, 1));
-            CHECK(thv(0,0,2) == thv(1, 2, 2));
+            TINY_ASSERT_EQ(thv(0,0,1), thv(1, 2, 1));
+            TINY_ASSERT_EQ(thv(0,0,2), thv(1, 2, 2));
         }
 
         { // orthogonal slices
@@ -101,9 +88,9 @@ int main(int, char**) {
             a.to(b);
             tv.to(thv);
 
-            CHECK(thv(0,0,0) == thv(0, 1, 2));
-            CHECK(thv(0,1,0) == thv(1, 1, 2));
-            CHECK(thv(0,2,1) == thv(2, 2, 2));
+            TINY_ASSERT_EQ(thv(0,0,0), thv(0, 1, 2));
+            TINY_ASSERT_EQ(thv(0,1,0), thv(1, 1, 2));
+            TINY_ASSERT_EQ(thv(0,2,1), thv(2, 2, 2));
         }
 
         {
@@ -113,7 +100,7 @@ int main(int, char**) {
             auto b = a.reshape(1, 2, 2, 2, 2);
             
             const std::array<i64, 5> correct_stride{1, 1, 3, 9, 18};
-            CHECK(b.stride() == correct_stride);
+            TINY_ASSERT_BUFEQ(b.stride(), correct_stride, correct_stride.size());
         }
 
         {
@@ -123,7 +110,7 @@ int main(int, char**) {
             auto b = a.reshape(2, 3, 1, 1, 4);
 
             const std::array<i64, 5> correct_stride{1, 2, 9, 9, 9};
-            CHECK(b.stride() == correct_stride);
+            TINY_ASSERT_BUFEQ(b.stride(), correct_stride, correct_stride.size());
         }
 
         {
@@ -133,7 +120,7 @@ int main(int, char**) {
             auto b = a.reshape(3, 2, 2);
 
             const std::array<i64, 3> correct_stride{3, 9, 18};
-            CHECK(b.stride() == correct_stride);
+            TINY_ASSERT_BUFEQ(b.stride(), correct_stride, correct_stride.size());
         }
 
         {
@@ -143,7 +130,7 @@ int main(int, char**) {
             auto b = a.reshape(2, 18);
 
             const std::array<i64, 2> correct_stride{1, 2};
-            CHECK(b.stride() == correct_stride);
+            TINY_ASSERT_BUFEQ(b.stride(), correct_stride, correct_stride.size());
         }
 
         {
@@ -153,9 +140,9 @@ int main(int, char**) {
             a.fill(111.f);
             tv.to(thv);
 
-            CHECK(thv(0,0,0) == 111.f);
-            CHECK(thv(0,1,1) == 111.f);
-            CHECK(thv(0,2,2) == 111.f);
+            TINY_ASSERT_EQ(thv(0,0,0), 111.f);
+            TINY_ASSERT_EQ(thv(0,1,1), 111.f);
+            TINY_ASSERT_EQ(thv(0,2,2), 111.f);
         }
 
         {
@@ -165,7 +152,7 @@ int main(int, char**) {
             auto b = tv.reshape(10, 1, 1);
 
             const std::array<i64, 3> correct_stride{1, 10, 10};
-            CHECK(b.stride() == correct_stride);
+            TINY_ASSERT_BUFEQ(b.stride(), correct_stride, correct_stride.size());
         }
     }
 

@@ -39,7 +39,7 @@ int main(int  /*argc*/, char ** /*argv*/) {
         std::printf("\n|    Alpha   |     CL     |     CD     |    CMx     |    CMy     |    CMz     |  CL Error   |  CD Error   |\n");
         std::printf("|------------|------------|------------|------------|------------|------------|-------------|-------------|\n");
         for (i64 i = 0; i < test_alphas.size(); i++) {
-            const FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
+            FlowData flow{test_alphas[i], 0.0f, 1.0f, 1.0f};
             const auto coeffs = simulation.run(flow);
             const f32 analytical_cl = compute_analytical_cl(flow.alpha);
             const f32 cl_aerr = std::abs(coeffs.cl - analytical_cl);

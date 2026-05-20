@@ -25,24 +25,24 @@ int main() {
         const std::unique_ptr<BLAS> blas = backend->create_blas();
         const std::unique_ptr<LU> solver = backend->create_lu_solver();
         
-        Tensor2D<Location::Host> M_h{memory.get()};
-        Tensor2D<Location::Host> C_h{memory.get()};
-        Tensor2D<Location::Host> K_h{memory.get()};
-        Tensor2D<Location::Host> u_h{memory.get()};
-        Tensor2D<Location::Host> v_h{memory.get()};
-        Tensor2D<Location::Host> a_h{memory.get()};
-        Tensor1D<Location::Host> t_h{memory.get()};
+        Tensor2fH M_h{memory.get()};
+        Tensor2fH C_h{memory.get()};
+        Tensor2fH K_h{memory.get()};
+        Tensor2fH u_h{memory.get()};
+        Tensor2fH v_h{memory.get()};
+        Tensor2fH a_h{memory.get()};
+        Tensor1fH t_h{memory.get()};
 
-        Tensor1D<Location::Device> zero{memory.get()};
-        Tensor2D<Location::Device> M_d{memory.get()};
-        Tensor2D<Location::Device> C_d{memory.get()};
-        Tensor2D<Location::Device> K_d{memory.get()};
-        Tensor2D<Location::Device> u_d{memory.get()}; // dof x tsteps
-        Tensor2D<Location::Device> v_d{memory.get()}; // dof x tsteps
-        Tensor2D<Location::Device> a_d{memory.get()}; // dof x tsteps
-        Tensor1D<Location::Device> du{memory.get()}; // dof
-        Tensor1D<Location::Device> dv{memory.get()}; // dof
-        Tensor1D<Location::Device> da{memory.get()}; // dof
+        Tensor1fD zero{memory.get()};
+        Tensor2fD M_d{memory.get()};
+        Tensor2fD C_d{memory.get()};
+        Tensor2fD K_d{memory.get()};
+        Tensor2fD u_d{memory.get()}; // dof x tsteps
+        Tensor2fD v_d{memory.get()}; // dof x tsteps
+        Tensor2fD a_d{memory.get()}; // dof x tsteps
+        Tensor1fD du{memory.get()}; // dof
+        Tensor1fD dv{memory.get()}; // dof
+        Tensor1fD da{memory.get()}; // dof
 
         // Host tensors
         M_h.init({3,3});

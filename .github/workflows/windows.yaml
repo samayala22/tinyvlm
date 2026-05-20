@@ -31,9 +31,9 @@ jobs:
 
       - name: Download ISPC
         run: |
-          Invoke-WebRequest -Uri "https://github.com/ispc/ispc/releases/download/v1.22.0/ispc-v1.22.0-windows.zip" -OutFile "ispc.zip"
+          Invoke-WebRequest -Uri "https://github.com/ispc/ispc/releases/download/v1.28.1/ispc-v1.28.1-windows.zip" -OutFile "ispc.zip"
           7z x ispc.zip
-          "ispc-v1.22.0-windows/bin" >> $env:GITHUB_PATH
+          "ispc-v1.28.1-windows/bin" >> $env:GITHUB_PATH
 
       # Force xmake to a specific folder (for cache)
       - name: Set xmake env

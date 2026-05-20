@@ -1,23 +1,12 @@
 #include "vlm.hpp"
 #include "vlm_kinematics.hpp"
 
+#include "tinytest.hpp"
+
 #include <cmath>
 #include <cstdio>
 #include <cassert>
 #include <string>
-
-#define CHECK(condition)                     \
-    do {                                            \
-        if (!(condition)) {                         \
-            std::fprintf(stderr,                         \
-                    "Assertion failed: %s\n"        \
-                    "File: %s, Line: %d\n",        \
-                    #condition, __FILE__, __LINE__);\
-            std::abort();                                \
-        }                                           \
-    } while (0)
-
-bool APPROX(float a, float b) { return std::abs(a - b) < 1e-6; }
 
 using namespace vlm;
 
@@ -26,7 +15,7 @@ int main(int /*unused*/, char** /*unused*/) {
     const f32 amplitude = 0.1f;
     const f32 omega = 0.5f;
 
-    KinematicsTree kinematics;
+    KinematicsTree<f32> kinematics;
     auto body_init = kinematics.add([=](const fwd::Float& t) { return translation_matrix<fwd::Float>({0.0f, 10.0f, 0.0f}); }); // initial position
     auto freestream = kinematics.add([=](const fwd::Float& t) { return translation_matrix<fwd::Float>({-u_inf*t, 0.0f, 0.0f}); })->after(body_init); // freestream
     // auto heave = kinematics.add([=](const fwd::Float& t) { return translation_matrix<fwd::Float>({0.0f, 0.0f, amplitude * fwd::sin(omega * t)}); })->after(freestream); // heave
@@ -42,13 +31,9 @@ int main(int /*unused*/, char** /*unused*/) {
     auto ang_vel = wing_kinematics->angular_velocity(t);
     std::printf("t: %f, vel: %f %f %f\n", t, vel.x, vel.y, vel.z);
     std::printf("t: %f, ang vel: %f %f %f\n", t, ang_vel.x, ang_vel.y, ang_vel.z);
-    
-    // CHECK(APPROX(vel.x, -u_inf));
-    // CHECK(APPROX(vel.y, 0.0f));
-    // CHECK(APPROX(vel.z, amplitude * omega * std::cos(omega * t)));
 
-    CHECK(APPROX(ang_vel.x, 0.0f));
-    CHECK(APPROX(ang_vel.y, 0.5f * PI_f * omega * std::cos(omega * t)));
-    CHECK(APPROX(ang_vel.z, 0.0f));
+    TINY_ASSERT_NEAR(ang_vel.x, 0.0f, 1e-6);
+    TINY_ASSERT_NEAR(ang_vel.y, 0.5f * PI_f * omega * std::cos(omega * t), 1e-6);
+    TINY_ASSERT_NEAR(ang_vel.z, 0.0f, 1e-6);
     return 0;
 }

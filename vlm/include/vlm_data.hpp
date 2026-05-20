@@ -2,7 +2,6 @@
 
 #include "vlm_types.hpp"
 #include "vlm_fwd.hpp"
-#include "vlm_memory.hpp"
 #include "tinyinterpolate.hpp"
 #include "linalg.h"
 
@@ -12,14 +11,14 @@ namespace vlm {
 class FlowData {
     public:
     // TODO: maybe move these to methods
-    const f32 alpha; // global angle of attack
-    const f32 beta; // global sideslip angle
-    const f32 u_inf; // freestream velocity magnitude
-    const f32 rho; // fluid density
+    f32 alpha; // global angle of attack
+    f32 beta; // global sideslip angle
+    f32 u_inf; // freestream velocity magnitude
+    f32 rho; // fluid density
 
-    const linalg::float3 freestream;
-    const linalg::float3 lift_axis;
-    const linalg::float3 stream_axis;
+    linalg::float3 freestream;
+    linalg::float3 lift_axis;
+    linalg::float3 stream_axis;
 
     FlowData(const f32 alpha_, const f32 beta_, const f32 u_inf_, const f32 rho_);
     FlowData(const linalg::float3& freestream_, const f32 rho_);
@@ -27,9 +26,9 @@ class FlowData {
 
 class AeroCoefficients {
     public:
-    const f32 cl;
-    const f32 cd;
-    const linalg::float3 cm;
+    f32 cl;
+    f32 cd;
+    linalg::float3 cm;
 
     AeroCoefficients(const f32 cl_, const f32 cd_, const linalg::float3& cm_) :
         cl(cl_),

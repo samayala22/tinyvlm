@@ -41,11 +41,19 @@ class CUDA_BLAS final : public BLAS {
         CUDA_BLAS() = default;
         ~CUDA_BLAS() = default;
 
-        void gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, const TensorView<f32, 1, Location::Device>& y, Trans trans = Trans::No) override;
-        void gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
-        void axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) override;
-        void axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) override;
-        f32 norm(const TensorView<f32, 1, Location::Device>& x) override;
+        void gemv(const f32 alpha, const TensorView2fD& A, const TensorView1fD& x, const f32 beta, const TensorView1fD& y, Trans trans = Trans::No) override;
+        void gemm(const f32 alpha, const TensorView2fD& A, const TensorView2fD& B, const f32 beta, const TensorView2fD& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
+        void axpy(const f32 alpha, const TensorView1fD& x, const TensorView1fD& y) override;
+        void axpy(const f32 alpha, const TensorView2fD& x, const TensorView2fD& y) override;
+        void scal(const f32 alpha, const TensorView1fD& x) override;
+        f32 norm(const TensorView1fD& x) override;
+
+        void gemv(const f64 alpha, const TensorView2dD& A, const TensorView1dD& x, const f64 beta, const TensorView1dD& y, Trans trans = Trans::No) override;
+        void gemm(const f64 alpha, const TensorView2dD& A, const TensorView2dD& B, const f64 beta, const TensorView2dD& C, Trans trans_a = Trans::No, Trans trans_b = Trans::No) override;
+        void axpy(const f64 alpha, const TensorView1dD& x, const TensorView1dD& y) override;
+        void axpy(const f64 alpha, const TensorView2dD& x, const TensorView2dD& y) override; // Y = alpha *  overrideY
+        void scal(const f64 alpha, const TensorView1dD& x) override;
+        f64 norm(const TensorView1dD& x) override;
 };
 
 std::unique_ptr<BLAS> BackendCUDA::create_blas() { return std::make_unique<CUDA_BLAS>(); }
@@ -57,7 +65,7 @@ cublasOperation_t cublas_trans(BLAS::Trans trans) {
     }
 }
 
-void CUDA_BLAS::gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 1, Location::Device>& x, const f32 beta, const TensorView<f32, 1, Location::Device>& y, Trans trans) {
+void CUDA_BLAS::gemv(const f32 alpha, const TensorView2fD& A, const TensorView1fD& x, const f32 beta, const TensorView1fD& y, Trans trans) {
     // TODO: double check if this is correct
     i64 m = (trans == Trans::No) ? A.shape(0) : A.shape(1);
     i64 n = (trans == Trans::No) ? A.shape(1) : A.shape(0);
@@ -78,7 +86,7 @@ void CUDA_BLAS::gemv(const f32 alpha, const TensorView<f32, 2, Location::Device>
     ));
 }
 
-void CUDA_BLAS::gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>& A, const TensorView<f32, 2, Location::Device>& B, const f32 beta, const TensorView<f32, 2, Location::Device>& C, Trans trans_a, Trans trans_b) {
+void CUDA_BLAS::gemm(const f32 alpha, const TensorView2fD& A, const TensorView2fD& B, const f32 beta, const TensorView2fD& C, Trans trans_a, Trans trans_b) {
     i64 m = (trans_a == BLAS::Trans::No) ? A.shape(0) : A.shape(1);
     i64 n = (trans_b == BLAS::Trans::No) ? B.shape(1) : B.shape(0);
     i64 k = (trans_a == BLAS::Trans::No) ? A.shape(1) : A.shape(0);
@@ -101,7 +109,7 @@ void CUDA_BLAS::gemm(const f32 alpha, const TensorView<f32, 2, Location::Device>
     ));
 }
 
-void CUDA_BLAS::axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>& x, const TensorView<f32, 1, Location::Device>& y) {
+void CUDA_BLAS::axpy(const f32 alpha, const TensorView1fD& x, const TensorView1fD& y) {
     CHECK_CUBLAS(cublasSaxpy_64(
         CUBlasCtx::get().handle(),
         x.size(),
@@ -113,7 +121,7 @@ void CUDA_BLAS::axpy(const f32 alpha, const TensorView<f32, 1, Location::Device>
     ));
 }
 
-void CUDA_BLAS::axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>& x, const TensorView<f32, 2, Location::Device>& y) {
+void CUDA_BLAS::axpy(const f32 alpha, const TensorView2fD& x, const TensorView2fD& y) {
     f32 beta = 1.0f;
     CHECK_CUBLAS(cublasSgeam_64(
         CUBlasCtx::get().handle(),
@@ -132,7 +140,7 @@ void CUDA_BLAS::axpy(const f32 alpha, const TensorView<f32, 2, Location::Device>
     ));
 }
 
-f32 CUDA_BLAS::norm(const TensorView<f32, 1, Location::Device>& x) {
+f32 CUDA_BLAS::norm(const TensorView1fD& x) {
     f32 result;
     CHECK_CUBLAS(cublasSnrm2(
         CUBlasCtx::get().handle(),
@@ -142,4 +150,14 @@ f32 CUDA_BLAS::norm(const TensorView<f32, 1, Location::Device>& x) {
         &result
     ));
     return result;
+}
+
+void CUDA_BLAS::scal(const f32 alpha, const TensorView1fD& x) {
+    CHECK_CUBLAS(cublasSscal(
+        CUBlasCtx::get().handle(),
+        x.shape(0),
+        &alpha,
+        x.ptr(),
+        x.stride(0)
+    ));
 }

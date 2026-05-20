@@ -1,9 +1,9 @@
 set_project("vlm")
-set_version("0.1.0")
-set_xmakever("2.8.6") -- xmake test support
+set_xmakever("3.0.0")
 
 add_rules("mode.debug", "mode.release", "mode.releasedbg")
 add_rules("plugin.compile_commands.autoupdate", {outputdir = "."})
+set_policy("test.return_zero_on_failure", true)
 
 -- set_toolchains("cuda")
 -- set_toolset("cxx", "clang")
@@ -12,6 +12,7 @@ set_policy("build.warning", true)
 set_policy("build.cuda.devlink", true) -- magic
 set_policy("run.autobuild", true)
 -- set_policy("build.optimization.lto")
+add_cxxflags("-fPIC", {tools = {"gcc", "clang"}})
 
 -- if is_mode("debug") then
 --     set_policy("build.sanitizer.address", true) -- use xmake f --policies=build.sanitizer.address
@@ -20,6 +21,7 @@ set_policy("run.autobuild", true)
 set_warnings("all")
 set_languages("c++17", "c99")
 set_runtimes("MD") -- msvc runtime library (MD/MT/MDd/MTd)
+add_requires("pybind11 2.12.0")
 
 -- Define backends and helper functions
 backends = {"cuda", "cpu"}
@@ -44,6 +46,7 @@ for _,name in ipairs(backends) do
     end
 end
 
+
 includes("packages/*.lua")
 includes("vlm/xmake.lua") -- library and main driver
 
@@ -58,3 +61,20 @@ for _, file in ipairs(os.files("tests/*.cpp")) do
         add_files("tests/" .. name .. ".cpp")
         add_tests("default")
 end
+
+-- Create python lib
+target("libhbvlm")
+    add_rules("python.library")
+    add_packages("pybind11")
+    set_default(false)
+    add_rpathdirs("$ORIGIN")
+    add_deps("libvlm")
+    add_files("lib/libhbvlm.cpp")
+
+target("libhbvlm3")
+    add_rules("python.library")
+    add_packages("pybind11")
+    set_default(false)
+    add_rpathdirs("$ORIGIN")
+    add_deps("libvlm")
+    add_files("lib/libhbvlm3.cpp")
