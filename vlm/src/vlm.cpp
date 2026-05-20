@@ -44,7 +44,7 @@ Simulation::Simulation(const std::string& backend_name, const std::vector<std::s
     }
 };
 
-inline i64 total_panels(const MultiDim<2>& assembly_wing) {
+static i64 total_panels(const MultiDim<2>& assembly_wing) {
     i64 total = 0;
     for (const auto& wing : assembly_wing) {
         total += wing[0] * wing[1];
@@ -196,7 +196,7 @@ void NLVLM::alloc_buffers() {
     for (const auto& wake : verts_wake.views()) wake.slice(All, All, 3).fill(1.f);
 }
 
-void strip_alpha_to_vel(const FlowData& flow, MultiTensorView3fD& local_velocities, const MultiTensorView1fH& strip_alphas) {
+static void strip_alpha_to_vel(const FlowData& flow, MultiTensorView3fD& local_velocities, const MultiTensorView1fH& strip_alphas) {
     for (const auto& [strip, vel] : zip(strip_alphas, local_velocities)) {
         // Note: this is not the most efficient way
         // we can set the first row and then copy each contiguous spanwise slice instead
