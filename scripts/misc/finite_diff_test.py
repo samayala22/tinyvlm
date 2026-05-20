@@ -2,7 +2,7 @@ import autograd.numpy as np  # Thinly-wrapped numpy
 from autograd import elementwise_grad as egrad
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from finite_diff import *
+from ..finite_diff import *
 
 def create_functions(scale):
     # def f(x): return scale * np.sin(3*x) * np.log(x)

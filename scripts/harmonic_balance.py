@@ -31,7 +31,7 @@ def X_to_complex(X):
     Xc[:, 1:] = (X[:, 1::2] - 1j * X[:, 2::2]) / 2
     return Xc
 
-def X_to_real(X, lanczos_m=1.0):
+def X_to_real(X, lanczos_m=0.0):
     """
     Converts a dofs * N complex array to a dofs * (2*N-1) real array
     """

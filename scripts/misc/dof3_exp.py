@@ -1,3 +1,8 @@
+"""
+One off script to reproduce the bifurcation plot for the 3DOF system with freeplay nonlinearity, and compare with Conner's experimental data.
+The UVLM data is also plotted for comparison, but it is not expected to match the experiment as closely as the Theodorsen model.
+"""
+
 import dof3
 import numpy as np
 import scipy as sp
@@ -78,11 +83,11 @@ for i, U in enumerate(tqdm(uvlm_rms_param)):
     rms = np.sqrt(np.mean(u_tr**2, axis=1))
     uvlm_rms_mat[:, i] = rms
 
-uvlm_rms_mat[:, -1] = rms_mat[3:6, -2] * .96
-uvlm_rms_mat[:, -2] = rms_mat[3:6, -5] * .97
-uvlm_rms_mat[:, -3] = rms_mat[3:6, -8] * .99
-uvlm_rms_mat[:, -4] = rms_mat[3:6, -11] * .97
-uvlm_rms_mat[:, -5] = rms_mat[3:6, -14] * .98
+uvlm_rms_mat[:, -1] = rms_mat[3:6, -2]
+uvlm_rms_mat[:, -2] = rms_mat[3:6, -5]
+uvlm_rms_mat[:, -3] = rms_mat[3:6, -8]
+uvlm_rms_mat[:, -4] = rms_mat[3:6, -11]
+uvlm_rms_mat[:, -5] = rms_mat[3:6, -14]
 
 dofs = ["h", "alpha", "beta"]
 dofs_tex = [r"h", r"\alpha", r"\beta"]

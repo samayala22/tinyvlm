@@ -77,6 +77,7 @@ def plot_scaling(cores, times):
     plot.fig_save(fig, "build/uvlm_cpu_core_scaling")
 
 if __name__ == "__main__":
+    # Data collected from timing printed in the console
     uvlm_meshes = [500, 1000, 2000, 4000, 8000, 16000]
     uvlm_cpu = [0.17646, 0.89409, 7.28, 61.54, 513.59, 4216.68]
     # uvlm_cpu_sse2 = [0.202, 1.39, 11.8, 101.09, 872.0, 7251.0]
