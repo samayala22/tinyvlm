@@ -7,8 +7,6 @@
 #include "vlm_types.hpp"
 #include "vlm_memory.hpp"
 
-#include "tinyfwd.hpp"
-
 namespace vlm {
 
 using SurfDims = std::pair<i64, i64>; // nc, ns
