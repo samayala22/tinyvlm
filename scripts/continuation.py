@@ -40,7 +40,7 @@ def metadatas_filename(mds: list):
     return f"cont_{mds[0].name}_combined_{len(mds)}_totalit_{total_it}"
 
 def metadata_filename(md):
-    return f"cont_{md.name}_st_{int(md.param_start)}_end_{int(md.param_end)}_it_{md.X.shape[1]}"
+    return f"cont_{md.name}_st_{int(md.param_start)}_end_{int(md.param_end)}_it_{md.X.shape[1]}_h{md.dims.n_h}"
 
 def load_metadata(filepath):
     with open(filepath, "rb") as f:

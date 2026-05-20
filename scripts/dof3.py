@@ -9,33 +9,40 @@ import helpers
 
 @dataclass
 class Vars:
-    a: float = 0.0# Dimensionless distance between mid-chord and elastic axis (EA)
-    b: float = 0.0# Semi-chord [m]
-    c: float = 0.0# Dimensionless distance between flap hinge and mid-chord (0.5)
-    I_alpha: float = 0.0# Mass moment of inertia of the wing-flap about wing EA per unit span [kgm]
-    I_beta: float = 0.0# Mass moment of inertia of the flap about flap hinge line per unit span [kgm]
-    k_h: float = 0.0# linear structural stiffness coefficient of plunging [kg/ms^2]
-    k_alpha: float = 0.0# Linear structural stiffness coefficient of plunging [kg/ms^2]
-    k_beta: float = 0.0# Linear structural stiffness coefficient of pitching [kg/ms^2]
-    m: float = 0.0# Mass of wing-aileron per span [kg/m]
-    m_t: float = 0.0# Mass of wing-aileron and the supports per span [kg/m]
-    r_alpha: float = 0.0# dimensionless radius of gyration around elastic axis
-    r_beta: float = 0.0# dimensionless radius of gyration around flap hinge axis
-    S_alpha: float = 0.0# static mass moment of wing-flap about wing EA per unit span [kg]
-    S_beta: float = 0.0# static mass moment of flap about flap hinge line per unit span [kg]
-    x_alpha: float = 0.0# dimensionless distance between airfoil EA and the center of gravity
-    x_beta: float = 0.0# dimensionless distance between flap center of gravity and flap hinge axis
-    omega_h: float = 0.0# uncoupled plunge natural frequency [hz]
-    omega_alpha: float = 0.0# uncoupled pitch natural frequency [hz]
-    omega_beta: float = 0.0# uncoupled flap natural frequency [hz]
-    rho: float = 0.0# fluid density [kg/m^3]
-    zeta_h: float = 0.0# plunge damping ratio
-    zeta_alpha: float = 0.0# pitch damping ratio
-    zeta_beta: float = 0.0# flap damping ratio
+    a: float = -0.5# Dimensionless distance between mid-chord and elastic axis (EA)
+    b: float = 0.127# Semi-chord [m]
+    c: float = 0.5# Dimensionless distance between flap hinge and mid-chord (0.5)
+    I_alpha: float = 0.01347# Mass moment of inertia of the wing-flap about wing EA per unit span [kgm]
+    I_beta: float = 0.0003264# Mass moment of inertia of the flap about flap hinge line per unit span [kgm]
+    k_h: float = 2818.8# linear structural stiffness coefficient of plunging [kg/ms^2]
+    k_alpha: float = 37.34# Linear structural stiffness coefficient of plunging [kg/ms^2]
+    k_beta: float = 3.9# Linear structural stiffness coefficient of pitching [kg/ms^2]
+    m: float = 1.5666# Mass of wing-aileron per span [kg/m]
+    m_t: float = 3.39298# Mass of wing-aileron and the supports per span [kg/m]
+    r_alpha: float = 0.7321# dimensionless radius of gyration around elastic axis
+    r_beta: float = 0.1140# dimensionless radius of gyration around flap hinge axis
+    S_alpha: float = 0.08587# static mass moment of wing-flap about wing EA per unit span [kg]
+    S_beta: float = 0.00395# static mass moment of flap about flap hinge line per unit span [kg]
+    x_alpha: float = 0.4340# dimensionless distance between airfoil EA and the center of gravity
+    x_beta: float = 0.02# dimensionless distance between flap center of gravity and flap hinge axis
+    omega_h: float = 42.5352# uncoupled plunge natural frequency [hz]
+    omega_alpha: float = 52.6506# uncoupled pitch natural frequency [hz]
+    omega_beta: float = 109.3093# uncoupled flap natural frequency [hz]
+    rho: float = 1.225# fluid density [kg/m^3]
+    zeta_h: float = 0.0113# plunge damping ratio
+    zeta_alpha: float = 0.01626# pitch damping ratio
+    zeta_beta: float = 0.0115# flap damping ratio
     U: float = 0.0 # dimensional freestream velocity [m/s]
     sigma: float = 0.0 # ratio of the uncoupled plunge and pitch natural frequencies
     V: float = 0.0 # dimensionless freestream velocity 
     mu: float = 0.0 # mass ratio of the wing-flap mass
+
+def update_vars(v: Vars, U: float):
+    v.U = U
+    v.sigma = v.omega_h / v.omega_alpha
+    v.V = v.U / (v.b * v.omega_alpha)
+    v.mu = v.m / (np.pi * v.rho * v.b**2)
+    return v
 
 def alpha_freeplay(alpha, M0=0.0, Mf=0.0, delta=np.radians(4.24), a_f=np.radians(-2.12)):
     """

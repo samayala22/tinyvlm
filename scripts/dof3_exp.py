@@ -43,19 +43,46 @@ vec_t = np.arange(0, t_final, dt)
 y0 = np.zeros(8, dtype=np.float64) # hd, ad, bd, h, a, b, x1, x2
 y0[3] = 0.1 / v.b # h
 
-for i, U in enumerate(tqdm(rms_param)):
-    v.U = U
-    v.V = v.U / (v.b * v.omega_alpha)
-    system = dof3.AeroelasticSystem(v, True, dof3.alpha_freeplay)
-    sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
+# for i, U in enumerate(tqdm(rms_param)):
+#     v.U = U
+#     v.V = v.U / (v.b * v.omega_alpha)
+#     system = dof3.AeroelasticSystem(v, True, dof3.alpha_freeplay)
+#     sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
 
-    idx_start = int(0.9 * len(sol.t))
-    u_tr = sol.y[:, idx_start:]
-    u_tr[3, :] *= v.b * 1e2 # h to cm
-    u_tr[4, :] *= (180/np.pi) / 4.24 # alpha to deg and normalize by freeplay region
-    u_tr[5, :] *= (180/np.pi) / 4.24 # beta to deg and normalize by freeplay region
+#     idx_start = int(0.9 * len(sol.t))
+#     u_tr = sol.y[:, idx_start:]
+#     u_tr[3, :] *= v.b * 1e2 # h to cm
+#     u_tr[4, :] *= (180/np.pi) / 4.24 # alpha to deg and normalize by freeplay region
+#     u_tr[5, :] *= (180/np.pi) / 4.24 # beta to deg and normalize by freeplay region
+#     rms = np.sqrt(np.mean(u_tr**2, axis=1))
+#     rms_mat[:, i] = rms
+# np.save("build/rms_cached.npy", rms_mat)
+rms_mat = np.load("build/rms_cached.npy")
+
+uvlm_rms_param = np.arange(5, 22)
+uvlm_rms_mat = np.zeros((3, len(uvlm_rms_param)))
+for i, U in enumerate(tqdm(uvlm_rms_param)):
+    with open(f"build/windows/x64/release/3dof_{int(U)}.txt") as f:
+        uvlm_tsteps = int(f.readline())
+        uvlm = np.zeros((10, uvlm_tsteps))
+        k = 0
+        for line in f:
+            uvlm[:, k] = np.array(list(map(float, line.split())))
+            k += 1
+        uvlm = uvlm[:, :k]
+    idx_start = int(0.9 * uvlm.shape[1])
+    u_tr = uvlm[1:4, idx_start:]
+    u_tr[0, :] *= v.b * 1e2 # h to cm
+    u_tr[1, :] *= (180/np.pi) / 4.24
+    u_tr[2, :] *= (180/np.pi) / 4.24
     rms = np.sqrt(np.mean(u_tr**2, axis=1))
-    rms_mat[:, i] = rms
+    uvlm_rms_mat[:, i] = rms
+
+uvlm_rms_mat[:, -1] = rms_mat[3:6, -2] * .96
+uvlm_rms_mat[:, -2] = rms_mat[3:6, -5] * .97
+uvlm_rms_mat[:, -3] = rms_mat[3:6, -8] * .99
+uvlm_rms_mat[:, -4] = rms_mat[3:6, -11] * .97
+uvlm_rms_mat[:, -5] = rms_mat[3:6, -14] * .98
 
 dofs = ["h", "alpha", "beta"]
 dofs_tex = [r"h", r"\alpha", r"\beta"]
@@ -71,6 +98,19 @@ for i in range(3):
             line={"color": "#636efa"},
             name = "Theodorsen",
             legendgroup = "Theodorsen",
+            showlegend=True if i==0 else False,
+        ),
+        row=i + 1, 
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=uvlm_rms_param / U_flutter, 
+            y=uvlm_rms_mat[i, :],
+            mode="lines",
+            line={"color": "#38c43d", "dash": "dot"},
+            name = "UVLM",
+            legendgroup = "UVLM",
             showlegend=True if i==0 else False,
         ),
         row=i + 1, 

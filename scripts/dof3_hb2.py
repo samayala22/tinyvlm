@@ -1,6 +1,7 @@
 import numpy as np
 import scipy as sp
 from dataclasses import dataclass
+import sys
 
 # local imports
 import dof3
@@ -11,7 +12,7 @@ import finite_diff as fd
 import plotting as plot
 
 BETA_NL_DAMPING = False
-INITIAL_ONLY = True
+INITIAL_ONLY = False
  
 def nonlinear_damping(A, omega):
     """
@@ -145,12 +146,12 @@ class AeroelasticSystem:
         self.M2[6:8, 6:8] = np.eye(2)
         self.M2[6:8, 0:3] = - self.Q_a
 
-def create_motion_system():
+def create_motion_system(v, system, torsional_func):
     def fnlt(t, X, u, u_dot, omega, U):
         f = np.zeros((8, t.shape[0]))
         gamma = 0
         f[0, :] = v.mu * u[3, :] * v.sigma**2 * (1 + gamma * u[3, :]**2)
-        f[2, :] = v.mu * ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * torsional_func(u[5, :])      
+        f[2, :] = v.mu * ((v.omega_beta / v.omega_alpha)**2 * v.r_beta**2) * torsional_func(u[5, :])
         return -f
 
     def fnlf(X, omega, U):
@@ -161,17 +162,17 @@ def create_motion_system():
         return M_s
     
     def C(U):
-        return sys.M2
+        return system.M2
     
     def K(U):
         V = U / (v.b * v.omega_alpha)
-        D_a = V * sys.D_a
-        D_s = sys.D_s
-        K_a = V**2 * sys.K_a
-        K_s = sys.K_s
-        L_delta = 2 * V * sys.L_delta
-        Q_v = V * sys.Q_v
-        L_lambda = V * sys.L_lambda
+        D_a = V * system.D_a
+        D_s = system.D_s
+        K_a = V**2 * system.K_a
+        K_s = system.K_s
+        L_delta = 2 * V * system.L_delta
+        Q_v = V * system.Q_v
+        L_lambda = V * system.L_lambda
 
         M1 = np.zeros((8, 8))
         M1[0:3, 0:3] = D_a - D_s
@@ -188,60 +189,17 @@ def create_motion_system():
     
     return cont.System(M, C, K, dMdU, dCdU, dKdU, fnlt, fnlf)
 
-if __name__ == "__main__":
-    torsional_spring = 1
-    torsional_spring_names = ["freeplay", "cubic", "linear"]
-
-    if (torsional_spring == 0):
-        torsional_func = dof3.alpha_freeplay
-    elif (torsional_spring == 1):
-        torsional_func = dof3.alpha_poly
-    else:
-        torsional_func = dof3.alpha_linear
-
-    # Params
-    flutter_speed = 23.9
-    # param_start = flutter_speed * 0.3
-    # param_end = flutter_speed * 0.6
-    param_start = 8.0
-    param_end = 20.0
+def run_continuation(torsional_spring:int, param_start:float, param_end:float, harmonics:int=5):
+    assert torsional_spring in [0, 1, 2], "Invalid torsional spring type"
+    torsional_name = ["freeplay", "cubic", "linear"][torsional_spring]
+    torsional_func = [dof3.alpha_freeplay, dof3.alpha_poly, dof3.alpha_linear][torsional_spring]
 
     v = dof3.Vars()
-    v.a = -0.5 
-    v.b = 0.127 
-    v.c = 0.5 
-    v.I_alpha = 0.01347
-    v.I_beta = 0.0003264
-    v.k_h = 2818.8
-    v.k_alpha = 37.34
-    v.k_beta = 3.9
-    v.m = 1.5666
-    v.m_t = 3.39298
-    v.r_alpha = 0.7321
-    v.r_beta = 0.1140
-    v.S_alpha = 0.08587
-    v.S_beta = 0.00395
-    v.x_alpha = 0.4340
-    v.x_beta = 0.02
-    v.omega_h = 42.5352
-    v.omega_alpha = 52.6506
-    v.omega_beta = 109.3093
-    v.rho = 1.225
-    v.zeta_h = 0.0113
-    v.zeta_alpha = 0.01626
-    v.zeta_beta = 0.0115
-    v.sigma = v.omega_h / v.omega_alpha
-    v.U = param_start
-    v.V = v.U / (v.b * v.omega_alpha)
-    v.mu = v.m / (np.pi * v.rho * v.b**2)
-
-    sys = AeroelasticSystem(v)
-
-    # Independent params
+    v = dof3.update_vars(v, param_start)
     dims = hb.Dims(
         n_d=8,          # number of degrees of freedom
-        n_h=5          # number of harmonics
-    ) 
+        n_h=harmonics          # number of harmonics
+    )
 
     # Time integration
     t_final = 1000.0
@@ -261,13 +219,8 @@ if __name__ == "__main__":
     X0[-2] = omega0
     X0[-1] = param_start
 
-    # X0[2] = 5e-3
-    # X0[3] = 5e-3
-    # X0[-2] = 0.085
-    # X0[-1] = param_start
-
     metadata = cont.Metadata()
-    metadata.name = f"3dof_{torsional_spring_names[torsional_spring]}"
+    metadata.name = f"3dof_{torsional_name}"
     metadata.param_start = param_start
     metadata.param_end = param_end
     metadata.max_steps = 1 if INITIAL_ONLY else 5000
@@ -276,10 +229,10 @@ if __name__ == "__main__":
     metadata.ds = 0.02
     metadata.dims = dims
     
-    motion = create_motion_system()
-    if not helpers.getenv("POST"):
-        metadata = cont.continuation(X0, motion, metadata)
-    
+    system2 = AeroelasticSystem(v)
+    motion = create_motion_system(v, system2, torsional_func)
+    metadata = cont.continuation(X0, motion, metadata)
+
     if helpers.getenv("PLOT"):
         X_mat = metadata.X
         hb_sol_t, hb_sol0 = hb.to_timedomain(vec_t, dims.n_d, X_mat[:-2, 0], X_mat[-2, 0], dims.n_h)
@@ -294,45 +247,15 @@ if __name__ == "__main__":
         dof3.format_plot(fig)
         plot.fig_save(fig, f"build/3dof/hbvlm0", html=True, pdf=False)
 
-    if not helpers.getenv("POST"):
-        exit(0)
+if __name__ == "__main__":
+    torsional_spring = 1
+    argv = sys.argv
+    assert len(argv) == 5, "Usage: python dof3_combined.py <torsional_spring_type> <param_start> <param_end> <harmonics>"
 
-    rms_samples = 20
-    rms_param = np.linspace(5.0, 20.0, rms_samples)
-    rms_mat = np.zeros((dims.n_d, rms_samples))
-    for i, U in enumerate(rms_param):
-        v.U = U
-        v.V = v.U / (v.b * v.omega_alpha)
-        system = dof3.AeroelasticSystem(v, True, torsional_func)
-        sol = sp.integrate.solve_ivp(system.coupled_system, (0, t_final), y0, t_eval=vec_t, method='RK45')
+    torsional_spring = int(argv[1])
+    param_start = float(argv[2])
+    param_end = float(argv[3])
+    harmonics = int(argv[4])
+    run_continuation(torsional_spring, param_start, param_end, harmonics)
 
-        idx_start = int(0.9 * len(sol.t))
-        u_tr = sol.y[:, idx_start:]
-        rms = np.sqrt(np.mean(u_tr**2, axis=1))
-        rms_mat[:, i] = rms
-
-    if torsional_spring == 1:
-        metadata_files = [
-            "build/cont_3dof_cubic_st_6_end_20_it_285.pkl",
-            "build/cont_3dof_cubic_st_6_end_1_it_326.pkl",
-            "build/cont_3dof_cubic_st_12_end_20_it_212.pkl",
-            "build/cont_3dof_cubic_st_12_end_10_it_161.pkl",
-            "build/cont_3dof_cubic_st_11_end_1_it_405.pkl" # went back and forth
-        ]
-    elif torsional_spring == 0:
-        metadata_files = [
-            "build/cont_3dof_freeplay_st_6_end_20_it_284.pkl",
-            "build/cont_3dof_freeplay_st_6_end_1_it_808.pkl",
-            "build/cont_3dof_freeplay_st_15_end_20_it_157.pkl",
-            "build/cont_3dof_freeplay_st_15_end_1_it_495.pkl",
-            "build/cont_3dof_freeplay_st_11_end_20_it_752.pkl",
-            "build/cont_3dof_freeplay_st_11_end_9_it_85.pkl"
-        ]
-    
-    metadatas = []
-    import pickle
-    for filename in metadata_files:
-        with open(filename, 'rb') as f:
-            metadatas.append(pickle.load(f))
-        print(f"Loaded: {filename}")
-    cont.plot_hb_continuation(metadatas, timeseries=(rms_param, rms_mat))
+    # run_continuation(1, 8.0, 20.0, 5)
